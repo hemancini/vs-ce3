@@ -1,0 +1,1204 @@
+---
+import Layout from '@/layouts/Layout.astro';
+export const prerender = false;
+
+// ─── Tipos ────────────────────────────────────────────────────────────────────
+interface DrmConfig {
+  enabled?: boolean;
+  savedAt?: string;
+  keyId?: string;
+  widevine?: { licenseUrl: string; pssh?: string };
+  playready?: { licenseUrl?: string; laUrl: string };
+}
+interface FairPlayConfig {
+  enabled?: boolean;
+  licenseUrl?: string;
+  keyUri?: string;
+  kid?: string;
+  assetId?: string;
+  ivHex?: string;
+}
+interface PublicUrls {
+  dashManifest?: string;
+  dashManifestNoDRM?: string;
+  hlsFairPlayManifest?: string;
+  trailerManifest?: string;
+  coverImage?: string;
+  fullPoster?: string;
+  hoverFullPoster?: string;
+  thumbnailFull?: string;
+  thumbnailTrailer?: string;
+  trailerPoster?: string;
+  fullGif?: string;
+  trailerGif?: string;
+}
+interface VideoDoc {
+  id: string;
+  title?: string;
+  description?: string;
+  processingStatus?: string;
+  isActive?: boolean;
+  hasNoDRMVersion?: boolean;
+  permitirPlaySinDRM?: boolean;
+  views?: number | string;
+  likes?: number | string;
+  cost?: number | string;
+  createdAt?: string;
+  drm?: DrmConfig;
+  fairplay?: FairPlayConfig;
+  publicUrls?: PublicUrls;
+  [key: string]: unknown;
+}
+
+interface PlaylistDoc {
+  id: string;
+  title?: string;
+  name?: string;
+  description?: string;
+  order?: number | string;
+  createdAt?: string;
+  [key: string]: unknown;
+}
+
+interface ApiResponse {
+  meta: {
+    totalCollections: number;
+    totalDocuments: number;
+    collections: Record<string, { count: number; accessible: boolean; error?: string }>;
+  };
+  data: Record<string, Record<string, Record<string, unknown>>>;
+}
+
+// ─── Fetch server-side ────────────────────────────────────────────────────────
+let videos: VideoDoc[] = [];
+let playlists: PlaylistDoc[] = [];
+let error: string | null = null;
+let totalCount = 0;
+
+try {
+  const origin = Astro.url.origin;
+  const cookie = Astro.request.headers.get('cookie') ?? '';
+  const res = await fetch(`${origin}/api/vodscene/firestore?collections=videos,playlists`, {
+    headers: { cookie },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const json: ApiResponse = await res.json();
+
+  const colMeta = json.meta?.collections?.videos;
+  if (!colMeta?.accessible) {
+    error = colMeta?.error ?? "Colección no accesible";
+  } else {
+    const raw = json.data?.videos ?? {};
+    totalCount = colMeta.count;
+    videos = Object.entries(raw).map(([id, fields]) => ({ id, ...fields } as VideoDoc));
+    videos.sort((a, b) => {
+      const da = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const db = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return db - da;
+    });
+  }
+
+  // Playlists (best-effort: no error si no es accesible)
+  const plMeta = json.meta?.collections?.playlists;
+  if (plMeta?.accessible) {
+    const rawPl = json.data?.playlists ?? {};
+    playlists = Object.entries(rawPl).map(([id, fields]) => ({ id, ...fields } as PlaylistDoc));
+    playlists.sort((a, b) => {
+      const oa = Number(a.order ?? 9999), ob = Number(b.order ?? 9999);
+      if (oa !== ob) return oa - ob;
+      return (a.title ?? a.name ?? "").localeCompare(b.title ?? b.name ?? "", "es");
+    });
+  }
+} catch (e) {
+  error = e instanceof Error ? e.message : "Error desconocido";
+}
+
+// ─── Agrupar videos por playlist ──────────────────────────────────────────────
+const playlistMap = new Map<string, PlaylistDoc>(playlists.map((p) => [p.id, p]));
+
+interface VideoGroup {
+  playlist: PlaylistDoc | null;
+  videos: VideoDoc[];
+}
+
+// Construir grupos respetando el orden de playlists
+const groupMap = new Map<string, VideoGroup>();
+for (const pl of playlists) {
+  groupMap.set(pl.id, { playlist: pl, videos: [] });
+}
+// Grupo especial para videos sin playlistId
+const noGroup: VideoGroup = { playlist: null, videos: [] };
+
+for (const v of videos) {
+  const pid = v.playlistId as string | undefined;
+  if (pid && groupMap.has(pid)) {
+    groupMap.get(pid)!.videos.push(v);
+  } else {
+    noGroup.videos.push(v);
+  }
+}
+
+// Grupos con al menos un video + sin categoría al final
+const groups: VideoGroup[] = [...groupMap.values()].filter((g) => g.videos.length > 0);
+if (noGroup.videos.length > 0) groups.push(noGroup);
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function formatDate(val: unknown): string {
+  if (!val) return "—";
+  const d = new Date(val as string);
+  return isNaN(d.getTime()) ? String(val)
+    : new Intl.DateTimeFormat("es", { dateStyle: "medium" }).format(d);
+}
+function formatViews(val: unknown): string {
+  if (val === undefined || val === null) return "—";
+  const n = Number(val);
+  return isNaN(n) ? String(val) : new Intl.NumberFormat("es").format(n);
+}
+function formatCost(val: unknown): string {
+  if (val === undefined || val === null) return "";
+  const n = Number(val);
+  if (isNaN(n) || n === 0) return "Gratis";
+  return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(n);
+}
+function getThumb(v: VideoDoc): string | null {
+  return v.publicUrls?.coverImage ?? v.publicUrls?.thumbnailFull
+    ?? v.publicUrls?.fullPoster ?? v.publicUrls?.trailerPoster ?? null;
+}
+
+type PlayMode = "nodrm" | "widevine" | "trailer" | "unavailable";
+function getPlayMode(v: VideoDoc): PlayMode {
+  if (v.processingStatus !== "ready") return "unavailable";
+  if (v.permitirPlaySinDRM || v.hasNoDRMVersion) return "nodrm";
+  if (v.drm?.enabled && v.publicUrls?.dashManifest) return "widevine";
+  if (v.publicUrls?.trailerManifest) return "trailer";
+  return "unavailable";
+}
+
+interface VideoPlayerData {
+  id: string;
+  title: string;
+  mode: PlayMode;
+  dashNoDRM?: string;
+  dashDRM?: string;
+  hlsFP?: string;
+  trailer?: string;
+  poster?: string;
+  widevineUrl?: string;
+  playreadyUrl?: string;
+  fpLicenseUrl?: string;
+  uploadedBy?: string;
+}
+function buildPlayerData(v: VideoDoc): VideoPlayerData {
+  return {
+    id:           v.id,
+    title:        String(v.title ?? "Sin título"),
+    mode:         getPlayMode(v),
+    dashNoDRM:    v.publicUrls?.dashManifestNoDRM,
+    dashDRM:      v.publicUrls?.dashManifest,
+    hlsFP:        v.publicUrls?.hlsFairPlayManifest,
+    trailer:      v.publicUrls?.trailerManifest,
+    poster:       getThumb(v) ?? undefined,
+    widevineUrl:  v.drm?.widevine?.licenseUrl,
+    playreadyUrl: v.drm?.playready?.laUrl ?? v.drm?.playready?.licenseUrl,
+    fpLicenseUrl: v.fairplay?.licenseUrl,
+    uploadedBy:   v.uploadedBy as string | undefined,
+  };
+}
+
+const KNOWN = new Set([
+  "title","description","publicUrls","drm","fairplay","hasNoDRMVersion",
+  "permitirPlaySinDRM","views","likes","cost","createdAt","updatedAt",
+  "processingStatus","isActive","participants","uploadedBy","uploaderId",
+  "playlistId","commentsCount","subscriptionViews","userLikes","r2Paths",
+  "coconutJobStatus","processingProgress","hasManualThumbnail","lastUpdated","id"
+]);
+
+const playerDataMap: Record<string, VideoPlayerData> = {};
+for (const v of videos) playerDataMap[v.id] = buildPlayerData(v);
+const playerDataJson = JSON.stringify(playerDataMap);
+
+// Datos de playlists para el cliente
+const playlistsJson = JSON.stringify(
+  Object.fromEntries(playlists.map((p) => [p.id, { title: p.title ?? p.name ?? p.id }]))
+);
+
+// Clases Tailwind definidas completas para que el compilador las detecte
+const modeBadgeClasses: Record<string, string> = {
+  nodrm:       "bg-[#052e16] text-green-400 border border-[#166534]",
+  widevine:    "bg-[#0d1a2e] text-blue-300 border border-[#1e40af]",
+  trailer:     "bg-[#1c1007] text-amber-400 border border-[#92400e]",
+  unavailable: "bg-vs-surface text-gray-500 border border-vs-border",
+};
+const modeBadgeLabels: Record<string, string> = {
+  nodrm: "Sin DRM", widevine: "Widevine", trailer: "Tráiler", unavailable: "No disponible",
+};
+---
+
+<Layout title="Videos — vodscene">
+  <Fragment slot="head">
+    <!-- Shaka Player UI (DASH + Widevine + PlayReady + FairPlay) -->
+    <script is:inline src="https://cdnjs.cloudflare.com/ajax/libs/shaka-player/4.3.5/shaka-player.ui.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/shaka-player/4.3.5/controls.min.css" />
+  </Fragment>
+
+  <header class="mb-8">
+    <nav class="mb-3" aria-label="Navegación principal">
+      <a href="/" class="text-blue-400 hover:text-blue-300 hover:underline text-sm">← Inicio</a>
+    </nav>
+    <div class="flex items-end justify-between gap-4 flex-wrap">
+      <div>
+        <h1 class="text-3xl font-bold text-white">Videos</h1>
+        {!error && (
+          <p class="text-gray-500 text-sm mt-1 tabular-nums" id="video-count">
+            {totalCount === 0 ? "Sin videos"
+              : `${new Intl.NumberFormat("es").format(totalCount)} ${totalCount === 1 ? "video" : "videos"}`}
+          </p>
+        )}
+      </div>
+      {videos.length > 0 && (
+        <div class="flex gap-2 flex-wrap items-center">
+          <div class="relative flex-1 min-w-[180px] sm:w-72">
+            <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+            <input
+              id="video-search"
+              type="search"
+              placeholder="Buscar por título, descripción o ID…"
+              autocomplete="off"
+              class="w-full bg-vs-surface border border-vs-border rounded-[6px] pl-8 pr-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-400 transition-colors"
+              aria-label="Buscar videos"
+            />
+          </div>
+          <select
+            id="video-sort"
+            aria-label="Ordenar videos"
+            class="bg-vs-surface border border-vs-border rounded-[6px] px-2 py-1.5 text-sm text-gray-300 focus:outline-none focus:border-blue-400 transition-colors cursor-pointer"
+          >
+            <option value="date-desc">Más reciente</option>
+            <option value="date-asc">Más antiguo</option>
+            <option value="title-asc">Título A → Z</option>
+            <option value="title-desc">Título Z → A</option>
+            <option value="views-desc">Más vistas</option>
+            <option value="views-asc">Menos vistas</option>
+            <option value="likes-desc">Más me gustas</option>
+            <option value="likes-asc">Menos me gustas</option>
+            <option value="cost-desc">Mayor precio</option>
+            <option value="cost-asc">Menor precio</option>
+          </select>
+          {/* Toggle vista */}
+          <div class="flex rounded-[6px] border border-vs-border overflow-hidden flex-shrink-0" role="group" aria-label="Modo de vista">
+            <button
+              id="view-btn-grouped"
+              class="flex items-center gap-1.5 px-2.5 py-1.5 text-sm font-medium bg-blue-500/20 text-blue-300 border-r border-vs-border cursor-pointer transition-colors"
+              aria-pressed="true"
+              title="Agrupar por categoría"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="4" rx="1"/><rect x="3" y="10" width="7" height="4" rx="1"/><rect x="3" y="17" width="7" height="4" rx="1"/><rect x="14" y="3" width="7" height="4" rx="1"/><rect x="14" y="10" width="7" height="4" rx="1"/></svg>
+              Categorías
+            </button>
+            <button
+              id="view-btn-list"
+              class="flex items-center gap-1.5 px-2.5 py-1.5 text-sm font-medium bg-transparent text-gray-400 hover:text-gray-200 cursor-pointer transition-colors border-r border-vs-border"
+              aria-pressed="false"
+              title="Lista plana"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/></svg>
+              Lista
+            </button>
+            <button
+              id="view-btn-poster"
+              class="flex items-center gap-1.5 px-2.5 py-1.5 text-sm font-medium bg-transparent text-gray-400 hover:text-gray-200 cursor-pointer transition-colors"
+              aria-pressed="false"
+              title="Vista poster horizontal"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M4 8h16"/></svg>
+              Poster
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  </header>
+
+  <main id="main-content">
+    {error && (
+      <div class="bg-red-950 border border-red-900 rounded-lg px-5 py-4 text-red-400 mb-6" role="alert" aria-live="polite">
+        <strong>Error al cargar los videos:</strong> {error}
+      </div>
+    )}
+
+    {!error && videos.length === 0 && (
+      <div class="text-center py-16 text-gray-500" role="status"><p>No se encontraron videos.</p></div>
+    )}
+
+    <div id="search-empty" class="text-center py-16 text-gray-500 hidden" role="status">No hay videos que coincidan con la búsqueda.</div>
+
+    {videos.length > 0 && (
+      <div id="sections-container" class="view-grouped">
+        {groups.map((group) => {
+          const sectionId = group.playlist?.id ?? "__none__";
+          const sectionTitle = group.playlist
+            ? (group.playlist.title ?? group.playlist.name ?? group.playlist.id)
+            : "Sin categoría";
+          return (
+            <section data-section-id={sectionId}>
+              {/* Encabezado de sección (visible solo en modo agrupado) */}
+              <div class="section-heading flex items-center gap-3 mb-4">
+                <button
+                  class="section-toggle flex items-center gap-2 text-base font-semibold text-gray-200 hover:text-white bg-transparent border-0 p-0 cursor-pointer transition-colors group"
+                  aria-expanded="true"
+                  aria-controls={`grid-${sectionId}`}
+                  data-section-toggle={sectionId}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-blue-400 flex-shrink-0" aria-hidden="true"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2z"/></svg>
+                  {sectionTitle}
+                  <svg class="section-chevron text-gray-500 flex-shrink-0 transition-transform duration-200" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+                </button>
+                <span class="text-[.7rem] font-semibold px-1.5 py-[2px] rounded bg-vs-surface border border-vs-border text-gray-500 tabular-nums flex-shrink-0 section-count" data-total={group.videos.length}>
+                  {group.videos.length} {group.videos.length === 1 ? "video" : "videos"}
+                </span>
+                <div class="flex-1 h-px bg-vs-border"></div>
+              </div>
+              <ol id={`grid-${sectionId}`} class="section-grid grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-5 list-none p-0 mb-10" aria-label={`Videos: ${sectionTitle}`}>
+                {group.videos.map((v) => {
+                  const extraKeys = Object.keys(v).filter((k) => !KNOWN.has(k));
+                  const thumb   = getThumb(v);
+                  const gifUrl  = v.publicUrls?.fullGif ?? v.publicUrls?.trailerGif ?? null;
+                  const mode    = getPlayMode(v);
+                  const canPlay = mode !== "unavailable";
+                  const badgeCls   = modeBadgeClasses[mode];
+                  const badgeLabel = modeBadgeLabels[mode];
+                  const searchText = [v.title, v.description, v.id, sectionTitle].filter(Boolean).join(" ").toLowerCase();
+                  return (
+                    <li
+                      data-search={searchText}
+                      data-title={(v.title ?? "").toLowerCase()}
+                      data-views={String(Number(v.views ?? 0))}
+                      data-likes={String(Number(v.likes ?? 0))}
+                      data-cost={String(Number(v.cost ?? 0))}
+                      data-created={String(v.createdAt ? new Date(v.createdAt).getTime() : 0)}
+                      data-playlist-id={sectionId}
+                      data-poster-img={v.publicUrls?.hoverFullPoster ?? v.publicUrls?.fullPoster ?? v.publicUrls?.thumbnailFull ?? thumb ?? ""}
+                      data-trailer-gif={v.publicUrls?.trailerGif ?? ""}
+                    >
+                      <article class="bg-vs-surface border border-vs-border rounded-lg overflow-hidden flex flex-col hover:border-blue-400 motion-safe:hover:-translate-y-0.5 transition-[border-color,transform] touch-manipulation" aria-labelledby={`title-${v.id}`}>
+
+                        {/* Miniatura + overlay play */}
+                        <div class="poster-thumb-wrap aspect-video bg-[#111] overflow-hidden relative" data-gif={gifUrl ?? ""} data-thumb={thumb ?? ""}>
+                          {thumb
+                            ? <img src={thumb} alt="" width="560" height="315" loading="lazy" aria-hidden="true" class="w-full h-full object-cover block transition-opacity duration-200" data-original-src={thumb} />
+                            : <div class="w-full h-full flex items-center justify-center text-gray-500 text-[2rem] select-none" aria-hidden="true">▶</div>
+                          }
+                          <span class={`absolute top-1.5 right-1.5 text-[.65rem] font-bold tracking-[.04em] px-1.5 py-[2px] rounded-[3px] pointer-events-none ${badgeCls}`} aria-hidden="true">
+                            {badgeLabel}
+                          </span>
+                          {canPlay && (
+                            <div class="group absolute inset-0 flex items-center justify-center hover:bg-black/45 transition-colors">
+                              <button
+                                class="absolute inset-0 bg-transparent border-0 cursor-pointer focus-visible:outline-[3px] focus-visible:outline-blue-400 focus-visible:outline-offset-[-3px]"
+                                aria-label={`Reproducir: ${v.title ?? v.id}`}
+                                data-video-id={v.id}
+                              >
+                                <span class="w-[52px] h-[52px] rounded-full bg-black/65 border-2 border-white/80 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" aria-hidden="true">
+                                  <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" class="fill-white w-[22px] h-[22px] translate-x-[2px]"><polygon points="5,3 19,12 5,21"/></svg>
+                                </span>
+                              </button>
+                              <button
+                                class="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity z-10 inline-flex items-center gap-1 text-[.68rem] font-semibold px-2 py-1 rounded bg-black/70 border border-white/20 text-white/80 hover:border-blue-400 hover:text-blue-400 cursor-pointer"
+                                data-popup-id={v.id}
+                                data-popup-trailer={mode === "trailer" ? "1" : "0"}
+                                aria-label={`Abrir popup: ${v.title ?? v.id}`}
+                                title="Abrir en ventana flotante"
+                              >
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M3 9h6"/></svg>
+                                Popup
+                              </button>
+                            </div>
+                          )}
+                          {/* Overlays exclusivos de vista Poster */}
+                          {v.cost !== undefined && Number(v.cost) > 0 && (
+                            <span class="poster-badge">
+                              {new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 }).format(Number(v.cost))}
+                            </span>
+                          )}
+                          <div class="poster-play" aria-hidden="true">
+                            {canPlay && (
+                              <button
+                                class="inline-flex items-center justify-center w-9 h-9 rounded-full bg-white/90 text-black cursor-pointer border-0"
+                                data-video-id={v.id}
+                                tabindex="-1"
+                                aria-hidden="true"
+                              >
+                                <svg viewBox="0 0 24 24" class="fill-current w-4 h-4 translate-x-[1px]"><polygon points="5,3 19,12 5,21"/></svg>
+                              </button>
+                            )}
+                          </div>
+                          <div class="poster-title">{v.title ?? "Sin título"}</div>
+                        </div>
+
+                        {/* Cuerpo */}
+                        <div class="px-4 py-3.5 flex flex-col gap-1.5 flex-1">
+                          <h3 class="font-semibold text-[.95rem] text-white overflow-hidden line-clamp-2 min-w-0" id={`title-${v.id}`}>{v.title ?? "Sin título"}</h3>
+                          {v.description && <p class="text-[.8rem] text-gray-500 overflow-hidden line-clamp-2 min-w-0">{String(v.description)}</p>}
+
+                          <ul class="flex flex-wrap gap-y-1 gap-x-2.5 list-none p-0 mt-auto pt-2" aria-label="Metadatos">
+                            {v.views !== undefined && (
+                              <li><span class="text-[.72rem] bg-[#2a2a2a] border border-vs-border rounded px-1.5 py-[2px] text-gray-500 whitespace-nowrap tabular-nums" aria-label={`Vistas: ${formatViews(v.views)}`}>👁 {formatViews(v.views)}</span></li>
+                            )}
+                            {v.likes !== undefined && Number(v.likes) > 0 && (
+                              <li><span class="text-[.72rem] bg-[#2a2a2a] border border-vs-border rounded px-1.5 py-[2px] text-gray-500 whitespace-nowrap">♥ {formatViews(v.likes)}</span></li>
+                            )}
+                            {v.cost !== undefined && (
+                              <li><span class="text-[.72rem] bg-[#2a2a2a] border border-vs-border rounded px-1.5 py-[2px] text-gray-500 whitespace-nowrap">{formatCost(v.cost)}</span></li>
+                            )}
+                            {v.createdAt && (
+                              <li><span class="text-[.72rem] bg-[#2a2a2a] border border-vs-border rounded px-1.5 py-[2px] text-gray-500 whitespace-nowrap">📅 {formatDate(v.createdAt)}</span></li>
+                            )}
+                          </ul>
+                        </div>
+
+                        {/* Botones */}
+                        <div class="px-4 pb-3.5 flex gap-2 flex-wrap">
+                          {canPlay ? (
+                            <button
+                              class="inline-flex items-center gap-1.5 text-[.8rem] font-semibold px-3 py-1.5 rounded-[5px] cursor-pointer border-0 font-sans bg-blue-400 text-black hover:bg-blue-300 focus-visible:outline-2 focus-visible:outline-blue-300 focus-visible:outline-offset-2 transition-colors"
+                              data-video-id={v.id}
+                              aria-label={`Reproducir: ${v.title ?? v.id}`}
+                            >
+                              <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="5,3 19,12 5,21"/></svg>
+                              {mode === "trailer" ? "Ver tráiler" : "Reproducir"}
+                            </button>
+                          ) : (
+                            <button class="inline-flex items-center gap-1.5 text-[.8rem] font-semibold px-3 py-1.5 rounded-[5px] cursor-not-allowed border border-vs-border bg-transparent text-gray-500 opacity-40 font-sans" disabled>No disponible</button>
+                          )}
+                          {canPlay && mode !== "trailer" && v.publicUrls?.trailerManifest && (
+                            <button
+                              class="inline-flex items-center gap-1.5 text-[.8rem] font-semibold px-3 py-1.5 rounded-[5px] cursor-pointer border border-vs-border bg-transparent text-gray-500 hover:border-blue-400 hover:text-blue-400 focus-visible:outline-2 focus-visible:outline-blue-300 focus-visible:outline-offset-2 transition-colors font-sans"
+                              data-video-id={v.id}
+                              data-force-trailer="true"
+                              aria-label={`Ver tráiler de: ${v.title ?? v.id}`}
+                            >
+                              Tráiler
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Detalles */}
+                        <div class="px-4 pb-3.5">
+                          <button
+                            class="text-[.73rem] text-gray-500 hover:text-blue-400 cursor-pointer bg-transparent border-0 p-0 flex items-center gap-1.5 transition-colors"
+                            data-extra-id={v.id}
+                            data-extra-json={JSON.stringify(v)}
+                            aria-label={`Ver detalles de ${v.title ?? v.id}`}
+                          >
+                            <span class="text-[.55rem]">&#9656;</span>
+                            Detalles
+                          </button>
+                        </div>
+
+                        <p class="text-[.68rem] text-gray-700 font-mono px-4 pb-3">ID: {v.id}</p>
+                      </article>
+                    </li>
+                  );
+                })}
+              </ol>
+            </section>
+          );
+        })}
+      </div>
+    )}
+  </main>
+
+  {/* ─── Modal datos extra ─────────────────────────────────────────────────── */}
+  <dialog
+    id="extra-data-modal"
+    aria-label="Detalles del video"
+    aria-modal="true"
+    class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 m-0 bg-vs-bg border border-vs-border rounded-[10px] p-0 max-w-[min(720px,95vw)] w-[min(680px,92vw)] shadow-[0_24px_64px_rgba(0,0,0,.8)] [&::backdrop]:bg-black/60 [&::backdrop]:backdrop-blur-sm"
+  >
+    <!-- Barra de tabs -->
+    <div class="flex items-center border-b border-vs-border bg-vs-modal px-4">
+      <button id="tab-btn-details" class="text-sm font-medium px-1 py-3 mr-5 border-b-2 border-red-500 text-white cursor-pointer bg-transparent" aria-selected="true">Details</button>
+      <button id="tab-btn-raw"     class="text-sm font-medium px-1 py-3 border-b-2 border-transparent text-gray-500 hover:text-gray-300 cursor-pointer bg-transparent transition-colors" aria-selected="false">Raw JSON</button>
+      <div class="flex-1"></div>
+      <button
+        id="extra-modal-close"
+        class="bg-transparent border border-vs-border rounded-[5px] px-2 py-1 text-gray-500 cursor-pointer text-[.85rem] my-2 hover:border-red-400 hover:text-red-400 focus-visible:outline-2 focus-visible:outline-blue-400 focus-visible:outline-offset-2 transition-colors"
+        aria-label="Cerrar"
+      >✕</button>
+    </div>
+    <!-- Panel: Details -->
+    <div id="extra-panel-details" class="overflow-auto max-h-[72vh]"></div>
+    <!-- Panel: Raw JSON -->
+    <div id="extra-panel-raw" class="overflow-auto max-h-[72vh] p-4 hidden">
+      <pre id="extra-modal-content" class="text-[.78rem] text-gray-300 font-mono whitespace-pre-wrap break-all m-0"></pre>
+    </div>
+  </dialog>
+
+  {/* ─── Modal de reproducción ────────────────────────────────────────────── */}
+  <dialog
+    id="player-modal"
+    aria-label="Reproductor de video"
+    aria-modal="true"
+    class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 m-0 bg-black border border-vs-border rounded-[10px] p-0 max-w-[min(900px,95vw)] w-[min(860px,92vw)] shadow-[0_24px_64px_rgba(0,0,0,.8)] overscroll-contain [&::backdrop]:bg-black/60 [&::backdrop]:backdrop-blur-sm"
+  >
+    <div class="flex items-center justify-between px-4 py-3 border-b border-vs-border bg-vs-modal cursor-grab active:cursor-grabbing select-none modal-header">
+      <span class="text-[.9rem] font-semibold text-white min-w-0 overflow-hidden text-ellipsis whitespace-nowrap" id="modal-title-text">—</span>
+      <button class="bg-transparent border border-vs-border rounded-[5px] px-2 py-1 text-gray-500 cursor-pointer text-[.85rem] flex-shrink-0 hover:border-red-400 hover:text-red-400 focus-visible:outline-2 focus-visible:outline-blue-400 focus-visible:outline-offset-2 transition-colors" id="modal-close-btn" aria-label="Cerrar reproductor">✕</button>
+    </div>
+    <div class="bg-black relative">
+      <video id="player-video" class="w-full block aspect-video bg-black" playsinline></video>
+      <div id="player-error" class="px-4 py-3 text-red-400 bg-red-950 text-[.82rem] hidden" role="alert" aria-live="polite"></div>
+    </div>
+    <div class="px-4 py-2.5 bg-vs-modal text-xs flex gap-3 items-center flex-wrap">
+      <span id="modal-mode-tag"></span>
+      <span id="modal-mode-desc" class="text-gray-500"></span>
+    </div>
+  </dialog>
+
+  {/* Datos de videos para el player */}
+  <script is:inline define:vars={{ playerDataJson, playlistsJson }}>
+    window.__VIDEOS__    = JSON.parse(playerDataJson);
+    window.__PLAYLISTS__ = JSON.parse(playlistsJson);
+  </script>
+
+  <style is:global>
+    /* ── Vista lista: #sections-container.view-list ─────── */
+    #sections-container.view-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 1.25rem;
+    }
+    #sections-container.view-list section[data-section-id] { display: contents; }
+    #sections-container.view-list .section-heading         { display: none !important; }
+    #sections-container.view-list .section-grid            { display: contents; }
+
+    /* ── Vista agrupada (default) ───────────────────────── */
+    #sections-container.view-grouped section[data-section-id][data-hidden="true"] {
+      display: none;
+    }
+
+    /* ── Colapsar sección ───────────────────────────────── */
+    section[data-section-id][data-collapsed="true"] .section-grid {
+      display: none !important;
+    }
+    section[data-section-id][data-collapsed="true"] .section-chevron {
+      transform: rotate(-90deg);
+    }
+
+    /* ── Ocultar overlays poster en vistas no-poster ────── */
+    :not(.view-poster) .poster-badge,
+    :not(.view-poster) .poster-play,
+    :not(.view-poster) .poster-title { display: none !important; }
+
+    /* ── Vista poster (scroll horizontal) ───────────────── */
+    #sections-container.view-poster .section-grid {
+      display: flex;
+      flex-direction: row;
+      gap: 0.625rem;
+      overflow-x: auto;
+      overflow-y: visible;
+      padding-bottom: 0.75rem;
+      scrollbar-width: thin;
+      scrollbar-color: #333 transparent;
+      list-style: none;
+      margin: 0;
+      padding-inline: 0;
+    }
+    #sections-container.view-poster .section-grid::-webkit-scrollbar { height: 5px; }
+    #sections-container.view-poster .section-grid::-webkit-scrollbar-track { background: transparent; }
+    #sections-container.view-poster .section-grid::-webkit-scrollbar-thumb { background: #333; border-radius: 99px; }
+
+    #sections-container.view-poster li[data-search] {
+      flex: 0 0 auto;
+      width: 150px;
+      order: initial !important;
+    }
+
+    /* Ocultar body/botones/detalles de la card en vista poster */
+    #sections-container.view-poster article > div:not(.poster-thumb-wrap),
+    #sections-container.view-poster article > p {
+      display: none !important;
+    }
+
+    /* Contenedor de imagen poster: relación 2:3 */
+    #sections-container.view-poster article {
+      display: block;
+      border-radius: 8px;
+      overflow: hidden;
+      border-color: transparent;
+      background: #111;
+      transition: transform 0.18s ease, border-color 0.18s ease;
+    }
+    #sections-container.view-poster article:hover {
+      transform: scale(1.04);
+      border-color: #60a5fa !important;
+    }
+    #sections-container.view-poster .poster-thumb-wrap {
+      display: block !important;
+      aspect-ratio: 2 / 3;
+      position: relative;
+      width: 100%;
+      overflow: hidden;
+      background: #111;
+    }
+    #sections-container.view-poster .poster-thumb-wrap img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      transition: opacity 0.2s ease;
+    }
+    #sections-container.view-poster .poster-thumb-wrap .poster-badge {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      font-size: 0.6rem;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: rgba(0,0,0,0.72);
+      color: #fff;
+      border: 1px solid rgba(255,255,255,0.18);
+      pointer-events: none;
+      white-space: nowrap;
+    }
+    #sections-container.view-poster .poster-thumb-wrap .poster-play {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      padding-bottom: 10px;
+      opacity: 0;
+      transition: opacity 0.18s ease;
+      background: linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 55%);
+    }
+    #sections-container.view-poster article:hover .poster-play {
+      opacity: 1;
+    }
+    #sections-container.view-poster .poster-thumb-wrap .poster-title {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 22px 8px 8px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: #fff;
+      background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, transparent 100%);
+      line-height: 1.3;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    #sections-container.view-poster section[data-section-id][data-hidden="true"] {
+      display: none;
+    }
+  </style>
+
+  <script is:inline>
+    // ─── Colapsar/expandir sección al hacer clic en su encabezado ──────────────
+    document.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-section-toggle]");
+      if (!btn) return;
+      const section = btn.closest("section[data-section-id]");
+      if (!section) return;
+      const collapsed = section.dataset.collapsed === "true";
+      section.dataset.collapsed = collapsed ? "" : "true";
+      btn.setAttribute("aria-expanded", String(collapsed));
+    });
+
+    // ─── Toggle vista agrupada / lista ────────────────────────────────────────
+    const container   = document.getElementById("sections-container");
+    const btnGrouped  = document.getElementById("view-btn-grouped");
+    const btnList     = document.getElementById("view-btn-list");
+    const btnPoster   = document.getElementById("view-btn-poster");
+
+    const BASE_BTN    = "flex items-center gap-1.5 px-2.5 py-1.5 text-sm font-medium cursor-pointer transition-colors";
+    const ACTIVE_CLS  = BASE_BTN + " bg-blue-500/20 text-blue-300 border-r border-vs-border";
+    const INACTIVE_WITH_BORDER = BASE_BTN + " bg-transparent text-gray-400 hover:text-gray-200 border-r border-vs-border";
+    const INACTIVE_LAST = BASE_BTN + " bg-transparent text-gray-400 hover:text-gray-200";
+
+    let currentView = "grouped";
+
+    function setView(v) {
+      const prev = currentView;
+      currentView = v;
+      // Si salimos de poster, restaurar imágenes originales
+      if (prev === "poster" && v !== "poster") restorePosterImages();
+      container.classList.toggle("view-grouped", v === "grouped");
+      container.classList.toggle("view-list",    v === "list");
+      container.classList.toggle("view-poster",  v === "poster");
+      btnGrouped.setAttribute("aria-pressed", String(v === "grouped"));
+      btnList.setAttribute("aria-pressed",    String(v === "list"));
+      btnPoster.setAttribute("aria-pressed",  String(v === "poster"));
+      btnGrouped.className = v === "grouped" ? ACTIVE_CLS : INACTIVE_WITH_BORDER;
+      btnList.className    = v === "list"    ? ACTIVE_CLS : INACTIVE_WITH_BORDER;
+      btnPoster.className  = v === "poster"  ? ACTIVE_CLS.replace(" border-r border-vs-border", "") + " bg-blue-500/20 text-blue-300" : INACTIVE_LAST;
+      // Re-apply sort order so it works in all views
+      const sortSel = document.getElementById("video-sort");
+      if (sortSel) applySort(sortSel.value);
+      // En vista poster: asignar imagen poster + bind hover trailerGif
+      if (v === "poster") bindPosterHover();
+    }
+
+    function restorePosterImages() {
+      document.querySelectorAll("li[data-poster-img] .poster-thumb-wrap img").forEach((img) => {
+        const orig = img.dataset.originalSrc;
+        if (orig) img.src = orig;
+        img.dataset.posterSet = "";
+      });
+    }
+
+    if (btnGrouped) btnGrouped.addEventListener("click", () => setView("grouped"));
+    if (btnList)    btnList.addEventListener("click",    () => setView("list"));
+    if (btnPoster)  btnPoster.addEventListener("click",  () => setView("poster"));
+
+    function bindPosterHover() {
+      document.querySelectorAll("#sections-container.view-poster li[data-poster-img]").forEach((li) => {
+        const posterImg  = li.dataset.posterImg;
+        const trailerGif = li.dataset.trailerGif;
+        if (!posterImg && !trailerGif) return;
+        const img = li.querySelector(".poster-thumb-wrap img");
+        if (!img) return;
+        // Ensure poster image is set
+        if (posterImg && img.dataset.posterSet !== "1") {
+          img.src = posterImg;
+          img.dataset.posterSet = "1";
+        }
+        if (!trailerGif) return;
+        if (li.dataset.posterHoverBound === "1") return;
+        li.dataset.posterHoverBound = "1";
+        li.addEventListener("mouseenter", () => { img.src = trailerGif; });
+        li.addEventListener("mouseleave", () => { img.src = posterImg || img.dataset.originalSrc || ""; });
+      });
+    }
+
+    // ─── Buscador + ordenación ────────────────────────────────────────────────
+    const searchInput = document.getElementById("video-search");
+    const videoCount  = document.getElementById("video-count");
+    const searchEmpty = document.getElementById("search-empty");
+    const sortSelect  = document.getElementById("video-sort");
+
+    if (container) {
+      const totalLabel = videoCount ? videoCount.textContent : "";
+
+      function getAllItems() {
+        return Array.from(container.querySelectorAll("li[data-search]"));
+      }
+
+      function applyFilter() {
+        const q = searchInput ? searchInput.value.trim().toLowerCase() : "";
+        const allItems = getAllItems();
+        let visible = 0;
+        for (const li of allItems) {
+          const match = !q || li.dataset.search.includes(q);
+          li.style.display = match ? "" : "none";
+          if (match) visible++;
+        }
+        // En vista agrupada: ocultar secciones sin resultados
+        for (const section of container.querySelectorAll("section[data-section-id]")) {
+          const anyVisible = Array.from(section.querySelectorAll("li[data-search]"))
+            .some((li) => li.style.display !== "none");
+          section.dataset.hidden = anyVisible ? "" : "true";
+          // Actualizar contador de la sección
+          const badge = section.querySelector(".section-count");
+          if (badge) {
+            const sectionVisible = Array.from(section.querySelectorAll("li[data-search]"))
+              .filter((li) => li.style.display !== "none").length;
+            const total = Number(badge.dataset.total ?? 0);
+            badge.textContent = q
+              ? `${sectionVisible} de ${total}`
+              : `${total} ${total === 1 ? "video" : "videos"}`;
+          }
+        }
+        if (videoCount) {
+          videoCount.textContent = q
+            ? `${visible} resultado${visible !== 1 ? "s" : ""} de ${allItems.length}`
+            : totalLabel;
+        }
+        if (searchEmpty) searchEmpty.classList.toggle("hidden", visible > 0 || !q);
+      }
+
+      function applySort(key) {
+        const allItems = getAllItems();
+        allItems.sort((a, b) => {
+          switch (key) {
+            case "date-asc":   return Number(a.dataset.created) - Number(b.dataset.created);
+            case "date-desc":  return Number(b.dataset.created) - Number(a.dataset.created);
+            case "title-asc":  return (a.dataset.title || "").localeCompare(b.dataset.title || "", "es");
+            case "title-desc": return (b.dataset.title || "").localeCompare(a.dataset.title || "", "es");
+            case "views-desc": return Number(b.dataset.views) - Number(a.dataset.views);
+            case "views-asc":  return Number(a.dataset.views) - Number(b.dataset.views);
+            case "likes-desc": return Number(b.dataset.likes) - Number(a.dataset.likes);
+            case "likes-asc":  return Number(a.dataset.likes) - Number(b.dataset.likes);
+            case "cost-desc":  return Number(b.dataset.cost)  - Number(a.dataset.cost);
+            case "cost-asc":   return Number(a.dataset.cost)  - Number(b.dataset.cost);
+            default: return 0;
+          }
+        });
+        if (currentView === "list") {
+          // En vista lista: asignar CSS order para que el grid plano quede ordenado
+          allItems.forEach((el, i) => { el.style.order = String(i); });
+        } else {
+          // En vista agrupada: reordenar dentro de cada section-grid
+          allItems.forEach((el) => { el.style.order = ""; });
+          const sections = container.querySelectorAll("section[data-section-id]");
+          for (const section of sections) {
+            const grid = section.querySelector(".section-grid");
+            if (!grid) continue;
+            // Reordenar los li dentro del grid según el sort global
+            const sectionItems = allItems.filter((li) => li.closest("section") === section);
+            for (const li of sectionItems) grid.appendChild(li);
+          }
+        }
+      }
+
+      if (searchInput) searchInput.addEventListener("input", applyFilter);
+      if (sortSelect)  sortSelect.addEventListener("change", () => applySort(sortSelect.value));
+    }
+  </script>
+
+  <script is:inline>
+    shaka.polyfill.installAll();
+
+    const modal      = document.getElementById("player-modal");
+    const videoEl    = document.getElementById("player-video");
+    const modalTitle = document.getElementById("modal-title-text");
+    const modeTag    = document.getElementById("modal-mode-tag");
+    const modeDesc   = document.getElementById("modal-mode-desc");
+    const errorDiv   = document.getElementById("player-error");
+    const closeBtn   = document.getElementById("modal-close-btn");
+
+    let shakaPlayer = null;
+    let shakaUi = null;
+
+    function showError(msg) { errorDiv.classList.remove("hidden"); errorDiv.textContent = "Error: " + msg; }
+    function clearError()   { errorDiv.classList.add("hidden");    errorDiv.textContent = ""; }
+
+    async function openPlayer(videoId, forceTrailer) {
+      const data = window.__VIDEOS__[videoId];
+      if (!data) return;
+
+      clearError();
+      modalTitle.textContent = data.title;
+
+      // Destruir instancia previa
+      if (shakaUi)     { await shakaUi.destroy();     shakaUi = null; }
+      if (shakaPlayer) { await shakaPlayer.destroy(); shakaPlayer = null; }
+
+      videoEl.poster = data.poster || "";
+
+      let manifestUrl = null;
+      let drmServers  = {};
+      let modeLabel   = "";
+      let modeClass   = "";
+      let modeTip     = "";
+
+      const useTrailer = forceTrailer || data.mode === "trailer";
+
+      if (useTrailer && data.trailer) {
+        manifestUrl = data.trailer;
+        modeLabel   = "Tráiler";
+        modeClass   = "trailer";
+        modeTip     = "HLS — sin DRM";
+      } else if (data.mode === "nodrm" && data.dashNoDRM) {
+        manifestUrl = data.dashNoDRM;
+        modeLabel   = "Sin DRM";
+        modeClass   = "nodrm";
+        modeTip     = "DASH — reproducción libre";
+      } else if (data.mode === "widevine" && data.dashDRM) {
+        manifestUrl = data.dashDRM;
+        modeLabel   = "Widevine DRM";
+        modeClass   = "widevine";
+        modeTip     = "DASH — protegido Widevine / PlayReady";
+        if (data.widevineUrl)  drmServers["com.widevine.alpha"]      = data.widevineUrl;
+        if (data.playreadyUrl) drmServers["com.microsoft.playready"] = data.playreadyUrl;
+      }
+
+      if (!manifestUrl) { showError("No hay URL de reproducción disponible."); modal.showModal(); return; }
+
+      modeTag.textContent  = modeLabel;
+      const modeTagClasses = {
+        nodrm:   "text-[.7rem] font-bold px-[7px] py-[2px] rounded-[3px] tracking-wide bg-[#052e16] text-green-400 border border-[#166534]",
+        widevine:"text-[.7rem] font-bold px-[7px] py-[2px] rounded-[3px] tracking-wide bg-[#0d1a2e] text-blue-300 border border-[#1e40af]",
+        trailer: "text-[.7rem] font-bold px-[7px] py-[2px] rounded-[3px] tracking-wide bg-[#1c1007] text-amber-400 border border-[#92400e]",
+      };
+      modeTag.className    = modeTagClasses[modeClass] || "";
+      modeDesc.textContent = modeTip;
+
+      if (!shaka.Player.isBrowserSupported()) {
+        showError("Tu navegador no soporta DASH. Usa Chrome o Firefox.");
+        modal.showModal();
+        return;
+      }
+
+      // Inicializar con el video element directamente (necesario para shaka.ui)
+      const videoContainer = videoEl.parentElement;
+      shakaPlayer = new shaka.Player(videoEl);
+
+      // UI overlay con controles
+      if (shaka.ui && shaka.ui.Overlay) {
+        shakaUi = new shaka.ui.Overlay(shakaPlayer, videoContainer, videoEl);
+        shakaUi.configure({
+          controlPanelElements: ['play_pause','time_and_duration','spacer','mute','volume','fullscreen','overflow_menu']
+        });
+      }
+
+      shakaPlayer.addEventListener("error", (event) => {
+        const err = event.detail;
+        showError("Shaka " + err.code + ": " + (err.message || "error de reproducción"));
+      });
+
+      // ─── Request filter: CustomData para EZDRM ─────────────────────
+      shakaPlayer.getNetworkingEngine().registerRequestFilter((type, request) => {
+        if (type !== shaka.net.NetworkingEngine.RequestType.LICENSE) return;
+        const uri = request.uris[0];
+        if (!uri || !uri.includes("ezdrm.com")) return;
+
+        const customData = encodeURIComponent(JSON.stringify({
+          userId:  data.uploadedBy || "LH4KxJwmTYZPgIFVZzQuoMNGzfq1",
+          videoId: videoId
+        }));
+        request.uris[0] = uri + (uri.includes("?") ? "&" : "?") + "CustomData=" + customData;
+
+        request.headers["accept"]           = "*/*";
+        request.headers["accept-language"]  = "en-US,en;q=0.9";
+        request.headers["Referer"]          = "https://vodscene.com/";
+        request.headers["Content-Type"]     = "text/plain;charset=UTF-8";
+        request.headers["sec-fetch-dest"]   = "empty";
+        request.headers["sec-fetch-mode"]   = "cors";
+        request.headers["sec-fetch-site"]   = "cross-site";
+      });
+
+      // ─── Configurar DRM ────────────────────────────────────────────
+      if (Object.keys(drmServers).length > 0) {
+        shakaPlayer.configure({ drm: { servers: drmServers } });
+      }
+
+      try {
+        await shakaPlayer.load(manifestUrl);
+        videoEl.play().catch(() => {});
+      } catch (err) {
+        showError(err.message || "No se pudo cargar el video.");
+        // Destruir el player para que el spinner de Shaka no quede visible
+        if (shakaUi)     { try { await shakaUi.destroy();     } catch (_) {} shakaUi = null; }
+        if (shakaPlayer) { try { await shakaPlayer.destroy(); } catch (_) {} shakaPlayer = null; }
+        videoEl.removeAttribute("src");
+      }
+
+      modal.showModal();
+    }
+
+    async function closePlayer() {
+      videoEl.pause();
+      if (shakaUi)     { await shakaUi.destroy();     shakaUi = null; }
+      if (shakaPlayer) { await shakaPlayer.destroy(); shakaPlayer = null; }
+      videoEl.removeAttribute("src");
+      videoEl.poster = "";
+      clearError();
+      modal.close();
+    }
+
+    closeBtn.addEventListener("click", closePlayer);
+    modal.addEventListener("cancel", closePlayer);
+    modal.addEventListener("click", (e) => { if (e.target === modal) closePlayer(); });
+
+    document.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-video-id]");
+      if (!btn) return;
+      openPlayer(btn.dataset.videoId, btn.dataset.forceTrailer === "true");
+    });
+
+    // ─── Extra data modal ─────────────────────────────────────────────────────
+    const extraModal      = document.getElementById("extra-data-modal");
+    const extraPanelDet   = document.getElementById("extra-panel-details");
+    const extraPanelRaw   = document.getElementById("extra-panel-raw");
+    const extraModalPre   = document.getElementById("extra-modal-content");
+    const extraModalClose = document.getElementById("extra-modal-close");
+    const tabBtnDet       = document.getElementById("tab-btn-details");
+    const tabBtnRaw       = document.getElementById("tab-btn-raw");
+
+    function switchTab(tab) {
+      const isDet = tab === "details";
+      extraPanelDet.classList.toggle("hidden", !isDet);
+      extraPanelRaw.classList.toggle("hidden",  isDet);
+      tabBtnDet.className = isDet
+        ? "text-sm font-medium px-1 py-3 mr-5 border-b-2 border-red-500 text-white cursor-pointer bg-transparent"
+        : "text-sm font-medium px-1 py-3 mr-5 border-b-2 border-transparent text-gray-500 hover:text-gray-300 cursor-pointer bg-transparent transition-colors";
+      tabBtnRaw.className = !isDet
+        ? "text-sm font-medium px-1 py-3 border-b-2 border-red-500 text-white cursor-pointer bg-transparent"
+        : "text-sm font-medium px-1 py-3 border-b-2 border-transparent text-gray-500 hover:text-gray-300 cursor-pointer bg-transparent transition-colors";
+    }
+
+    tabBtnDet.addEventListener("click", () => switchTab("details"));
+    tabBtnRaw.addEventListener("click", () => switchTab("raw"));
+
+    extraModalClose.addEventListener("click", () => extraModal.close());
+    extraModal.addEventListener("cancel", () => extraModal.close());
+    extraModal.addEventListener("click", (e) => { if (e.target === extraModal) extraModal.close(); });
+
+    function esc(s) { return String(s ?? "—").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+    function lbl(t) { return `<div class="text-[.68rem] font-semibold text-gray-500 uppercase tracking-wider mb-1">${t}</div>`; }
+    function val(v, cls = "text-gray-200 text-sm") { return `<div class="${cls}">${esc(v)}</div>`; }
+    function codebox(v) { return `<div class="bg-[#111] border border-[#2d2d2d] rounded px-3 py-2 text-[.78rem] font-mono text-gray-300 break-all">${esc(v)}</div>`; }
+    function field(l, v, cls)  { return `<div>${lbl(l)}${val(v, cls)}</div>`; }
+    function fieldCode(l, v)   { return `<div>${lbl(l)}${codebox(v)}</div>`; }
+
+    function buildDetails(data) {
+      const cost        = data.cost ? Number(data.cost) : 0;
+      const costStr     = !cost ? "Gratis" : new Intl.NumberFormat("es-AR",{style:"currency",currency:"ARS",maximumFractionDigits:0}).format(cost);
+      const createdAt   = data.createdAt ? new Intl.DateTimeFormat("en",{dateStyle:"short"}).format(new Date(data.createdAt)) : null;
+      const participants = Array.isArray(data.participants)
+        ? data.participants.map(p => typeof p === "object" && p !== null ? (p.name ?? p.displayName ?? p.id ?? p.slug ?? JSON.stringify(p)) : String(p)).join(", ")
+        : (data.participants ?? null);
+      const manifestUrl  = data.publicUrls?.dashManifestNoDRM || data.publicUrls?.dashManifest || data.publicUrls?.trailerManifest;
+      const keyId        = data.drm?.keyId;
+      const fpIv         = data.fairplay?.ivHex;
+
+      let html = '<div class="p-5 space-y-5 text-sm">';
+
+      // ─ Grid 2 columnas ─
+      const gridCells = [];
+      if (participants)         gridCells.push(field("Participants", participants));
+      if (data.cost !== undefined) gridCells.push(field("Cost", costStr, cost > 0 ? "text-green-400 text-sm font-semibold" : "text-gray-200 text-sm"));
+      if (data.processingStatus) gridCells.push(field("Processing Status", data.processingStatus));
+      if (createdAt)            gridCells.push(field("Created At", createdAt));
+      if (data.isActive !== undefined) gridCells.push(field("Active", data.isActive ? "Yes" : "No"));
+      if (data.uploadedBy)      gridCells.push(field("Uploaded By", data.uploadedBy));
+
+      if (gridCells.length) {
+        html += `<div class="grid grid-cols-2 gap-x-8 gap-y-4 border-b border-[#2d2d2d] pb-5">${gridCells.join("")}</div>`;
+      }
+
+      // ─ Descripción ─
+      if (data.description) {
+        html += `<div class="border-b border-[#2d2d2d] pb-5">${field("Description", data.description)}</div>`;
+      }
+
+      // ─ Manifest URL ─
+      if (manifestUrl) {
+        html += `<div class="border-b border-[#2d2d2d] pb-5">${fieldCode("Manifest URL", manifestUrl)}</div>`;
+      }
+
+      // ─ DRM Keys ─
+      if (keyId || fpIv) {
+        html += '<div class="space-y-3">';
+        html += '<div class="text-red-400 text-[.8rem] font-bold uppercase tracking-wider flex items-center gap-1.5">🔒 DRM Keys</div>';
+        if (keyId) html += fieldCode("Key ID (Widevine/Common)", keyId);
+        if (fpIv)  html += fieldCode("FairPlay IV", fpIv);
+        html += '</div>';
+      }
+
+      html += '</div>';
+      return html;
+    }
+
+    document.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-extra-id]");
+      if (!btn) return;
+      const rawJson = btn.dataset.extraJson;
+      if (!rawJson) return;
+      const data = JSON.parse(rawJson);
+      switchTab("details");
+      extraPanelDet.innerHTML = buildDetails(data);
+      extraModalPre.textContent = JSON.stringify(data, null, 2);
+      extraModal.showModal();
+    });
+
+    document.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-popup-id]");
+      if (!btn) return;
+      const id      = btn.dataset.popupId;
+      const trailer = btn.dataset.popupTrailer === "1" ? "&trailer=1" : "";
+      window.open(
+        `/vodscene/player?id=${id}${trailer}`,
+        `player-${id}`,
+        "popup,width=960,height=560,resizable=yes"
+      );
+    });
+
+    // ─── GIF preview on hover ──────────────────────────────────────────────────
+    document.querySelectorAll("[data-gif]").forEach((wrap) => {
+      const gif = wrap.dataset.gif;
+      if (!gif) return;
+      const img = wrap.querySelector("img");
+      if (!img) return;
+      const original = img.src;
+      wrap.addEventListener("mouseenter", () => { img.src = gif; });
+      wrap.addEventListener("mouseleave", () => { img.src = original; });
+    });
+
+    // ─── Drag ─────────────────────────────────────────────────────────────────
+    const modalHeader = modal.querySelector(".modal-header");
+    let dragging = false, startX = 0, startY = 0, origLeft = 0, origTop = 0;
+
+    function dragStart(cx, cy) {
+      const rect = modal.getBoundingClientRect();
+      // Pasar de transform-center a posición absoluta antes de arrastrar
+      modal.style.transform = "none";
+      modal.style.left = rect.left + "px";
+      modal.style.top  = rect.top  + "px";
+      startX  = cx;
+      startY  = cy;
+      origLeft = rect.left;
+      origTop  = rect.top;
+      dragging = true;
+      modal.style.boxShadow = "0 32px 80px rgba(0,0,0,.95)";
+      document.body.style.userSelect = "none";
+    }
+
+    function dragMove(cx, cy) {
+      if (!dragging) return;
+      const dx = cx - startX;
+      const dy = cy - startY;
+      // Limitar al viewport
+      const mw = modal.offsetWidth;
+      const mh = modal.offsetHeight;
+      const newLeft = Math.max(0, Math.min(window.innerWidth  - mw, origLeft + dx));
+      const newTop  = Math.max(0, Math.min(window.innerHeight - mh, origTop  + dy));
+      modal.style.left = newLeft + "px";
+      modal.style.top  = newTop  + "px";
+    }
+
+    function dragEnd() {
+      if (!dragging) return;
+      dragging = false;
+      modal.style.boxShadow = "";
+      document.body.style.userSelect = "";
+    }
+
+    // Mouse
+    modalHeader.addEventListener("mousedown", (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      dragStart(e.clientX, e.clientY);
+    });
+    window.addEventListener("mousemove", (e) => dragMove(e.clientX, e.clientY));
+    window.addEventListener("mouseup",   dragEnd);
+
+    // Touch
+    modalHeader.addEventListener("touchstart", (e) => {
+      const t = e.touches[0];
+      dragStart(t.clientX, t.clientY);
+    }, { passive: true });
+    window.addEventListener("touchmove", (e) => {
+      if (!dragging) return;
+      e.preventDefault();
+      const t = e.touches[0];
+      dragMove(t.clientX, t.clientY);
+    }, { passive: false });
+    window.addEventListener("touchend", dragEnd);
+
+    // Resetear posición al cerrar
+    const _origClose = closePlayer;
+    closePlayer = async () => {
+      await _origClose();
+      modal.style.left = "";
+      modal.style.top  = "";
+      modal.style.transform = "";
+    };
+  </script>
+</Layout>

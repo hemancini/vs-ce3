@@ -1,0 +1,376 @@
+---
+import Layout from '@/layouts/Layout.astro';
+import rawVideos from '@/pages/api/buymyvids/videos.json';
+export const prerender = false;
+
+// ─── Tipos ────────────────────────────────────────────────────────────────────
+interface BmvVideo {
+  uid: string;          // índice único generado
+  id: string;
+  url: string;
+  filename: string;
+  description?: string;
+  timestamp?: string;
+  likes?: string;
+  comments?: string;
+  duration?: number;
+}
+
+// Asignar UID único por índice (los IDs del JSON se repiten)
+const videos: BmvVideo[] = (rawVideos as Omit<BmvVideo, 'uid'>[]).map((v, i) => ({
+  ...v,
+  uid: `bmv-${i}`,
+}));
+
+// Ordenar por timestamp desc (más reciente primero)
+videos.sort((a, b) => {
+  const da = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+  const db = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+  return db - da;
+});
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function formatDate(val: unknown): string {
+  if (!val) return "—";
+  const d = new Date(val as string);
+  return isNaN(d.getTime()) ? String(val)
+    : new Intl.DateTimeFormat("es", { dateStyle: "medium" }).format(d);
+}
+function formatNum(val: unknown): string {
+  if (val === undefined || val === null) return "—";
+  const n = Number(val);
+  return isNaN(n) ? String(val) : new Intl.NumberFormat("es").format(n);
+}
+function formatDuration(secs?: number): string {
+  if (!secs) return "";
+  const s = Math.round(secs);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
+  return `${m}:${String(ss).padStart(2, "0")}`;
+}
+function getExt(filename: string): string {
+  return filename.split(".").pop()?.toUpperCase() ?? "";
+}
+
+// Datos serializados para el player client-side
+interface PlayerData {
+  uid: string;
+  url: string;
+  description: string;
+  duration?: number;
+}
+const playerMap: Record<string, PlayerData> = {};
+for (const v of videos) {
+  playerMap[v.uid] = {
+    uid: v.uid,
+    url: v.url,
+    description: v.description ?? "",
+    duration: v.duration,
+  };
+}
+const playerDataJson = JSON.stringify(playerMap);
+---
+
+<Layout title="Videos — BuyMyVids">
+  <header class="mb-8">
+    <nav class="mb-3" aria-label="Navegación principal">
+      <a href="/" class="text-blue-400 hover:text-blue-300 hover:underline text-sm">← Inicio</a>
+    </nav>
+    <div class="flex items-end justify-between gap-4 flex-wrap">
+      <div>
+        <h1 class="text-3xl font-bold text-white">BuyMyVids</h1>
+        <p class="text-gray-500 text-sm mt-1 tabular-nums" id="video-count">
+          {videos.length === 0 ? "Sin videos"
+            : `${new Intl.NumberFormat("es").format(videos.length)} ${videos.length === 1 ? "video" : "videos"}`}
+        </p>
+      </div>
+
+      {videos.length > 0 && (
+        <div class="flex gap-2 flex-wrap items-center">
+          <div class="relative flex-1 min-w-[180px] sm:w-72">
+            <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+            <input
+              id="video-search"
+              type="search"
+              placeholder="Buscar por descripción o archivo…"
+              autocomplete="off"
+              class="w-full bg-vs-surface border border-vs-border rounded-[6px] pl-8 pr-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-400 transition-colors"
+              aria-label="Buscar videos"
+            />
+          </div>
+          <select
+            id="video-sort"
+            aria-label="Ordenar videos"
+            class="bg-vs-surface border border-vs-border rounded-[6px] px-2 py-1.5 text-sm text-gray-300 focus:outline-none focus:border-blue-400 transition-colors cursor-pointer"
+          >
+            <option value="date-desc">Más reciente</option>
+            <option value="date-asc">Más antiguo</option>
+            <option value="likes-desc">Más likes</option>
+            <option value="likes-asc">Menos likes</option>
+            <option value="comments-desc">Más comentarios</option>
+            <option value="duration-desc">Mayor duración</option>
+            <option value="duration-asc">Menor duración</option>
+          </select>
+        </div>
+      )}
+    </div>
+  </header>
+
+  <main id="main-content">
+    {videos.length === 0 && (
+      <div class="text-center py-16 text-gray-500" role="status"><p>No se encontraron videos.</p></div>
+    )}
+
+    <div id="search-empty" class="text-center py-16 text-gray-500 hidden" role="status">No hay videos que coincidan con la búsqueda.</div>
+
+    {videos.length > 0 && (
+      <ol
+        class="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-5 list-none p-0"
+        aria-label="Lista de videos BuyMyVids"
+        id="videos-grid"
+      >
+        {videos.map((v) => {
+          const ext  = getExt(v.filename);
+          const dur  = formatDuration(v.duration);
+          const searchText = [v.description, v.filename, v.id].filter(Boolean).join(" ").toLowerCase();
+          return (
+            <li
+              data-search={searchText}
+              data-date={String(v.timestamp ? new Date(v.timestamp).getTime() : 0)}
+              data-likes={String(Number(v.likes ?? 0))}
+              data-comments={String(Number(v.comments ?? 0))}
+              data-duration={String(v.duration ?? 0)}
+            >
+              <article
+                class="bg-vs-surface border border-vs-border rounded-lg overflow-hidden flex flex-col hover:border-blue-400 motion-safe:hover:-translate-y-0.5 transition-[border-color,transform] touch-manipulation"
+                aria-label={v.description ? v.description.slice(0, 60) : v.filename}
+              >
+                {/* Miniatura placeholder + overlay play */}
+                <div class="aspect-video bg-[#111] overflow-hidden relative flex items-center justify-center">
+                  <span class="text-gray-700 text-[2.5rem] select-none pointer-events-none" aria-hidden="true">▶</span>
+                  {dur && (
+                    <span class="absolute bottom-1.5 right-1.5 text-[.65rem] font-bold tabular-nums px-1.5 py-[2px] rounded-[3px] bg-black/70 text-gray-300 pointer-events-none">
+                      {dur}
+                    </span>
+                  )}
+                  {ext && (
+                    <span class="absolute top-1.5 left-1.5 text-[.65rem] font-bold tracking-[.04em] px-1.5 py-[2px] rounded-[3px] bg-[#0d1a2e] text-blue-300 border border-[#1e40af] pointer-events-none">
+                      {ext}
+                    </span>
+                  )}
+                  <div class="group absolute inset-0 flex items-center justify-center hover:bg-black/45 transition-colors">
+                    <button
+                      class="absolute inset-0 bg-transparent border-0 cursor-pointer focus-visible:outline-[3px] focus-visible:outline-blue-400 focus-visible:outline-offset-[-3px]"
+                      aria-label={`Reproducir: ${v.description?.slice(0, 60) ?? v.filename}`}
+                      data-play-uid={v.uid}
+                    >
+                      <span class="w-[52px] h-[52px] rounded-full bg-black/65 border-2 border-white/80 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" class="fill-white w-[22px] h-[22px] translate-x-[2px]"><polygon points="5,3 19,12 5,21"/></svg>
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Cuerpo */}
+                <div class="px-4 py-3.5 flex flex-col gap-1.5 flex-1">
+                  {v.description && (
+                    <p class="text-[.85rem] text-gray-300 overflow-hidden line-clamp-3 min-w-0">{v.description}</p>
+                  )}
+
+                  <ul class="flex flex-wrap gap-y-1 gap-x-2.5 list-none p-0 mt-auto pt-2" aria-label="Metadatos">
+                    {v.likes !== undefined && (
+                      <li><span class="text-[.72rem] bg-[#2a2a2a] border border-vs-border rounded px-1.5 py-[2px] text-gray-500 whitespace-nowrap tabular-nums" aria-label={`Likes: ${formatNum(v.likes)}`}>♥ {formatNum(v.likes)}</span></li>
+                    )}
+                    {v.comments !== undefined && Number(v.comments) > 0 && (
+                      <li><span class="text-[.72rem] bg-[#2a2a2a] border border-vs-border rounded px-1.5 py-[2px] text-gray-500 whitespace-nowrap tabular-nums" aria-label={`Comentarios: ${formatNum(v.comments)}`}>💬 {formatNum(v.comments)}</span></li>
+                    )}
+                    {v.timestamp && (
+                      <li><span class="text-[.72rem] bg-[#2a2a2a] border border-vs-border rounded px-1.5 py-[2px] text-gray-500 whitespace-nowrap">📅 {formatDate(v.timestamp)}</span></li>
+                    )}
+                  </ul>
+                </div>
+
+                {/* Botón */}
+                <div class="px-4 pb-3.5 flex gap-2 flex-wrap">
+                  <button
+                    class="inline-flex items-center gap-1.5 text-[.8rem] font-semibold px-3 py-1.5 rounded-[5px] cursor-pointer border-0 font-sans bg-blue-400 text-black hover:bg-blue-300 focus-visible:outline-2 focus-visible:outline-blue-300 focus-visible:outline-offset-2 transition-colors"
+                    data-play-uid={v.uid}
+                    aria-label={`Reproducir: ${v.description?.slice(0, 60) ?? v.filename}`}
+                  >
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="5,3 19,12 5,21"/></svg>
+                    Reproducir
+                  </button>
+                  <a
+                    href={v.url}
+                    download={v.filename}
+                    class="inline-flex items-center gap-1.5 text-[.8rem] font-semibold px-3 py-1.5 rounded-[5px] cursor-pointer border border-vs-border bg-transparent text-gray-500 hover:border-blue-400 hover:text-blue-400 focus-visible:outline-2 focus-visible:outline-blue-300 focus-visible:outline-offset-2 transition-colors font-sans no-underline"
+                    aria-label={`Descargar: ${v.filename}`}
+                  >
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    Descargar
+                  </a>
+                </div>
+
+                <p class="text-[.68rem] text-gray-700 font-mono px-4 pb-3 truncate" title={v.filename}>{v.filename}</p>
+              </article>
+            </li>
+          );
+        })}
+      </ol>
+    )}
+  </main>
+
+  {/* ─── Modal de reproducción ────────────────────────────────────────────── */}
+  <dialog
+    id="player-modal"
+    aria-label="Reproductor de video"
+    aria-modal="true"
+    class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 m-0 bg-black border border-vs-border rounded-[10px] p-0 max-w-[min(900px,95vw)] w-[min(860px,92vw)] shadow-[0_24px_64px_rgba(0,0,0,.8)] overscroll-contain [&::backdrop]:bg-black/60 [&::backdrop]:backdrop-blur-sm"
+  >
+    <div class="flex items-center justify-between px-4 py-3 border-b border-vs-border bg-vs-modal cursor-grab active:cursor-grabbing select-none modal-header">
+      <span class="text-[.82rem] text-gray-400 font-mono min-w-0 overflow-hidden text-ellipsis whitespace-nowrap" id="modal-filename-text">—</span>
+      <button
+        class="bg-transparent border border-vs-border rounded-[5px] px-2 py-1 text-gray-500 cursor-pointer text-[.85rem] flex-shrink-0 hover:border-red-400 hover:text-red-400 focus-visible:outline-2 focus-visible:outline-blue-400 focus-visible:outline-offset-2 transition-colors"
+        id="modal-close-btn"
+        aria-label="Cerrar reproductor"
+      >✕</button>
+    </div>
+    <div class="bg-black">
+      <video
+        id="player-video"
+        class="w-full block aspect-video bg-black"
+        controls
+        playsinline
+        preload="metadata"
+      ></video>
+    </div>
+    <div class="px-4 py-2.5 bg-vs-modal">
+      <p id="modal-description" class="text-[.8rem] text-gray-400 line-clamp-2"></p>
+    </div>
+  </dialog>
+
+  {/* Datos para el player */}
+  <script is:inline define:vars={{ playerDataJson }}>
+    window.__BMV_VIDEOS__ = JSON.parse(playerDataJson);
+  </script>
+
+  <script is:inline>
+    // ─── Buscador + ordenamiento ───────────────────────────────────────────────
+    const searchInput = document.getElementById("video-search");
+    const videosGrid  = document.getElementById("videos-grid");
+    const videoCount  = document.getElementById("video-count");
+    const searchEmpty = document.getElementById("search-empty");
+    const sortSelect  = document.getElementById("video-sort");
+
+    if (videosGrid) {
+      const allItems   = Array.from(videosGrid.querySelectorAll("li[data-search]"));
+      const totalLabel = videoCount ? videoCount.textContent : "";
+
+      function applyFilter() {
+        const q = searchInput ? searchInput.value.trim().toLowerCase() : "";
+        let visible = 0;
+        for (const li of allItems) {
+          const match = !q || li.dataset.search.includes(q);
+          li.style.display = match ? "" : "none";
+          if (match) visible++;
+        }
+        if (videoCount) {
+          videoCount.textContent = q
+            ? `${visible} resultado${visible !== 1 ? "s" : ""} de ${allItems.length}`
+            : totalLabel;
+        }
+        if (searchEmpty) searchEmpty.classList.toggle("hidden", visible > 0 || !q);
+      }
+
+      function applySort(key) {
+        const items = Array.from(videosGrid.querySelectorAll("li[data-search]"));
+        items.sort((a, b) => {
+          switch (key) {
+            case "date-asc":      return Number(a.dataset.date)     - Number(b.dataset.date);
+            case "date-desc":     return Number(b.dataset.date)     - Number(a.dataset.date);
+            case "likes-desc":    return Number(b.dataset.likes)    - Number(a.dataset.likes);
+            case "likes-asc":     return Number(a.dataset.likes)    - Number(b.dataset.likes);
+            case "comments-desc": return Number(b.dataset.comments) - Number(a.dataset.comments);
+            case "duration-desc": return Number(b.dataset.duration) - Number(a.dataset.duration);
+            case "duration-asc":  return Number(a.dataset.duration) - Number(b.dataset.duration);
+            default: return 0;
+          }
+        });
+        for (const li of items) videosGrid.appendChild(li);
+      }
+
+      if (searchInput) searchInput.addEventListener("input", applyFilter);
+      if (sortSelect)  sortSelect.addEventListener("change", () => applySort(sortSelect.value));
+    }
+  </script>
+
+  <script is:inline>
+    // ─── Player modal ─────────────────────────────────────────────────────────
+    const modal        = document.getElementById("player-modal");
+    const videoEl      = document.getElementById("player-video");
+    const filenameEl   = document.getElementById("modal-filename-text");
+    const descEl       = document.getElementById("modal-description");
+    const closeBtn     = document.getElementById("modal-close-btn");
+
+    function openPlayer(uid) {
+      const data = window.__BMV_VIDEOS__[uid];
+      if (!data) return;
+      videoEl.src           = data.url;
+      filenameEl.textContent = data.url.split("/").pop() || uid;
+      descEl.textContent    = data.description || "";
+      modal.showModal();
+      videoEl.play().catch(() => {});
+    }
+
+    function closePlayer() {
+      videoEl.pause();
+      videoEl.src = "";
+      modal.close();
+    }
+
+    closeBtn.addEventListener("click", closePlayer);
+    modal.addEventListener("cancel", closePlayer);
+    modal.addEventListener("click", (e) => { if (e.target === modal) closePlayer(); });
+
+    document.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-play-uid]");
+      if (!btn) return;
+      openPlayer(btn.dataset.playUid);
+    });
+
+    // ─── Drag ─────────────────────────────────────────────────────────────────
+    const modalHeader = modal.querySelector(".modal-header");
+    let dragging = false, startX = 0, startY = 0, origLeft = 0, origTop = 0;
+
+    function dragStart(cx, cy) {
+      const rect = modal.getBoundingClientRect();
+      modal.style.transform = "none";
+      modal.style.left = rect.left + "px";
+      modal.style.top  = rect.top  + "px";
+      startX = cx; startY = cy; origLeft = rect.left; origTop = rect.top;
+      dragging = true;
+      document.body.style.userSelect = "none";
+    }
+    function dragMove(cx, cy) {
+      if (!dragging) return;
+      const dx = cx - startX, dy = cy - startY;
+      const mw = modal.offsetWidth, mh = modal.offsetHeight;
+      modal.style.left = Math.max(0, Math.min(window.innerWidth  - mw, origLeft + dx)) + "px";
+      modal.style.top  = Math.max(0, Math.min(window.innerHeight - mh, origTop  + dy)) + "px";
+    }
+    function dragEnd() { if (!dragging) return; dragging = false; document.body.style.userSelect = ""; }
+
+    modalHeader.addEventListener("mousedown", (e) => { if (e.button !== 0) return; e.preventDefault(); dragStart(e.clientX, e.clientY); });
+    window.addEventListener("mousemove", (e) => dragMove(e.clientX, e.clientY));
+    window.addEventListener("mouseup", dragEnd);
+
+    modalHeader.addEventListener("touchstart", (e) => { const t = e.touches[0]; dragStart(t.clientX, t.clientY); }, { passive: true });
+    window.addEventListener("touchmove", (e) => { if (!dragging) return; e.preventDefault(); const t = e.touches[0]; dragMove(t.clientX, t.clientY); }, { passive: false });
+    window.addEventListener("touchend", dragEnd);
+
+    const _close = closePlayer;
+    closePlayer = () => { _close(); modal.style.left = ""; modal.style.top = ""; modal.style.transform = ""; };
+  </script>
+</Layout>

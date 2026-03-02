@@ -1,0 +1,13 @@
+node_modules
+.git
+downloads
+docker-widevine
+device
+keydive
+*.log
+*.bin
+*.pyc
+__pycache__
+.tmp_*
+pnpm-lock.yaml
+src

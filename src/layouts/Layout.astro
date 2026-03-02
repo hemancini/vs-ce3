@@ -1,0 +1,52 @@
+---
+interface Props {
+  title?: string;
+  /** Pasar true en la página de login para omitir la validación de sesión */
+  noAuth?: boolean;
+}
+const { title = 'vodscene', noAuth = false } = Astro.props;
+---
+<!DOCTYPE html>
+<html lang="es" class="bg-vs-bg">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0f0f0f" />
+  <title>{title}</title>
+  <slot name="head" />
+</head>
+<body class="min-h-screen bg-vs-bg text-gray-300 font-sans p-8">
+
+  {!noAuth && (
+    <script>
+      /**
+       * Guarda de sesión del lado del cliente.
+       * sessionStorage se borra automáticamente al cerrar la ventana/pestaña,
+       * lo que fuerza un nuevo login aunque la cookie de servidor aún exista.
+       */
+    (function () {
+        const KEY = 'vs_session_expiry';
+        const expiry = sessionStorage.getItem(KEY);
+
+        if (!expiry || Date.now() > Number(expiry)) {
+          // Sin sesión activa en esta pestaña → cerrar sesión y redirigir
+          sessionStorage.removeItem(KEY);
+          fetch('/api/auth/logout', { method: 'POST' }).finally(function () {
+            // nosession=1 indica que la sesión de pestaña expiró:
+            // el login no debe redirigir automáticamente aunque el cookie siga presente
+            const dest = encodeURIComponent(window.location.pathname);
+            window.location.replace('/login?nosession=1&redirect=' + dest);
+          });
+        }
+      })();
+    </script>
+  )}
+  <a
+    href="#main-content"
+    class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-2 focus:bg-blue-400 focus:text-black focus:px-2 focus:py-1 focus:rounded focus:text-sm focus:font-semibold focus:z-50"
+  >
+    Ir al contenido principal
+  </a>
+  <slot />
+</body>
+</html>

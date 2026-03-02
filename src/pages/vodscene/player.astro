@@ -1,0 +1,234 @@
+---
+export const prerender = false;
+
+// ─── Tipos ────────────────────────────────────────────────────────────────────
+interface DrmConfig {
+  enabled?: boolean;
+  keyId?: string;
+  widevine?: { licenseUrl: string; pssh?: string };
+  playready?: { licenseUrl?: string; laUrl: string };
+}
+interface FairPlayConfig {
+  enabled?: boolean;
+  licenseUrl?: string;
+  ivHex?: string;
+}
+interface PublicUrls {
+  dashManifest?: string;
+  dashManifestNoDRM?: string;
+  hlsFairPlayManifest?: string;
+  trailerManifest?: string;
+  coverImage?: string;
+  fullPoster?: string;
+  thumbnailFull?: string;
+  trailerPoster?: string;
+  fullGif?: string;
+  trailerGif?: string;
+}
+interface VideoDoc {
+  id: string;
+  title?: string;
+  processingStatus?: string;
+  isActive?: boolean;
+  hasNoDRMVersion?: boolean;
+  permitirPlaySinDRM?: boolean;
+  drm?: DrmConfig;
+  fairplay?: FairPlayConfig;
+  publicUrls?: PublicUrls;
+  uploadedBy?: string;
+  [key: string]: unknown;
+}
+interface ApiResponse {
+  meta: { collections: Record<string, { accessible: boolean; error?: string }> };
+  data: Record<string, Record<string, Record<string, unknown>>>;
+}
+
+// ─── Query params ────────────────────────────────────────────────────────────
+const videoId    = Astro.url.searchParams.get("id") ?? "";
+const forceTrail = Astro.url.searchParams.get("trailer") === "1";
+
+let video: VideoDoc | null = null;
+let fetchError: string | null = null;
+
+if (videoId) {
+  try {
+    const origin = Astro.url.origin;
+    const cookie = Astro.request.headers.get('cookie') ?? '';
+    const res = await fetch(`${origin}/api/vodscene/firestore?collection=videos`, {
+      headers: { cookie },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json: ApiResponse = await res.json();
+    const colMeta = json.meta?.collections?.videos;
+    if (!colMeta?.accessible) throw new Error(colMeta?.error ?? "Colección no accesible");
+    const doc = json.data?.videos?.[videoId] as Record<string, unknown> | undefined;
+    if (!doc) throw new Error("Video no encontrado");
+    video = { id: videoId, ...doc } as VideoDoc;
+  } catch (e) {
+    fetchError = e instanceof Error ? e.message : "Error desconocido";
+  }
+}
+
+function getThumb(v: VideoDoc): string | null {
+  return v.publicUrls?.coverImage ?? v.publicUrls?.thumbnailFull
+    ?? v.publicUrls?.fullPoster ?? v.publicUrls?.trailerPoster ?? null;
+}
+
+type PlayMode = "nodrm" | "widevine" | "trailer" | "unavailable";
+function getPlayMode(v: VideoDoc): PlayMode {
+  if (v.processingStatus !== "ready") return "unavailable";
+  if (v.permitirPlaySinDRM || v.hasNoDRMVersion) return "nodrm";
+  if (v.drm?.enabled && v.publicUrls?.dashManifest) return "widevine";
+  if (v.publicUrls?.trailerManifest) return "trailer";
+  return "unavailable";
+}
+
+const mode = video ? getPlayMode(video) : "unavailable";
+const poster = video ? (getThumb(video) ?? "") : "";
+
+const playerData = video ? {
+  id:           video.id,
+  title:        String(video.title ?? "Sin título"),
+  mode,
+  forceTrailer: forceTrail,
+  dashNoDRM:    video.publicUrls?.dashManifestNoDRM,
+  dashDRM:      video.publicUrls?.dashManifest,
+  hlsFP:        video.publicUrls?.hlsFairPlayManifest,
+  trailer:      video.publicUrls?.trailerManifest,
+  poster,
+  widevineUrl:  video.drm?.widevine?.licenseUrl,
+  playreadyUrl: video.drm?.playready?.laUrl ?? video.drm?.playready?.licenseUrl,
+  fpLicenseUrl: video.fairplay?.licenseUrl,
+  uploadedBy:   video.uploadedBy as string | undefined,
+} : null;
+
+const playerDataJson = JSON.stringify(playerData);
+const title = video?.title ?? "Reproductor";
+---
+
+<!DOCTYPE html>
+<html lang="es" class="bg-black">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title} — vodscene</title>
+    <script is:inline src="https://cdnjs.cloudflare.com/ajax/libs/shaka-player/4.3.5/shaka-player.ui.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/shaka-player/4.3.5/controls.min.css" />
+    <style>
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { height: 100%; background: #000; color: #e5e5e5; font-family: system-ui, sans-serif; overflow: hidden; }
+      #root { position: relative; width: 100vw; height: 100vh; background: #000; }
+      #player-video { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; }
+      #player-error { position: absolute; bottom: 0; left: 0; right: 0; padding: 10px 14px; background: #450a0a; color: #fca5a5; font-size: .82rem; display: none; }
+      #no-video { display: flex; align-items: center; justify-content: center; height: 100vh; color: #6b7280; font-size: 1rem; }
+      #overlay { position: absolute; top: 0; left: 0; right: 0; display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: linear-gradient(to bottom, rgba(0,0,0,.7) 0%, transparent 100%); opacity: 0; transition: opacity .2s; pointer-events: none; }
+      #root:hover #overlay { opacity: 1; pointer-events: auto; }
+      #mode-tag { font-size: .65rem; font-weight: 700; padding: 2px 6px; border-radius: 3px; white-space: nowrap; }
+      #close-btn { margin-left: auto; background: rgba(0,0,0,.5); border: 1px solid rgba(255,255,255,.2); border-radius: 4px; padding: 3px 10px; color: #d1d5db; cursor: pointer; font-size: .82rem; transition: border-color .15s, color .15s; }
+      #close-btn:hover { border-color: #f87171; color: #f87171; }
+      .nodrm-tag   { background: #052e16; color: #4ade80; border: 1px solid #166534; }
+      .widevine-tag{ background: #0d1a2e; color: #93c5fd; border: 1px solid #1e40af; }
+      .trailer-tag { background: #1c1007; color: #fbbf24; border: 1px solid #92400e; }
+    </style>
+  </head>
+  <body>
+    {!video && (
+      <div id="no-video">
+        {fetchError ? `Error: ${fetchError}` : "Video no encontrado"}
+      </div>
+    )}
+    {video && (
+      <div id="root">
+        <video id="player-video" playsinline poster={poster}></video>
+        <div id="overlay">
+          <span id="mode-tag"></span>
+          <button id="close-btn" onclick="window.close()">✕ Cerrar</button>
+        </div>
+        <div id="player-error" role="alert"></div>
+      </div>
+    )}
+
+    {video && (
+      <script is:inline define:vars={{ playerDataJson }}>
+        const DATA = JSON.parse(playerDataJson);
+
+        shaka.polyfill.installAll();
+
+        const videoEl   = document.getElementById("player-video");
+        const errorDiv  = document.getElementById("player-error");
+        const modeTag   = document.getElementById("mode-tag");
+
+        function showError(msg) { errorDiv.style.display = "block"; errorDiv.textContent = "Error: " + msg; }
+
+        async function init() {
+          const useTrailer = DATA.forceTrailer || DATA.mode === "trailer";
+
+          let manifestUrl = null;
+          let drmServers  = {};
+          let modeLabel   = "";
+          let modeClass   = "";
+
+          if (useTrailer && DATA.trailer) {
+            manifestUrl = DATA.trailer; modeLabel = "Tráiler"; modeClass = "trailer-tag";
+          } else if (DATA.mode === "nodrm" && DATA.dashNoDRM) {
+            manifestUrl = DATA.dashNoDRM; modeLabel = "Sin DRM"; modeClass = "nodrm-tag";
+          } else if (DATA.mode === "widevine" && DATA.dashDRM) {
+            manifestUrl = DATA.dashDRM; modeLabel = "Widevine DRM"; modeClass = "widevine-tag";
+            if (DATA.widevineUrl)  drmServers["com.widevine.alpha"]      = DATA.widevineUrl;
+            if (DATA.playreadyUrl) drmServers["com.microsoft.playready"] = DATA.playreadyUrl;
+          }
+
+          modeTag.textContent = modeLabel;
+          modeTag.className   = "mode-tag " + modeClass;
+
+          if (!manifestUrl) { showError("No hay URL de reproducción disponible."); return; }
+
+          if (!shaka.Player.isBrowserSupported()) {
+            showError("Tu navegador no soporta DASH. Usa Chrome o Firefox."); return;
+          }
+
+          const videoContainer = videoEl.parentElement;
+          const player = new shaka.Player(videoEl);
+
+          if (shaka.ui && shaka.ui.Overlay) {
+            const ui = new shaka.ui.Overlay(player, videoContainer, videoEl);
+            ui.configure({ controlPanelElements: ['play_pause','time_and_duration','spacer','mute','volume','fullscreen','overflow_menu'] });
+          }
+
+          player.addEventListener("error", (e) => {
+            const err = e.detail;
+            showError("Shaka " + err.code + ": " + (err.message || "error de reproducción"));
+          });
+
+          player.getNetworkingEngine().registerRequestFilter((type, request) => {
+            if (type !== shaka.net.NetworkingEngine.RequestType.LICENSE) return;
+            const uri = request.uris[0];
+            if (!uri || !uri.includes("ezdrm.com")) return;
+            const customData = encodeURIComponent(JSON.stringify({
+              userId: DATA.uploadedBy || "LH4KxJwmTYZPgIFVZzQuoMNGzfq1",
+              videoId: DATA.id
+            }));
+            request.uris[0] = uri + (uri.includes("?") ? "&" : "?") + "CustomData=" + customData;
+            request.headers["accept"]          = "*/*";
+            request.headers["accept-language"] = "en-US,en;q=0.9";
+            request.headers["Referer"]         = "https://vodscene.com/";
+            request.headers["Content-Type"]    = "text/plain;charset=UTF-8";
+          });
+
+          if (Object.keys(drmServers).length > 0) {
+            player.configure({ drm: { servers: drmServers } });
+          }
+
+          try {
+            await player.load(manifestUrl);
+            videoEl.play().catch(() => {});
+          } catch (err) {
+            showError(err.message || "No se pudo cargar el video.");
+          }
+        }
+
+        init();
+      </script>
+    )}
+  </body>
+</html>

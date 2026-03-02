@@ -1,0 +1,16 @@
+name = "vs"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+pages_build_output_dir = "dist"
+
+[vars]
+FIREBASE_API_KEY = "AIzaSyAUPv7dU2kEk1rdC__6z8aGlPYPfQh_ogA"
+FIREBASE_PROJECT = "payperview-7c21f"
+VODSCENE_EMAIL   = "m45942076@gmail.com"
+# VODSCENE_PASSWORD se recomienda poner como secret:
+#   wrangler pages secret put VODSCENE_PASSWORD
+VODSCENE_PASSWORD = "minasricas00"
+# API_KEY: contraseña de acceso a la app.
+# Para producción usa secrets (nunca en vars):
+#   wrangler pages secret put API_KEY
+API_KEY = "changeme"

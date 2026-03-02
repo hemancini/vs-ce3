@@ -1,0 +1,57 @@
+# ─── Astro ─────────────────────────────────────────────────────────────────────
+dist/
+.astro/
+
+# ─── Dependencias ───────────────────────────────────────────────────────────────
+node_modules/
+.pnpm-store/
+
+# ─── Cloudflare / Wrangler ──────────────────────────────────────────────────────
+.wrangler/
+.dev.vars
+
+# ─── Variables de entorno ───────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+.env.production
+
+# ─── Logs ───────────────────────────────────────────────────────────────────────
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ─── Sistema operativo ──────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ─── Editores ───────────────────────────────────────────────────────────────────
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ─── Python ─────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# ─── Descargas / temporales ─────────────────────────────────────────────────────
+downloads/
+scripts/downloads/
+tmp/
+frida-server-*
+
+# ─── Docker ─────────────────────────────────────────────────────────────────────
+docker-widevine/tmp/
