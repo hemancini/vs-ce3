@@ -76,7 +76,7 @@ const playerDataJson = JSON.stringify(playerMap);
 <Layout title="Videos — BuyMyVids">
   <header class="mb-8">
     <nav class="mb-3" aria-label="Navegación principal">
-      <a href="/" class="text-blue-400 hover:text-blue-300 hover:underline text-sm">← Inicio</a>
+      <a href="/" class="focusable text-blue-400 hover:text-blue-300 hover:underline text-sm focus:ring-1 focus:ring-blue-400 rounded">← Inicio</a>
     </nav>
     <div class="flex items-end justify-between gap-4 flex-wrap">
       <div>
@@ -91,19 +91,19 @@ const playerDataJson = JSON.stringify(playerMap);
         <div class="flex gap-2 flex-wrap items-center">
           <div class="relative flex-1 min-w-[180px] sm:w-72">
             <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-            <input
-              id="video-search"
-              type="search"
-              placeholder="Buscar por descripción o archivo…"
-              autocomplete="off"
-              class="w-full bg-vs-surface border border-vs-border rounded-[6px] pl-8 pr-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-400 transition-colors"
-              aria-label="Buscar videos"
-            />
+              <input
+                id="video-search"
+                type="search"
+                placeholder="Buscar por descripción o archivo…"
+                autocomplete="off"
+                class="focusable w-full bg-vs-surface border border-vs-border rounded-[6px] pl-8 pr-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-400 transition-colors"
+                aria-label="Buscar videos"
+              />
           </div>
           <select
             id="video-sort"
             aria-label="Ordenar videos"
-            class="bg-vs-surface border border-vs-border rounded-[6px] px-2 py-1.5 text-sm text-gray-300 focus:outline-none focus:border-blue-400 transition-colors cursor-pointer"
+            class="focusable bg-vs-surface border border-vs-border rounded-[6px] px-2 py-1.5 text-sm text-gray-300 focus:outline-none focus:border-blue-400 transition-colors cursor-pointer"
           >
             <option value="date-desc">Más reciente</option>
             <option value="date-asc">Más antiguo</option>
@@ -162,7 +162,7 @@ const playerDataJson = JSON.stringify(playerMap);
                   )}
                   <div class="group absolute inset-0 flex items-center justify-center hover:bg-black/45 transition-colors">
                     <button
-                      class="absolute inset-0 bg-transparent border-0 cursor-pointer focus-visible:outline-[3px] focus-visible:outline-blue-400 focus-visible:outline-offset-[-3px]"
+                      class="focusable absolute inset-0 bg-transparent border-0 cursor-pointer focus-visible:outline-none"
                       aria-label={`Reproducir: ${v.description?.slice(0, 60) ?? v.filename}`}
                       data-play-uid={v.uid}
                     >
@@ -195,7 +195,7 @@ const playerDataJson = JSON.stringify(playerMap);
                 {/* Botón */}
                 <div class="px-4 pb-3.5 flex gap-2 flex-wrap">
                   <button
-                    class="inline-flex items-center gap-1.5 text-[.8rem] font-semibold px-3 py-1.5 rounded-[5px] cursor-pointer border-0 font-sans bg-blue-400 text-black hover:bg-blue-300 focus-visible:outline-2 focus-visible:outline-blue-300 focus-visible:outline-offset-2 transition-colors"
+                    class="focusable inline-flex items-center gap-1.5 text-[.8rem] font-semibold px-3 py-1.5 rounded-[5px] cursor-pointer border-0 font-sans bg-blue-400 text-black hover:bg-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-300 transition-colors"
                     data-play-uid={v.uid}
                     aria-label={`Reproducir: ${v.description?.slice(0, 60) ?? v.filename}`}
                   >
@@ -205,7 +205,7 @@ const playerDataJson = JSON.stringify(playerMap);
                   <a
                     href={v.url}
                     download={v.filename}
-                    class="inline-flex items-center gap-1.5 text-[.8rem] font-semibold px-3 py-1.5 rounded-[5px] cursor-pointer border border-vs-border bg-transparent text-gray-500 hover:border-blue-400 hover:text-blue-400 focus-visible:outline-2 focus-visible:outline-blue-300 focus-visible:outline-offset-2 transition-colors font-sans no-underline"
+                    class="focusable inline-flex items-center gap-1.5 text-[.8rem] font-semibold px-3 py-1.5 rounded-[5px] cursor-pointer border border-vs-border bg-transparent text-gray-500 hover:border-blue-400 hover:text-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-400 transition-colors font-sans no-underline"
                     aria-label={`Descargar: ${v.filename}`}
                   >
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -222,34 +222,25 @@ const playerDataJson = JSON.stringify(playerMap);
     )}
   </main>
 
-  {/* ─── Modal de reproducción ────────────────────────────────────────────── */}
-  <dialog
-    id="player-modal"
-    aria-label="Reproductor de video"
-    aria-modal="true"
-    class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 m-0 bg-black border border-vs-border rounded-[10px] p-0 max-w-[min(900px,95vw)] w-[min(860px,92vw)] shadow-[0_24px_64px_rgba(0,0,0,.8)] overscroll-contain [&::backdrop]:bg-black/60 [&::backdrop]:backdrop-blur-sm"
+  {/* ─── Contenedor para reproducción (Fullscreen) ────────────────────────── */}
+  <div
+    id="video-container"
+    class="fixed inset-0 bg-black z-[100] hidden items-center justify-center"
   >
-    <div class="flex items-center justify-between px-4 py-3 border-b border-vs-border bg-vs-modal cursor-grab active:cursor-grabbing select-none modal-header">
-      <span class="text-[.82rem] text-gray-400 font-mono min-w-0 overflow-hidden text-ellipsis whitespace-nowrap" id="modal-filename-text">—</span>
-      <button
-        class="bg-transparent border border-vs-border rounded-[5px] px-2 py-1 text-gray-500 cursor-pointer text-[.85rem] flex-shrink-0 hover:border-red-400 hover:text-red-400 focus-visible:outline-2 focus-visible:outline-blue-400 focus-visible:outline-offset-2 transition-colors"
-        id="modal-close-btn"
-        aria-label="Cerrar reproductor"
-      >✕</button>
+    <video id="player-video" class="w-full h-full block bg-black" playsinline></video>
+    
+    {/* Overlay de información y controles básicos (opcional, pero para consistencia) */}
+    <div class="absolute top-0 left-0 right-0 p-8 bg-gradient-to-b from-black/80 to-transparent pointer-events-none">
+      <div class="flex items-center gap-3 mb-2">
+        <span class="text-[.7rem] font-bold px-1.5 py-[2px] rounded-[3px] bg-blue-600 text-white border border-blue-400">MP4</span>
+        <span id="modal-filename-text" class="text-xl font-bold text-white uppercase tracking-tight"></span>
+      </div>
+      <p id="modal-description" class="text-gray-400 text-sm max-w-2xl line-clamp-2"></p>
     </div>
-    <div class="bg-black">
-      <video
-        id="player-video"
-        class="w-full block aspect-video bg-black"
-        controls
-        playsinline
-        preload="metadata"
-      ></video>
-    </div>
-    <div class="px-4 py-2.5 bg-vs-modal">
-      <p id="modal-description" class="text-[.8rem] text-gray-400 line-clamp-2"></p>
-    </div>
-  </dialog>
+
+    {/* Error display */}
+    <div id="player-error" class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-red-900/80 text-red-100 px-6 py-3 rounded-lg border border-red-500 hidden z-50"></div>
+  </div>
 
   {/* Datos para el player */}
   <script is:inline define:vars={{ playerDataJson }}>
@@ -304,35 +295,56 @@ const playerDataJson = JSON.stringify(playerMap);
       if (searchInput) searchInput.addEventListener("input", applyFilter);
       if (sortSelect)  sortSelect.addEventListener("change", () => applySort(sortSelect.value));
     }
-  </script>
 
-  <script is:inline>
-    // ─── Player modal ─────────────────────────────────────────────────────────
-    const modal        = document.getElementById("player-modal");
-    const videoEl      = document.getElementById("player-video");
-    const filenameEl   = document.getElementById("modal-filename-text");
-    const descEl       = document.getElementById("modal-description");
-    const closeBtn     = document.getElementById("modal-close-btn");
+    // ─── Player logic (Fullscreen) ────────────────────────────────────────────
+    const videoContainer = document.getElementById("video-container");
+    const videoEl        = document.getElementById("player-video");
+    const filenameEl      = document.getElementById("modal-filename-text");
+    const descEl         = document.getElementById("modal-description");
+    const errorDiv       = document.getElementById("player-error");
 
+    function showError(msg) { errorDiv.classList.remove("hidden"); errorDiv.textContent = "Error: " + msg; }
+    function clearError()   { errorDiv.classList.add("hidden");    errorDiv.textContent = ""; }
+
+    let isOpening = false;
     function openPlayer(uid) {
+      if (isOpening) return;
+      isOpening = true;
       const data = window.__BMV_VIDEOS__[uid];
-      if (!data) return;
-      videoEl.src           = data.url;
+      if (!data) { isOpening = false; return; }
+
+      clearError();
+      videoEl.src = data.url;
       filenameEl.textContent = data.url.split("/").pop() || uid;
-      descEl.textContent    = data.description || "";
-      modal.showModal();
-      videoEl.play().catch(() => {});
+      descEl.textContent = data.description || "";
+
+      videoContainer.classList.remove("hidden");
+      videoContainer.classList.add("flex");
+
+      if (videoContainer.requestFullscreen) videoContainer.requestFullscreen().catch(() => {});
+      else if (videoContainer.webkitRequestFullscreen) videoContainer.webkitRequestFullscreen();
+
+      videoEl.play().catch(err => showError(err.message));
+      isOpening = false;
     }
 
     function closePlayer() {
       videoEl.pause();
       videoEl.src = "";
-      modal.close();
+      if (document.fullscreenElement || document.webkitFullscreenElement) {
+        if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+        else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+      }
+      videoContainer.classList.remove("flex");
+      videoContainer.classList.add("hidden");
     }
 
-    closeBtn.addEventListener("click", closePlayer);
-    modal.addEventListener("cancel", closePlayer);
-    modal.addEventListener("click", (e) => { if (e.target === modal) closePlayer(); });
+    document.addEventListener("fullscreenchange", () => {
+      if (!document.fullscreenElement && !videoContainer.classList.contains("hidden")) closePlayer();
+    });
+    document.addEventListener("webkitfullscreenchange", () => {
+      if (!document.webkitFullscreenElement && !videoContainer.classList.contains("hidden")) closePlayer();
+    });
 
     document.addEventListener("click", (e) => {
       const btn = e.target.closest("[data-play-uid]");
@@ -340,37 +352,103 @@ const playerDataJson = JSON.stringify(playerMap);
       openPlayer(btn.dataset.playUid);
     });
 
-    // ─── Drag ─────────────────────────────────────────────────────────────────
-    const modalHeader = modal.querySelector(".modal-header");
-    let dragging = false, startX = 0, startY = 0, origLeft = 0, origTop = 0;
+    // ─── Previsualización Inline al enfocar ─────────────────────────────────────
+    const previewVideo = document.createElement("video");
+    previewVideo.muted = true;
+    previewVideo.autoplay = true;
+    previewVideo.setAttribute("playsinline", "");
+    previewVideo.className = "absolute inset-0 w-full h-full object-cover z-[5] bg-black";
 
-    function dragStart(cx, cy) {
-      const rect = modal.getBoundingClientRect();
-      modal.style.transform = "none";
-      modal.style.left = rect.left + "px";
-      modal.style.top  = rect.top  + "px";
-      startX = cx; startY = cy; origLeft = rect.left; origTop = rect.top;
-      dragging = true;
-      document.body.style.userSelect = "none";
+    function closePreview() {
+      if (autoplayTimer) { clearTimeout(autoplayTimer); autoplayTimer = null; }
+      previewVideo.pause();
+      previewVideo.removeAttribute("src");
+      previewVideo.load();
+      if (previewVideo.parentElement) previewVideo.parentElement.removeChild(previewVideo);
     }
-    function dragMove(cx, cy) {
-      if (!dragging) return;
-      const dx = cx - startX, dy = cy - startY;
-      const mw = modal.offsetWidth, mh = modal.offsetHeight;
-      modal.style.left = Math.max(0, Math.min(window.innerWidth  - mw, origLeft + dx)) + "px";
-      modal.style.top  = Math.max(0, Math.min(window.innerHeight - mh, origTop  + dy)) + "px";
+
+    function openPreview(uid, container) {
+      if (isOpening) return;
+      const data = window.__BMV_VIDEOS__[uid];
+      if (!data || !data.url) return;
+      closePreview();
+      previewVideo.src = data.url;
+      container.appendChild(previewVideo);
     }
-    function dragEnd() { if (!dragging) return; dragging = false; document.body.style.userSelect = ""; }
 
-    modalHeader.addEventListener("mousedown", (e) => { if (e.button !== 0) return; e.preventDefault(); dragStart(e.clientX, e.clientY); });
-    window.addEventListener("mousemove", (e) => dragMove(e.clientX, e.clientY));
-    window.addEventListener("mouseup", dragEnd);
+    let autoplayTimer = null;
+    document.addEventListener("focus", (e) => {
+      const focusable = e.target.closest("[data-play-uid]");
+      if (!focusable) return;
+      const videoId = focusable.dataset.playUid;
+      const thumbWrap = focusable.closest(".aspect-video");
+      if (!videoId || !thumbWrap) return;
 
-    modalHeader.addEventListener("touchstart", (e) => { const t = e.touches[0]; dragStart(t.clientX, t.clientY); }, { passive: true });
-    window.addEventListener("touchmove", (e) => { if (!dragging) return; e.preventDefault(); const t = e.touches[0]; dragMove(t.clientX, t.clientY); }, { passive: false });
-    window.addEventListener("touchend", dragEnd);
+      if (autoplayTimer) clearTimeout(autoplayTimer);
+      autoplayTimer = setTimeout(() => {
+        if (document.activeElement === focusable) openPreview(videoId, thumbWrap);
+      }, 1200);
+    }, true);
 
-    const _close = closePlayer;
-    closePlayer = () => { _close(); modal.style.left = ""; modal.style.top = ""; modal.style.transform = ""; };
+    document.addEventListener("blur", (e) => {
+      if (e.target.closest("[data-play-uid]")) closePreview();
+    }, true);
+
+    // ─── Spatial Navigation ───────────────────────────────────────────────────
+    (function() {
+      const FOCUSABLE_SELECTOR = '.focusable';
+      function getSpatialScore(rect1, rect2, direction) {
+        const c1 = { x: rect1.left + rect1.width / 2, y: rect1.top + rect1.height / 2 };
+        const c2 = { x: rect2.left + rect2.width / 2, y: rect2.top + rect2.height / 2 };
+        const dx = c2.x - c1.x, dy = c2.y - c1.y;
+        if (direction === 'ArrowUp' && dy >= 0) return Infinity;
+        if (direction === 'ArrowDown' && dy <= 0) return Infinity;
+        if (direction === 'ArrowLeft' && dx >= 0) return Infinity;
+        if (direction === 'ArrowRight' && dx <= 0) return Infinity;
+        const adx = Math.abs(dx), ady = Math.abs(dy);
+        if (direction === 'ArrowUp' || direction === 'ArrowDown') return ady + (adx * 1.5);
+        return adx + (ady * 1.5);
+      }
+      function navigate(direction) {
+        let current = document.activeElement;
+        const allFocusables = Array.from(document.querySelectorAll(FOCUSABLE_SELECTOR))
+          .filter(el => {
+            const rect = el.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0 && window.getComputedStyle(el).visibility !== 'hidden';
+          });
+        if (!allFocusables.length) return;
+        if (!allFocusables.includes(current)) { allFocusables[0].focus(); return; }
+        const rect1 = current.getBoundingClientRect();
+        let best = null, minScore = Infinity;
+        for (const candidate of allFocusables) {
+          if (candidate === current) continue;
+          const score = getSpatialScore(rect1, candidate.getBoundingClientRect(), direction);
+          if (score < minScore) { minScore = score; best = candidate; }
+        }
+        if (best) {
+          best.focus();
+          best.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+        }
+      }
+      window.addEventListener('keydown', (e) => {
+        const isInput = e.target.id === 'video-search' && e.target.tagName === 'INPUT';
+        if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+          if (isInput && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return;
+          e.preventDefault();
+          navigate(e.key);
+        }
+        if (e.key === 'Enter') {
+          const focused = document.activeElement;
+          if (!focused || !focused.classList.contains('focusable')) return;
+          const native = ['BUTTON', 'A', 'INPUT', 'SELECT', 'TEXTAREA'].includes(focused.tagName);
+          if (!native) focused.click();
+        }
+      });
+      window.addEventListener('load', () => { 
+        const search = document.getElementById('video-search');
+        if (search) search.focus();
+        else document.querySelector(FOCUSABLE_SELECTOR)?.focus();
+      });
+    })();
   </script>
 </Layout>

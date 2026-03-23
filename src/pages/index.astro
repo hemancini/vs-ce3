@@ -10,7 +10,7 @@ export const prerender = false;
     <li>
       <a
         href="/vodscene/videos"
-        class="flex items-center gap-3 bg-vs-surface border border-vs-border rounded-lg px-5 py-3.5 hover:border-blue-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 transition-colors no-underline"
+        class="focusable flex items-center gap-3 bg-vs-surface border border-vs-border rounded-lg px-5 py-3.5 hover:border-blue-400 focus-visible:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 transition-colors no-underline"
         aria-label="Ver todos los videos"
       >
         <span class="text-xl" aria-hidden="true">▶</span>
@@ -25,7 +25,7 @@ export const prerender = false;
     <li>
       <a
         href="/vodscene/participants"
-        class="flex items-center gap-3 bg-vs-surface border border-vs-border rounded-lg px-5 py-3.5 hover:border-blue-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 transition-colors no-underline"
+        class="focusable flex items-center gap-3 bg-vs-surface border border-vs-border rounded-lg px-5 py-3.5 hover:border-blue-400 focus-visible:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 transition-colors no-underline"
         aria-label="Ver todos los participantes"
       >
         <span class="text-xl" aria-hidden="true">👥</span>
@@ -37,6 +37,7 @@ export const prerender = false;
         </div>
       </a>
     </li>
+    </li>
   </ul>
 
   <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3 mt-7">BuyMyVids</h2>
@@ -44,7 +45,7 @@ export const prerender = false;
     <li>
       <a
         href="/buymyvids/videos"
-        class="flex items-center gap-3 bg-vs-surface border border-vs-border rounded-lg px-5 py-3.5 hover:border-blue-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 transition-colors no-underline"
+        class="focusable flex items-center gap-3 bg-vs-surface border border-vs-border rounded-lg px-5 py-3.5 hover:border-blue-400 focus-visible:outline-none focus:ring-2 focus:ring-blue-400 focus:border-blue-400 transition-colors no-underline"
         aria-label="Ver videos de BuyMyVids"
       >
         <span class="text-xl" aria-hidden="true">🎬</span>
@@ -60,19 +61,20 @@ export const prerender = false;
   <ul class="flex flex-col gap-2 list-none p-0" aria-label="Endpoints de la API">
     <li class="flex gap-2 items-baseline text-sm text-gray-400">
       <code class="bg-gray-800 px-1.5 py-px rounded text-[.875em] text-gray-300">GET</code>
-      <a href="/api/vodscene/firestore" class="text-blue-400 hover:text-blue-300 hover:underline">/api/firestore</a>
+      <a href="/api/vodscene/firestore" class="focusable text-blue-400 hover:text-blue-300 hover:underline px-1 focus:ring-2 focus:ring-blue-400 rounded">/api/firestore</a>
       — dump completo de todas las colecciones accesibles
     </li>
     <li class="flex gap-2 items-baseline text-sm text-gray-400">
       <code class="bg-gray-800 px-1.5 py-px rounded text-[.875em] text-gray-300">GET</code>
-      <a href="/api/vodscene/firestore?collection=videos" class="text-blue-400 hover:text-blue-300 hover:underline">/api/firestore?collection=videos</a>
+      <a href="/api/vodscene/firestore?collection=videos" class="focusable text-blue-400 hover:text-blue-300 hover:underline px-1 focus:ring-2 focus:ring-blue-400 rounded">/api/firestore?collection=videos</a>
       — solo la colección <code class="bg-gray-800 px-1.5 py-px rounded text-[.875em] text-gray-300">videos</code>
     </li>
     <li class="flex gap-2 items-baseline text-sm text-gray-400">
       <code class="bg-gray-800 px-1.5 py-px rounded text-[.875em] text-gray-300">GET</code>
-      <a href="/api/vodscene/firestore?collection=participants" class="text-blue-400 hover:text-blue-300 hover:underline">/api/firestore?collection=participants</a>
+      <a href="/api/vodscene/firestore?collection=participants" class="focusable text-blue-400 hover:text-blue-300 hover:underline px-1 focus:ring-2 focus:ring-blue-400 rounded">/api/firestore?collection=participants</a>
       — solo la colección <code class="bg-gray-800 px-1.5 py-px rounded text-[.875em] text-gray-300">participants</code>
     </li>
   </ul>
+
 </Layout>
 
