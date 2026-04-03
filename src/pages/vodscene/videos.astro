@@ -1002,7 +1002,7 @@ const hashtagsJson = JSON.stringify(sortedHashtags);
     let nextVideoIdToPlay = null;
 
     const autoplayOverlay = document.getElementById("autoplay-overlay");
-    const autoplayTimer   = document.getElementById("autoplay-timer");
+    const autoplayTimerEl = document.getElementById("autoplay-timer");
     const btnAutoplayCancel = document.getElementById("autoplay-cancel");
     const btnAutoplayPlayNow = document.getElementById("autoplay-play-now");
     const btnAutoplayPause = document.getElementById("autoplay-pause-resume");
@@ -1108,8 +1108,12 @@ const hashtagsJson = JSON.stringify(sortedHashtags);
         shakaPlayer.configure({
           streaming: {
             bufferingGoal: 30,
-            rebufferingGoal: 10,
+            rebufferingGoal: 2,
             bufferBehind: 60,
+            stallEnabled: true,
+            stallThreshold: 1,
+            stallSkip: 0.1,
+            gapDetectionThreshold: 0.5,
           }
         });
 
@@ -1125,6 +1129,20 @@ const hashtagsJson = JSON.stringify(sortedHashtags);
           const err = event.detail;
           showError("Shaka " + err.code + ": " + (err.message || "error de reproducción"));
         });
+
+        // ─── Watchdog: si el video queda en "waiting" más de 5s, microseek para desatascar ───
+        let stallWatchdog = null;
+        videoEl.addEventListener("waiting", () => {
+          clearTimeout(stallWatchdog);
+          stallWatchdog = setTimeout(() => {
+            if (videoEl.readyState < 3 && !videoEl.paused) {
+              const t = videoEl.currentTime;
+              videoEl.currentTime = t + 0.1;
+            }
+          }, 5000);
+        });
+        videoEl.addEventListener("playing", () => { clearTimeout(stallWatchdog); stallWatchdog = null; });
+        videoEl.addEventListener("pause",   () => { clearTimeout(stallWatchdog); stallWatchdog = null; });
 
         // ─── Request filter: CustomData para EZDRM ─────────────────────
         shakaPlayer.getNetworkingEngine().registerRequestFilter((type, request) => {
@@ -1201,14 +1219,15 @@ const hashtagsJson = JSON.stringify(sortedHashtags);
       currentVideoLi = null;
     }
 
-    // Auto-play: Al terminar un video, reproducir el siguiente del mismo grupo
+    // Auto-play: Al terminar un video, reproducir el anterior del mismo grupo
+    // (los videos están ordenados por fecha descendente, así que "siguiente" = previousElementSibling)
     videoEl.addEventListener('ended', () => {
       if (!currentVideoLi) return;
       
-      let nextLi = currentVideoLi.nextElementSibling;
-      // Buscar el siguiente que no esté oculto por filtros
+      let nextLi = currentVideoLi.previousElementSibling;
+      // Buscar el anterior que no esté oculto por filtros
       while (nextLi && (nextLi.style.display === 'none' || !nextLi.querySelector('[data-video-id]'))) {
-        nextLi = nextLi.nextElementSibling;
+        nextLi = nextLi.previousElementSibling;
       }
 
       if (nextLi) {
@@ -1227,7 +1246,7 @@ const hashtagsJson = JSON.stringify(sortedHashtags);
       autoplaySeconds = 3;
       isAutoplayPaused = false;
       
-      autoplayTimer.textContent = autoplaySeconds;
+      autoplayTimerEl.textContent = autoplaySeconds;
       btnAutoplayPause.textContent = "Pausar";
       btnAutoplayPause.className = "flex-1 px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm font-bold transition-colors border border-white/10";
       
@@ -1237,7 +1256,7 @@ const hashtagsJson = JSON.stringify(sortedHashtags);
       autoplayInterval = setInterval(() => {
         if (!isAutoplayPaused) {
           autoplaySeconds--;
-          autoplayTimer.textContent = Math.max(0, autoplaySeconds);
+          autoplayTimerEl.textContent = Math.max(0, autoplaySeconds);
           if (autoplaySeconds <= 0) {
             const finalId = nextVideoIdToPlay;
             cancelAutoplay();

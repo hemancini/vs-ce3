@@ -190,6 +190,18 @@ const title = video?.title ?? "Reproductor";
           const videoContainer = videoEl.parentElement;
           const player = new shaka.Player(videoEl);
 
+          player.configure({
+            streaming: {
+              bufferingGoal: 30,
+              rebufferingGoal: 2,
+              bufferBehind: 60,
+              stallEnabled: true,
+              stallThreshold: 1,
+              stallSkip: 0.1,
+              gapDetectionThreshold: 0.5,
+            }
+          });
+
           if (shaka.ui && shaka.ui.Overlay) {
             const ui = new shaka.ui.Overlay(player, videoContainer, videoEl);
             ui.configure({ controlPanelElements: ['play_pause','time_and_duration','spacer','mute','volume','fullscreen','overflow_menu'] });
@@ -199,6 +211,19 @@ const title = video?.title ?? "Reproductor";
             const err = e.detail;
             showError("Shaka " + err.code + ": " + (err.message || "error de reproducción"));
           });
+
+          // ─── Watchdog: microseek si el video queda en "waiting" más de 5s ───
+          let stallWatchdog = null;
+          videoEl.addEventListener("waiting", () => {
+            clearTimeout(stallWatchdog);
+            stallWatchdog = setTimeout(() => {
+              if (videoEl.readyState < 3 && !videoEl.paused) {
+                videoEl.currentTime = videoEl.currentTime + 0.1;
+              }
+            }, 5000);
+          });
+          videoEl.addEventListener("playing", () => { clearTimeout(stallWatchdog); stallWatchdog = null; });
+          videoEl.addEventListener("pause",   () => { clearTimeout(stallWatchdog); stallWatchdog = null; });
 
           player.getNetworkingEngine().registerRequestFilter((type, request) => {
             if (type !== shaka.net.NetworkingEngine.RequestType.LICENSE) return;
