@@ -690,6 +690,10 @@ const hashtagsJson = JSON.stringify(sortedHashtags);
                             >
                               {badgeLabel}
                             </span>
+                            <span
+                              class="duration-badge absolute bottom-1.5 left-1.5 z-20 text-[.65rem] font-semibold tabular-nums px-1.5 py-[2px] rounded-[3px] bg-black/75 text-white pointer-events-none hidden"
+                              aria-hidden="true"
+                            />
                             {canPlay && (
                               <div class="group absolute inset-0 flex items-center justify-center hover:bg-black/45 transition-colors">
                                 <button
@@ -2368,6 +2372,72 @@ const hashtagsJson = JSON.stringify(sortedHashtags);
       wrap.addEventListener("mouseleave", () => {
         img.src = original;
       });
+    });
+
+    // ─── Duración: fetch lazy del manifiesto DASH al hacer hover ──────────────
+    const durationCache = new Map(); // videoId -> segundos | null
+    const durationInflight = new Set();
+
+    function parseISODuration(iso) {
+      const m = /PT(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?/.exec(
+        iso,
+      );
+      if (!m || (!m[1] && !m[2] && !m[3])) return null;
+      return (
+        parseFloat(m[1] || 0) * 3600 +
+        parseFloat(m[2] || 0) * 60 +
+        parseFloat(m[3] || 0)
+      );
+    }
+
+    function fmtDuration(total) {
+      total = Math.round(total);
+      const h = Math.floor(total / 3600);
+      const mm = Math.floor((total % 3600) / 60);
+      const ss = total % 60;
+      const pad = (n) => String(n).padStart(2, "0");
+      return h > 0 ? `${h}:${pad(mm)}:${pad(ss)}` : `${mm}:${pad(ss)}`;
+    }
+
+    function showDuration(badge, secs) {
+      if (!badge || !secs) return;
+      badge.textContent = fmtDuration(secs);
+      badge.classList.remove("hidden");
+    }
+
+    async function loadDuration(videoId, badge) {
+      if (durationCache.has(videoId)) {
+        showDuration(badge, durationCache.get(videoId));
+        return;
+      }
+      if (durationInflight.has(videoId)) return;
+      const data = window.__VIDEOS__[videoId];
+      const url = data && (data.dashNoDRM || data.dashDRM);
+      if (!url) {
+        durationCache.set(videoId, null);
+        return;
+      }
+      durationInflight.add(videoId);
+      try {
+        const res = await fetch(url);
+        const txt = await res.text();
+        const m = /mediaPresentationDuration="([^"]+)"/.exec(txt);
+        const secs = m ? parseISODuration(m[1]) : null;
+        durationCache.set(videoId, secs);
+        showDuration(badge, secs);
+      } catch (_) {
+        durationCache.set(videoId, null);
+      } finally {
+        durationInflight.delete(videoId);
+      }
+    }
+
+    document.querySelectorAll(".poster-thumb-wrap").forEach((wrap) => {
+      const badge = wrap.querySelector(".duration-badge");
+      const btn = wrap.querySelector("[data-video-id]");
+      if (!badge || !btn) return;
+      const videoId = btn.dataset.videoId;
+      wrap.addEventListener("mouseenter", () => loadDuration(videoId, badge));
     });
 
     // Drag logic removed

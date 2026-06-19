@@ -303,6 +303,55 @@ const cleanTitle = (title) => {
   // Remember the original order so "Por defecto" can restore it
   cards.forEach((card, i) => card.setAttribute('data-order', String(i)));
 
+  // --- URL state sync ------------------------------------------------------
+  // Map each control to a short query-param key.
+  const urlParamMap = {
+    q: searchInput,
+    actress: actressSelect,
+    category: categorySelect,
+    res: resolutionSelect,
+    sort: sortSelect,
+  };
+
+  const defaultFor = (el) => (el === sortSelect ? 'default' : '');
+
+  // Write the current control values to the URL without adding history entries.
+  const syncUrl = () => {
+    const params = new URLSearchParams(window.location.search);
+    Object.entries(urlParamMap).forEach(([key, el]) => {
+      const value = (el?.value || '').trim();
+      if (value && value !== defaultFor(el)) {
+        params.set(key, value);
+      } else {
+        params.delete(key);
+      }
+    });
+    const qs = params.toString();
+    const newUrl = window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash;
+    window.history.replaceState(null, '', newUrl);
+  };
+
+  // Read the URL params into the controls on load.
+  const restoreFromUrl = () => {
+    const params = new URLSearchParams(window.location.search);
+    Object.entries(urlParamMap).forEach(([key, el]) => {
+      if (!el || !params.has(key)) return;
+      const value = params.get(key) || '';
+      // For selects, fall back to a case-insensitive option match.
+      if (el.tagName === 'SELECT') {
+        el.value = value;
+        if (el.value !== value) {
+          const opt = Array.from(el.options).find(
+            (o) => o.value.toLowerCase() === value.toLowerCase()
+          );
+          if (opt) el.value = opt.value;
+        }
+      } else {
+        el.value = value;
+      }
+    });
+  };
+
   const applySort = () => {
     if (!grid) return;
     const mode = sortSelect?.value || 'default';
@@ -378,11 +427,15 @@ const cleanTitle = (title) => {
     }
   };
 
-  searchInput?.addEventListener('input', applyFilters);
-  actressSelect?.addEventListener('change', applyFilters);
-  categorySelect?.addEventListener('change', applyFilters);
-  resolutionSelect?.addEventListener('change', applyFilters);
-  sortSelect?.addEventListener('change', applySort);
+  // Wrap the handlers so any change also persists to the URL.
+  const onFilterChange = () => { applyFilters(); syncUrl(); };
+  const onSortChange = () => { applySort(); syncUrl(); };
+
+  searchInput?.addEventListener('input', onFilterChange);
+  actressSelect?.addEventListener('change', onFilterChange);
+  categorySelect?.addEventListener('change', onFilterChange);
+  resolutionSelect?.addEventListener('change', onFilterChange);
+  sortSelect?.addEventListener('change', onSortChange);
 
   clearBtn?.addEventListener('click', () => {
     if (searchInput) searchInput.value = '';
@@ -392,6 +445,7 @@ const cleanTitle = (title) => {
     if (sortSelect) sortSelect.value = 'default';
     applySort();
     applyFilters();
+    syncUrl();
   });
 
   // Click on a card category tag -> apply that category filter
@@ -411,6 +465,7 @@ const cleanTitle = (title) => {
       }
 
       applyFilters();
+      syncUrl();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     });
   });
@@ -432,10 +487,13 @@ const cleanTitle = (title) => {
       }
 
       applyFilters();
+      syncUrl();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     });
   });
 
-  // Initialise count
+  // Restore state from the URL, then apply sort + filters.
+  restoreFromUrl();
+  applySort();
   applyFilters();
 </script>
