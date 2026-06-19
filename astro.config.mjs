@@ -1,6 +1,6 @@
 import { defineConfig } from "astro/config";
 import cloudflare from "@astrojs/cloudflare";
-import tailwind from "@astrojs/tailwind";
+import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
   output: "server",
@@ -10,9 +10,23 @@ export default defineConfig({
     platformProxy: { enabled: true },
   }),
 
-  integrations: [tailwind()],
+  vite: {
+    plugins: [tailwindcss()],
+    ssr: {
+      // El scraper (src/pages/api/sheer/scrape.js) usa estas deps de Node solo en
+      // `astro dev`. Las marcamos como externas para que el build de Cloudflare no
+      // intente bundlearlas (fallaría: no existen en Workers).
+      external: ["playwright", "dotenv", "node:fs", "node:path"],
+    },
+  },
 
   server: {
     host: true, // escucha en todas las interfaces (0.0.0.0)
+    watch: {
+      // El scraper escribe estos archivos de datos en runtime.
+      // Sin esto, cada escritura dispara un "[vite] program reload"
+      // en bucle y rompe astro:server-app.js / el HMR (ws).
+      ignored: ["**/videos.json"],
+    },
   },
 });

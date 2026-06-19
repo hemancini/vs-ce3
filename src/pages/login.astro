@@ -3,6 +3,7 @@ export const prerender = false;
 
 // Si ya tiene sesión válida → redirigir al destino o a /
 import { verifyToken, COOKIE_NAME } from "@/lib/auth";
+import "../styles/global.css";
 
 const env = (Astro.locals as App.Locals).runtime?.env;
 const apiKey   = env?.API_KEY ?? import.meta.env.API_KEY ?? "";

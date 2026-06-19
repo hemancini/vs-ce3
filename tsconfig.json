@@ -5,7 +5,7 @@
     "module": "ES2022",
     "moduleResolution": "bundler",
     "lib": ["ES2022", "DOM"],
-    "types": ["@cloudflare/workers-types/2023-07-01", "@astrojs/cloudflare"],
+    "types": ["astro/client", "@cloudflare/workers-types/2023-07-01", "@astrojs/cloudflare"],
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"]

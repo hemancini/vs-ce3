@@ -1,0 +1,200 @@
+---
+import Layout from '../../layouts/Sheer.astro';
+// El JSON generado por el scraper se empaqueta en build-time y actúa como API.
+import videos from '../api/sheer/videos.json';
+
+// Read video ID from query params
+const { searchParams } = Astro.url;
+const postId = searchParams.get('postId');
+
+const video = videos.find(v => v.postId === postId) || null;
+const errorMsg = (!video && postId)
+  ? `El video con ID ${postId} no fue encontrado en el catálogo.`
+  : null;
+
+// Clean title
+const title = video ? (video.title || `Video ${postId}`) : 'Video no encontrado';
+
+// Process sources
+let sources = video?.sources || [];
+// Sort sources descending by size
+sources = [...sources].sort((a, b) => {
+  const sizeA = parseInt(a.size || '0', 10);
+  const sizeB = parseInt(b.size || '0', 10);
+  return sizeB - sizeA;
+});
+
+// Set default best source
+const defaultSource = sources[0] || null;
+---
+
+<Layout title={`${title} - Sheer Player`}>
+  <div class="mx-auto max-w-[1300px] px-6 py-8">
+    <a href="/sheer" class="mb-6 inline-flex items-center gap-2 text-[0.95rem] text-muted transition-all duration-300 hover:-translate-x-1 hover:text-accent">
+      <i class="fa-solid fa-arrow-left"></i> Volver al catálogo
+    </a>
+
+    {errorMsg || !video ? (
+      <div class="mt-16 px-8 py-16 text-center text-[1.2rem] text-danger">
+        <i class="fa-solid fa-triangle-exclamation mb-4 block text-5xl"></i>
+        <p>{errorMsg || 'No se especificó un ID de video válido.'}</p>
+        <a href="/sheer" class="resolution-item mt-6 inline-flex w-auto justify-center">
+          Volver a Inicio
+        </a>
+      </div>
+    ) : (
+      <div class="mt-6 grid grid-cols-1 gap-8 lg:grid-cols-[2.5fr_1fr]">
+        {/* Left Side: Video Player */}
+        <div>
+          <div class="overflow-hidden rounded-3xl border border-line bg-card shadow-[0_10px_30px_rgba(0,0,0,0.5)]">
+            <div class="relative aspect-video w-full bg-black">
+              <div id="play-overlay" class="play-overlay">
+                <img
+                  src={video.poster || ''}
+                  alt={video.title || 'Vista previa'}
+                  class="absolute inset-0 h-full w-full object-cover"
+                />
+                <button class="play-overlay__btn" aria-label="Reproducir video">
+                  <i class="fa-solid fa-play ml-1"></i>
+                </button>
+              </div>
+              <video
+                id="main-video"
+                class="block h-full w-full"
+                controls
+                preload="none"
+                playsinline
+                data-default-src={defaultSource?.src ? defaultSource.src.replace(/&amp;/g, '&') : ''}
+              >
+                Tu navegador no soporta la reproducción de video HTML5.
+              </video>
+            </div>
+
+            <div class="p-8">
+              <h1 class="mb-4 text-[1.6rem] font-bold leading-tight">{video.title || 'Video sin título'}</h1>
+              <div class="mb-6 flex flex-wrap gap-4 border-b border-line pb-6 text-[0.9rem] text-muted [&>span]:flex [&>span]:items-center [&>span]:gap-1.5">
+                <span><i class="fa-solid fa-hashtag"></i> Post ID: {video.postId}</span>
+                {video.duration && <span><i class="fa-solid fa-clock"></i> Duración: {video.duration}</span>}
+                {video.videoId && <span><i class="fa-solid fa-circle-play"></i> Video ID: {video.videoId}</span>}
+                {video.contentId && <span><i class="fa-solid fa-database"></i> Content ID: {video.contentId}</span>}
+                {video.alias && <span><i class="fa-solid fa-user"></i> Alias: {video.alias}</span>}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Right Side: Resolution Selector */}
+        <div>
+          <div class="h-fit rounded-3xl border border-line bg-card p-6">
+            <h2 class="mb-5 flex items-center gap-2 text-[1.1rem] font-bold">
+              <i class="fa-solid fa-sliders"></i> Resoluciones
+            </h2>
+
+            {sources.length === 0 ? (
+              <p class="text-[0.9rem] text-muted">No hay fuentes de video disponibles.</p>
+            ) : (
+              <div class="flex flex-col gap-3">
+                {sources.map((src, index) => {
+                  const cleanUrl = src.src ? src.src.replace(/&amp;/g, '&') : '';
+                  const sizeLabel = src.size ? `${src.size}p` : 'Desconocida';
+                  const isBest = index === 0;
+
+                  return (
+                    <button
+                      class={`resolution-item ${isBest ? 'active' : ''}`}
+                      data-url={cleanUrl}
+                      title={`Reproducir en ${sizeLabel}`}
+                    >
+                      <div class="flex items-center gap-3 font-semibold">
+                        <i class="fa-solid fa-film"></i>
+                        <div>
+                          <div>Calidad {sizeLabel}</div>
+                          {src.bitrate && <div class="text-[0.75rem] text-muted">Bitrate: {(parseInt(src.bitrate)/1000000).toFixed(1)} Mbps</div>}
+                        </div>
+                      </div>
+                      <div class="flex items-center text-[1.1rem] font-bold text-accent">
+                        {isBest && <span class="mr-2 inline-block h-2 w-2 rounded-full bg-accent shadow-[0_0_8px_var(--color-accent)]"></span>}
+                        {src.size ? `${src.size}p` : ''}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    )}
+  </div>
+</Layout>
+
+<script is:inline>
+  document.addEventListener('DOMContentLoaded', () => {
+    const video = document.getElementById('main-video');
+    const overlay = document.getElementById('play-overlay');
+    const resolutionButtons = document.querySelectorAll('.resolution-item');
+
+    // Click-to-play: clicking the poster overlay starts video playback
+    if (overlay && video) {
+      overlay.addEventListener('click', () => {
+        const defaultSrc = video.getAttribute('data-default-src');
+        if (!defaultSrc) return;
+
+        // Load source
+        video.src = defaultSrc;
+        video.load();
+
+        // Hide overlay and show video
+        overlay.classList.add('play-overlay--hidden');
+
+        // Play once ready
+        video.addEventListener('canplay', function onCanPlay() {
+          video.play().catch(err => {
+            console.log('Auto-play prevented:', err);
+          });
+          video.removeEventListener('canplay', onCanPlay);
+        });
+      });
+    }
+
+    // Resolution switching
+    if (video && resolutionButtons.length > 0) {
+      resolutionButtons.forEach(button => {
+        button.addEventListener('click', () => {
+          if (button.classList.contains('active')) return;
+
+          resolutionButtons.forEach(btn => btn.classList.remove('active'));
+          button.classList.add('active');
+          
+          const videoUrl = button.getAttribute('data-url');
+          const currentTime = video.currentTime;
+          const isPlaying = !video.paused;
+          
+          console.log(`Switching resolution. Time: ${currentTime}s, Playing: ${isPlaying}`);
+          
+          video.src = videoUrl;
+          video.load();
+
+          // Also update default-src so overlay logic stays consistent
+          video.setAttribute('data-default-src', videoUrl);
+          
+          // Hide overlay if still visible (user changed resolution before playing)
+          if (overlay && !overlay.classList.contains('play-overlay--hidden')) {
+            overlay.classList.add('play-overlay--hidden');
+          }
+
+          video.addEventListener('loadedmetadata', function onMetadata() {
+            video.currentTime = currentTime;
+            video.removeEventListener('loadedmetadata', onMetadata);
+          });
+
+          if (isPlaying) {
+            video.play().catch(err => {
+              console.log('Auto-play prevented after source switch:', err);
+            });
+          }
+        });
+      });
+    }
+  });
+</script>

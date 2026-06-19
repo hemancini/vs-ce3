@@ -1,0 +1,441 @@
+---
+import Layout from '../../layouts/Sheer.astro';
+// El JSON generado por el scraper se empaqueta en build-time y actúa como API.
+import videos from '../api/sheer/videos.json';
+
+const errorMsg = (!videos || videos.length === 0)
+  ? 'No hay videos. Ejecuta el scraper en local y vuelve a desplegar.'
+  : null;
+
+// Build filter lists (actrices y categorías) from the scraped data
+const actressMap = new Map(); // name -> count
+const categoryMap = new Map(); // alias -> { name, count }
+
+videos.forEach((v) => {
+  (v.models || []).forEach((m) => {
+    if (m && m.name) actressMap.set(m.name, (actressMap.get(m.name) || 0) + 1);
+  });
+  (v.tags || []).forEach((t) => {
+    const key = (t && (t.alias || t.name)) || '';
+    if (!key) return;
+    const cur = categoryMap.get(key) || { name: t.name || key, count: 0 };
+    cur.count += 1;
+    categoryMap.set(key, cur);
+  });
+});
+
+const actresses = [...actressMap.entries()]
+  .map(([name, count]) => ({ name, count }))
+  .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+
+const categories = [...categoryMap.entries()]
+  .map(([alias, o]) => ({ alias, name: o.name, count: o.count }))
+  .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+
+// All resolutions present, for the resolution filter
+const resolutionSet = new Set();
+videos.forEach((v) => (v.sources || []).forEach((s) => s.size && resolutionSet.add(Number(s.size))));
+const resolutions = [...resolutionSet].sort((a, b) => b - a);
+
+const hasFilters = actresses.length > 0 || categories.length > 0;
+
+// Clean title helper
+const cleanTitle = (title) => {
+  return title || 'Video sin título';
+};
+---
+
+<Layout title="Catálogo de Videos - Sheer">
+  <div class="mx-auto max-w-[1300px] px-4 py-6 sm:px-6 sm:py-8">
+    <header class="sticky top-0 z-[100] mb-8 flex flex-wrap items-center justify-between gap-3 border-b border-line bg-[rgba(8,5,15,0.8)] pb-4 backdrop-blur-md sm:mb-12 sm:pb-6">
+      <a href="/sheer" class="text-gradient flex items-center gap-2 text-[1.35rem] font-extrabold tracking-[-0.5px] sm:text-[1.8rem]">
+        <i class="fa-solid fa-play-circle"></i> Sheer Player
+      </a>
+      <div class="flex flex-wrap items-center gap-2 sm:gap-4">
+        {import.meta.env.DEV && (
+          <a
+            href="/sheer/scraper"
+            class="flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full border border-line px-3 py-1.5 text-[0.8rem] font-bold shadow-[0_4px_10px_rgba(138,59,205,0.2)] transition-all duration-300 [background:var(--btn-gradient)] hover:-translate-y-0.5 hover:border-line-hover hover:shadow-[0_6px_15px_rgba(138,59,205,0.4)] sm:px-4 sm:py-2 sm:text-[0.9rem]"
+          >
+            <i class="fa-solid fa-spider"></i> <span class="hidden sm:inline">Consola </span>Scraper
+          </a>
+        )}
+        <div class="shrink-0 whitespace-nowrap rounded-full border border-line bg-card px-3 py-1.5 text-[0.8rem] text-muted sm:px-4 sm:py-2 sm:text-[0.9rem]">
+          <i class="fa-solid fa-video"></i> {videos.length} <span class="hidden sm:inline">videos disponibles</span><span class="sm:hidden">videos</span>
+        </div>
+      </div>
+    </header>
+
+    {errorMsg ? (
+      <div class="px-8 py-16 text-center text-[1.2rem] text-danger">
+        <i class="fa-solid fa-triangle-exclamation mb-4 block text-5xl"></i>
+        <p>{errorMsg}</p>
+      </div>
+    ) : (
+      <>
+        {/* Search bar */}
+        <div class="mb-6 flex gap-4 rounded-2xl border border-line bg-card px-4 py-3 shadow-[inset_0_2px_4px_rgba(0,0,0,0.2)] transition-all duration-300 focus-within:border-line-hover focus-within:shadow-glow sm:mb-10 sm:px-5">
+          <span class="flex items-center text-[1.2rem] text-muted"><i class="fa-solid fa-magnifying-glass"></i></span>
+          <input
+            type="text"
+            id="search"
+            placeholder="Buscar videos por título, ID..."
+            class="w-full border-none bg-transparent text-[1rem] text-ink outline-none placeholder:text-muted sm:text-[1.1rem]"
+            autocomplete="off"
+          />
+        </div>
+
+        {hasFilters && (
+          <div class="mb-8 grid grid-cols-2 items-end gap-3 sm:-mt-4 sm:mb-10 sm:flex sm:flex-wrap sm:gap-4">
+            {actresses.length > 0 && (
+              <div class="flex flex-col gap-1.5">
+                <label class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.5px] text-muted"><i class="fa-solid fa-user-tag"></i> Actriz</label>
+                <select id="filter-actress" class="w-full cursor-pointer rounded-[10px] border border-line bg-card px-3.5 py-2.5 text-[0.9rem] text-ink outline-none transition-all duration-300 hover:border-line-hover focus:border-line-hover sm:min-w-[180px]">
+                  <option value="">Todas ({actresses.length})</option>
+                  {actresses.map((a) => (
+                    <option value={a.name.toLowerCase()}>{a.name} ({a.count})</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {categories.length > 0 && (
+              <div class="flex flex-col gap-1.5">
+                <label class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.5px] text-muted"><i class="fa-solid fa-tags"></i> Categoría</label>
+                <select id="filter-category" class="w-full cursor-pointer rounded-[10px] border border-line bg-card px-3.5 py-2.5 text-[0.9rem] text-ink outline-none transition-all duration-300 hover:border-line-hover focus:border-line-hover sm:min-w-[180px]">
+                  <option value="">Todas ({categories.length})</option>
+                  {categories.map((c) => (
+                    <option value={c.alias}>{c.name} ({c.count})</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {resolutions.length > 0 && (
+              <div class="flex flex-col gap-1.5">
+                <label class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.5px] text-muted"><i class="fa-solid fa-clapperboard"></i> Calidad mín.</label>
+                <select id="filter-resolution" class="w-full cursor-pointer rounded-[10px] border border-line bg-card px-3.5 py-2.5 text-[0.9rem] text-ink outline-none transition-all duration-300 hover:border-line-hover focus:border-line-hover sm:min-w-[180px]">
+                  <option value="">Cualquiera</option>
+                  {resolutions.map((r) => (
+                    <option value={r}>{r}p+</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <div class="flex flex-col gap-1.5">
+              <label class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.5px] text-muted"><i class="fa-solid fa-arrow-down-wide-short"></i> Ordenar</label>
+              <select id="filter-sort" class="w-full cursor-pointer rounded-[10px] border border-line bg-card px-3.5 py-2.5 text-[0.9rem] text-ink outline-none transition-all duration-300 hover:border-line-hover focus:border-line-hover sm:min-w-[180px]">
+                <option value="default">Por defecto</option>
+                <option value="date-desc">Fecha (recientes)</option>
+                <option value="date-asc">Fecha (antiguos)</option>
+                <option value="views-desc">Más vistos</option>
+                <option value="views-asc">Menos vistos</option>
+                <option value="title-asc">Título (A-Z)</option>
+                <option value="title-desc">Título (Z-A)</option>
+                <option value="res-desc">Calidad (mayor)</option>
+                <option value="res-asc">Calidad (menor)</option>
+              </select>
+            </div>
+
+            <button id="filter-clear" class="flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-[10px] border border-line bg-[rgba(255,255,255,0.05)] px-4 py-2.5 text-[0.85rem] text-ink transition-all duration-300 hover:border-line-hover hover:bg-card-hover sm:w-auto sm:justify-start" type="button">
+              <i class="fa-solid fa-xmark"></i> Limpiar
+            </button>
+
+            <div class="col-span-2 self-center text-right text-[0.85rem] font-semibold text-muted sm:col-span-1 sm:ml-auto" id="filter-count"></div>
+          </div>
+        )}
+
+        {videos.length === 0 ? (
+          <div class="px-8 py-16 text-center text-[1.2rem] text-muted">
+            <i class="fa-solid fa-film mb-4 block text-5xl text-muted"></i>
+            <p>No hay videos disponibles en el catálogo.</p>
+          </div>
+        ) : (
+          <div class="grid grid-cols-1 gap-5 sm:grid-cols-[repeat(auto-fill,minmax(310px,1fr))] sm:gap-8" id="video-grid">
+            {videos.map((video) => {
+              // Find resolutions
+              const sizes = video.sources?.map(s => s.size).filter(Boolean) || [];
+              // Sort descending
+              const sortedSizes = sizes.map(Number).sort((a,b) => b-a);
+              const maxRes = sortedSizes[0] ? sortedSizes[0] + 'p' : 'SD';
+              const maxResNum = sortedSizes[0] || 0;
+
+              // Filter metadata
+              const modelNames = (video.models || []).map((m) => m.name).filter(Boolean);
+              const tagAliases = (video.tags || []).map((t) => t.alias || t.name).filter(Boolean);
+              const tagNames = (video.tags || []).map((t) => t.name).filter(Boolean);
+              const tagList = (video.tags || [])
+                .map((t) => ({ name: t.name, alias: t.alias || t.name }))
+                .filter((t) => t.name);
+              const searchBlob = [video.title, ...modelNames, ...tagNames].join(' ').toLowerCase();
+
+              // Views, publish date & duration
+              const views = video.views == null ? null : Number(video.views);
+              const dateStr = video.date || '';
+              const duration = video.duration || '';
+              const dateMs = dateStr ? Date.parse(dateStr) || 0 : 0;
+
+              return (
+                <div
+                  class="video-card group"
+                  data-title={video.title}
+                  data-id={video.postId}
+                  data-search={searchBlob}
+                  data-models={modelNames.join('|').toLowerCase()}
+                  data-tags={tagAliases.join('|').toLowerCase()}
+                  data-res={maxResNum}
+                  data-views={views ?? 0}
+                  data-date={dateMs}
+                  onclick={`window.location.href='/sheer/play?postId=${video.postId}'`}
+                >
+                  <div class="relative aspect-video w-full overflow-hidden bg-black">
+                    <div class="absolute right-3 top-3 rounded-md border border-line bg-[rgba(8,5,15,0.75)] px-2.5 py-1 text-xs font-bold uppercase tracking-[0.5px] text-accent backdrop-blur-md">{maxRes}</div>
+
+                    {duration && (
+                      <div class="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-md border border-line bg-[rgba(8,5,15,0.75)] px-2.5 py-1 text-xs font-bold tracking-[0.5px] text-ink backdrop-blur-md">
+                        <i class="fa-solid fa-clock"></i> {duration}
+                      </div>
+                    )}
+
+                    {video.poster ? (
+                      <img
+                        src={video.poster}
+                        alt={cleanTitle(video.title)}
+                        class="h-full w-full object-cover transition-all duration-300 group-hover:scale-105"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div class="flex h-full w-full flex-col items-center justify-center gap-2 [background:linear-gradient(135deg,#18122B_0%,#0c0817_100%)]">
+                        <i class="fa-solid fa-clapperboard text-[2.5rem] text-white/10"></i>
+                        <span class="text-[0.75rem] font-bold tracking-[1px] text-muted">SHEER CONTENT</span>
+                      </div>
+                    )}
+
+                    <div class="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-all duration-300 group-hover:opacity-100">
+                      <div class="flex h-[54px] w-[54px] scale-[0.8] items-center justify-center rounded-full text-[1.3rem] text-white shadow-[0_4px_15px_rgba(138,59,205,0.4)] transition-all duration-300 [background:var(--primary-gradient)] group-hover:scale-100">
+                        <i class="fa-solid fa-play"></i>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="flex grow flex-col p-5">
+                    <h2 class="mb-3 line-clamp-2 h-[2.8rem] text-base font-semibold leading-snug text-ink" title={video.title}>{cleanTitle(video.title)}</h2>
+
+                    {modelNames.length > 0 && (
+                      <div class="mb-2.5 flex items-center gap-1.5 truncate text-[0.8rem] font-semibold text-accent" title={modelNames.join(', ')}>
+                        <i class="fa-solid fa-user-tag"></i>
+                        <span class="truncate">
+                          {modelNames.map((name, i) => (
+                            <>
+                              {i > 0 && ', '}
+                              <span
+                                class="actress-link cursor-pointer hover:underline"
+                                data-actress={name.toLowerCase()}
+                                title={`Filtrar por ${name}`}
+                              >{name}</span>
+                            </>
+                          ))}
+                        </span>
+                      </div>
+                    )}
+
+                    {tagList.length > 0 && (
+                      <div class="mb-3.5 flex flex-wrap gap-1.5">
+                        {tagList.slice(0, 3).map((t) => (
+                          <span class="cat-tag cursor-pointer transition-colors hover:border-line-hover hover:text-accent" data-cat={t.alias} title={`Filtrar por ${t.name}`}>{t.name}</span>
+                        ))}
+                        {tagList.length > 3 && <span class="cat-tag cat-tag--more">+{tagList.length - 3}</span>}
+                      </div>
+                    )}
+
+                    <div class="mt-auto">
+                      {(dateStr || views != null) && (
+                        <div class="mb-2 flex items-center gap-3 text-[0.75rem] text-muted">
+                          {dateStr && (
+                            <span class="flex items-center gap-1.5"><i class="fa-solid fa-calendar-day"></i> {dateStr}</span>
+                          )}
+                          {views != null && (
+                            <span class="flex items-center gap-1.5"><i class="fa-solid fa-eye"></i> {views.toLocaleString('es')} views</span>
+                          )}
+                        </div>
+                      )}
+
+                      <div class="flex items-center justify-between text-[0.8rem] text-muted">
+                        <span>ID: {video.postId}</span>
+                        <div class="flex gap-1.5">
+                          {sortedSizes.slice(0, 3).map((size) => (
+                            <span class={`res-tag ${size === sortedSizes[0] ? 'res-tag--highlight' : ''}`}>{size}p</span>
+                          ))}
+                          {sortedSizes.length > 3 && <span class="res-tag">+{sortedSizes.length - 3}</span>}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div id="no-results" class="hidden px-8 py-16 text-center text-[1.2rem] text-muted">
+            <i class="fa-solid fa-ban mb-4 block text-5xl text-muted"></i>
+            <p>No se encontraron videos que coincidan con la búsqueda.</p>
+          </div>
+        )}
+      </>
+    )}
+  </div>
+</Layout>
+
+<script is:inline>
+  const searchInput = document.getElementById('search');
+  const cards = Array.from(document.querySelectorAll('.video-card'));
+  const noResults = document.getElementById('no-results');
+  const grid = document.getElementById('video-grid');
+
+  const actressSelect = document.getElementById('filter-actress');
+  const categorySelect = document.getElementById('filter-category');
+  const resolutionSelect = document.getElementById('filter-resolution');
+  const sortSelect = document.getElementById('filter-sort');
+  const clearBtn = document.getElementById('filter-clear');
+  const filterCount = document.getElementById('filter-count');
+
+  // Remember the original order so "Por defecto" can restore it
+  cards.forEach((card, i) => card.setAttribute('data-order', String(i)));
+
+  const applySort = () => {
+    if (!grid) return;
+    const mode = sortSelect?.value || 'default';
+
+    const num = (el, attr) => parseInt(el.getAttribute(attr) || '0', 10) || 0;
+
+    const sorted = [...cards].sort((a, b) => {
+      const titleA = (a.getAttribute('data-title') || '').toLowerCase();
+      const titleB = (b.getAttribute('data-title') || '').toLowerCase();
+      const resA = num(a, 'data-res');
+      const resB = num(b, 'data-res');
+      const viewsA = num(a, 'data-views');
+      const viewsB = num(b, 'data-views');
+      const dateA = num(a, 'data-date');
+      const dateB = num(b, 'data-date');
+      const orderA = num(a, 'data-order');
+      const orderB = num(b, 'data-order');
+
+      switch (mode) {
+        case 'title-asc': return titleA.localeCompare(titleB);
+        case 'title-desc': return titleB.localeCompare(titleA);
+        case 'res-desc': return resB - resA || titleA.localeCompare(titleB);
+        case 'res-asc': return resA - resB || titleA.localeCompare(titleB);
+        case 'views-desc': return viewsB - viewsA || titleA.localeCompare(titleB);
+        case 'views-asc': return viewsA - viewsB || titleA.localeCompare(titleB);
+        case 'date-desc': return dateB - dateA || titleA.localeCompare(titleB);
+        case 'date-asc': return dateA - dateB || titleA.localeCompare(titleB);
+        default: return orderA - orderB;
+      }
+    });
+
+    sorted.forEach((card) => grid.appendChild(card));
+  };
+
+  const applyFilters = () => {
+    const query = (searchInput?.value || '').toLowerCase().trim();
+    const actress = (actressSelect?.value || '').toLowerCase();
+    const category = (categorySelect?.value || '').toLowerCase();
+    const minRes = parseInt(resolutionSelect?.value || '0', 10) || 0;
+
+    let visibleCount = 0;
+
+    cards.forEach((card) => {
+      const blob = card.getAttribute('data-search') || card.getAttribute('data-title') || '';
+      const id = (card.getAttribute('data-id') || '').toLowerCase();
+      const models = (card.getAttribute('data-models') || '').split('|').filter(Boolean);
+      const tags = (card.getAttribute('data-tags') || '').split('|').filter(Boolean);
+      const res = parseInt(card.getAttribute('data-res') || '0', 10) || 0;
+
+      const matchesSearch = !query || blob.includes(query) || id.includes(query);
+      const matchesActress = !actress || models.includes(actress);
+      const matchesCategory = !category || tags.includes(category);
+      const matchesRes = !minRes || res >= minRes;
+
+      if (matchesSearch && matchesActress && matchesCategory && matchesRes) {
+        card.style.display = 'flex';
+        visibleCount++;
+      } else {
+        card.style.display = 'none';
+      }
+    });
+
+    if (filterCount) {
+      filterCount.textContent = `${visibleCount} de ${cards.length}`;
+    }
+
+    if (visibleCount === 0) {
+      if (noResults) noResults.classList.remove('hidden');
+      if (grid) grid.style.display = 'none';
+    } else {
+      if (noResults) noResults.classList.add('hidden');
+      if (grid) grid.style.display = 'grid';
+    }
+  };
+
+  searchInput?.addEventListener('input', applyFilters);
+  actressSelect?.addEventListener('change', applyFilters);
+  categorySelect?.addEventListener('change', applyFilters);
+  resolutionSelect?.addEventListener('change', applyFilters);
+  sortSelect?.addEventListener('change', applySort);
+
+  clearBtn?.addEventListener('click', () => {
+    if (searchInput) searchInput.value = '';
+    if (actressSelect) actressSelect.value = '';
+    if (categorySelect) categorySelect.value = '';
+    if (resolutionSelect) resolutionSelect.value = '';
+    if (sortSelect) sortSelect.value = 'default';
+    applySort();
+    applyFilters();
+  });
+
+  // Click on a card category tag -> apply that category filter
+  document.querySelectorAll('.cat-tag[data-cat]').forEach((tag) => {
+    tag.addEventListener('click', (e) => {
+      e.stopPropagation(); // don't trigger the card navigation
+      if (!categorySelect) return;
+
+      const cat = tag.getAttribute('data-cat') || '';
+      categorySelect.value = cat;
+      // Fallback to a case-insensitive match if the exact value wasn't an option
+      if (categorySelect.value !== cat) {
+        const opt = Array.from(categorySelect.options).find(
+          (o) => o.value.toLowerCase() === cat.toLowerCase()
+        );
+        if (opt) categorySelect.value = opt.value;
+      }
+
+      applyFilters();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  });
+
+  // Click on an actress name -> apply that actress filter
+  document.querySelectorAll('.actress-link[data-actress]').forEach((link) => {
+    link.addEventListener('click', (e) => {
+      e.stopPropagation(); // don't trigger the card navigation
+      if (!actressSelect) return;
+
+      const actress = link.getAttribute('data-actress') || '';
+      actressSelect.value = actress;
+      // Fallback to a case-insensitive match if the exact value wasn't an option
+      if (actressSelect.value !== actress) {
+        const opt = Array.from(actressSelect.options).find(
+          (o) => o.value.toLowerCase() === actress.toLowerCase()
+        );
+        if (opt) actressSelect.value = opt.value;
+      }
+
+      applyFilters();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  });
+
+  // Initialise count
+  applyFilters();
+</script>
