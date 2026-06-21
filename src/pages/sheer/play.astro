@@ -26,6 +26,8 @@ sources = [...sources].sort((a, b) => {
 
 // Set default best source
 const defaultSource = sources[0] || null;
+// Set lowest quality source for preview (fastest seeking)
+const previewSource = sources[sources.length - 1] || sources[0] || null;
 ---
 
 <Layout title={`${title} - Sheer Player`}>
@@ -47,7 +49,7 @@ const defaultSource = sources[0] || null;
         {/* Left Side: Video Player */}
         <div>
           <div class="overflow-hidden rounded-3xl border border-line bg-card shadow-[0_10px_30px_rgba(0,0,0,0.5)]">
-            <div class="relative aspect-video w-full bg-black">
+            <div class="relative aspect-video w-full bg-black group/player overflow-hidden" id="player-container">
               <div id="play-overlay" class="play-overlay">
                 <img
                   src={video.poster || ''}
@@ -58,16 +60,89 @@ const defaultSource = sources[0] || null;
                   <i class="fa-solid fa-play ml-1"></i>
                 </button>
               </div>
+              
               <video
                 id="main-video"
-                class="block h-full w-full"
-                controls
+                class="block h-full w-full cursor-pointer"
                 preload="none"
                 playsinline
                 data-default-src={defaultSource?.src ? defaultSource.src.replace(/&amp;/g, '&') : ''}
+                data-preview-src={previewSource?.src ? previewSource.src.replace(/&amp;/g, '&') : ''}
               >
                 Tu navegador no soporta la reproducción de video HTML5.
               </video>
+
+              <!-- Custom Video Controls -->
+              <div id="custom-controls" class="absolute bottom-0 left-0 right-0 z-20 flex flex-col gap-3 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-4 opacity-0 transition-opacity duration-300 pointer-events-none group-hover/player:opacity-100 group-focus-within/player:opacity-100 controls-visible">
+                
+                <!-- Timeline / Progress Bar -->
+                <div id="timeline-container" class="relative group/timeline flex h-3 w-full cursor-pointer items-center pointer-events-auto select-none">
+                  <!-- Preview Tooltip -->
+                  <div id="preview-tooltip" class="absolute bottom-7 left-0 -translate-x-1/2 pointer-events-none opacity-0 transition-opacity duration-200 flex flex-col items-center gap-1.5 z-30">
+                    <!-- Thumbnail wrapper: canvas shows last frame instantly; hidden video seeks in background -->
+                    <div class="relative w-40 aspect-video rounded-lg border border-[rgba(138,59,205,0.4)] bg-black overflow-hidden shadow-[0_5px_15px_rgba(0,0,0,0.8)]">
+                      <canvas id="preview-canvas" class="absolute inset-0 w-full h-full object-cover"></canvas>
+                      <video id="preview-video" class="absolute inset-0 w-full h-full object-cover opacity-0" preload="metadata" muted playsinline></video>
+                    </div>
+                    <!-- Time stamp -->
+                    <span id="preview-time" class="bg-base/90 text-accent text-xs px-2.5 py-0.5 rounded border border-line font-bold font-mono">00:00</span>
+                  </div>
+
+                  <!-- Timeline Track -->
+                  <div class="h-1 w-full bg-white/20 rounded-full group-hover/timeline:h-2 transition-all duration-150 relative">
+                    <!-- Load progress (buffered) -->
+                    <div id="buffered-bar" class="absolute left-0 top-0 h-full bg-white/10 w-0 rounded-full transition-all duration-150"></div>
+                    <!-- Play progress -->
+                    <div id="progress-bar" class="absolute left-0 top-0 h-full bg-gradient-to-r from-primary to-accent w-0 rounded-full shadow-[0_0_8px_var(--color-accent)]"></div>
+                  </div>
+                  <!-- Scrubber handle -->
+                  <div id="scrubber-handle" class="absolute h-3.5 w-3.5 rounded-full bg-accent border border-white opacity-0 group-hover/timeline:opacity-100 transition-opacity duration-150 shadow-[0_0_10px_rgba(69,231,240,0.8)] -translate-x-1/2 pointer-events-none" style="left: 0%;"></div>
+                </div>
+
+                <!-- Controls Row -->
+                <div class="flex items-center justify-between pointer-events-auto text-ink">
+                  <!-- Left side: Play/Pause, Volume, Time -->
+                  <div class="flex items-center gap-4">
+                    <!-- Play / Pause Button -->
+                    <button id="play-btn" class="cursor-pointer text-xl transition-transform active:scale-95 hover:text-accent" aria-label="Reproducir">
+                      <i class="fa-solid fa-play"></i>
+                    </button>
+
+                    <!-- Volume Container -->
+                    <div class="flex items-center gap-2 group/volume">
+                      <!-- Mute Button -->
+                      <button id="mute-btn" class="cursor-pointer text-lg hover:text-accent" aria-label="Silenciar">
+                        <i class="fa-solid fa-volume-high"></i>
+                      </button>
+                      <!-- Volume Slider -->
+                      <input
+                        type="range"
+                        id="volume-slider"
+                        min="0"
+                        max="1"
+                        step="0.05"
+                        value="1"
+                        class="w-0 group-hover/volume:w-16 transition-all duration-300 origin-left accent-accent cursor-pointer h-1 rounded-full bg-white/20 hover:bg-white/30"
+                      />
+                    </div>
+
+                    <!-- Time display -->
+                    <div class="text-sm font-mono text-muted">
+                      <span id="current-time">0:00</span>
+                      <span class="mx-1">/</span>
+                      <span id="duration-time">0:00</span>
+                    </div>
+                  </div>
+
+                  <!-- Right side: Fullscreen -->
+                  <div class="flex items-center gap-3">
+                    <!-- Fullscreen Button -->
+                    <button id="fullscreen-btn" class="cursor-pointer text-lg hover:text-accent active:scale-95" aria-label="Pantalla completa">
+                      <i class="fa-solid fa-expand"></i>
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <div class="p-8">
@@ -128,37 +203,424 @@ const defaultSource = sources[0] || null;
   </div>
 </Layout>
 
+<style>
+  /* Custom Styles for Video Player */
+  #player-container:hover #custom-controls,
+  #player-container:focus-within #custom-controls,
+  #custom-controls.controls-visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  
+  /* Hide custom controls if overlay is visible */
+  #play-overlay:not(.play-overlay--hidden) ~ #custom-controls {
+    display: none !important;
+  }
+  
+  /* Ensure timeline tooltip transitions are smooth */
+  #preview-tooltip {
+    transition: opacity 0.2s ease, left 0.05s linear;
+  }
+  
+  /* Styling for Volume Slider Range input */
+  #volume-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    height: 4px;
+    outline: none;
+    transition: width 0.3s ease, background 0.3s ease;
+  }
+
+  #volume-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--color-accent);
+    cursor: pointer;
+    box-shadow: 0 0 6px var(--color-accent);
+    transition: transform 0.1s ease;
+  }
+
+  #volume-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.3);
+  }
+
+  #volume-slider::-moz-range-thumb {
+    width: 10px;
+    height: 10px;
+    border: none;
+    border-radius: 50%;
+    background: var(--color-accent);
+    cursor: pointer;
+    box-shadow: 0 0 6px var(--color-accent);
+    transition: transform 0.1s ease;
+  }
+
+  #volume-slider::-moz-range-thumb:hover {
+    transform: scale(1.3);
+  }
+</style>
+
 <script is:inline>
   document.addEventListener('DOMContentLoaded', () => {
     const video = document.getElementById('main-video');
     const overlay = document.getElementById('play-overlay');
     const resolutionButtons = document.querySelectorAll('.resolution-item');
+    
+    // Custom controls elements
+    const playerContainer = document.getElementById('player-container');
+    const customControls = document.getElementById('custom-controls');
+    const playBtn = document.getElementById('play-btn');
+    const muteBtn = document.getElementById('mute-btn');
+    const volumeSlider = document.getElementById('volume-slider');
+    const currentTimeEl = document.getElementById('current-time');
+    const durationTimeEl = document.getElementById('duration-time');
+    const fullscreenBtn = document.getElementById('fullscreen-btn');
+    const timelineContainer = document.getElementById('timeline-container');
+    const progressBar = document.getElementById('progress-bar');
+    const bufferedBar = document.getElementById('buffered-bar');
+    const scrubberHandle = document.getElementById('scrubber-handle');
+    const previewTooltip = document.getElementById('preview-tooltip');
+    const previewVideo = document.getElementById('preview-video');
+    const previewTime = document.getElementById('preview-time');
 
-    // Click-to-play: clicking the poster overlay starts video playback
-    if (overlay && video) {
+    if (!video) return;
+
+    // Preload preview video using the lowest quality source for fastest seek response
+    const previewSrc = video.getAttribute('data-preview-src') || video.getAttribute('data-default-src');
+    if (previewSrc && previewVideo) {
+      previewVideo.src = previewSrc;
+      previewVideo.load();
+    }
+
+    // --- Canvas frame buffer ---
+    // Instead of showing the <video> directly, we draw each rendered frame to a canvas.
+    // This means the canvas keeps the last good frame visible while the video seeks the next one.
+    const previewCanvas = document.getElementById('preview-canvas');
+    let canvasCtx = previewCanvas ? previewCanvas.getContext('2d') : null;
+
+    function drawFrameToCanvas() {
+      if (!canvasCtx || !previewVideo || previewVideo.readyState < 2) return;
+      // Set canvas dimensions to match video
+      if (previewCanvas.width !== previewVideo.videoWidth) {
+        previewCanvas.width = previewVideo.videoWidth || 160;
+        previewCanvas.height = previewVideo.videoHeight || 90;
+      }
+      canvasCtx.drawImage(previewVideo, 0, 0, previewCanvas.width, previewCanvas.height);
+    }
+
+    // --- rAF-throttled seek queue ---
+    // We only issue one fastSeek per animation frame, discarding intermediate positions.
+    let rafPending = false;
+    let pendingPreviewTime = null;
+
+    function seekPreviewVideo(time) {
+      if (!previewVideo) return;
+      pendingPreviewTime = time;
+      if (rafPending) return;
+      rafPending = true;
+      requestAnimationFrame(() => {
+        rafPending = false;
+        if (pendingPreviewTime === null) return;
+        const t = pendingPreviewTime;
+        pendingPreviewTime = null;
+        // fastSeek jumps to nearest keyframe — much faster over network
+        if (typeof previewVideo.fastSeek === 'function') {
+          previewVideo.fastSeek(t);
+        } else {
+          previewVideo.currentTime = t;
+        }
+      });
+    }
+
+    // Draw frame to canvas each time the preview video finishes seeking
+    if (previewVideo) {
+      previewVideo.addEventListener('seeked', drawFrameToCanvas);
+      previewVideo.addEventListener('loadeddata', drawFrameToCanvas);
+    }
+
+    // Helper: format seconds to MM:SS
+    function formatTime(seconds) {
+      if (isNaN(seconds) || !isFinite(seconds)) return '0:00';
+      const mins = Math.floor(seconds / 60);
+      const secs = Math.floor(seconds % 60);
+      return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+    }
+
+    // Toggle Play/Pause
+    function togglePlay() {
+      if (overlay && !overlay.classList.contains('play-overlay--hidden')) {
+        overlay.click();
+        return;
+      }
+      if (video.paused) {
+        video.play().catch(err => console.log('Playback error:', err));
+      } else {
+        video.pause();
+      }
+    }
+
+    // Click on main video triggers play/pause
+    video.addEventListener('click', togglePlay);
+    if (playBtn) playBtn.addEventListener('click', togglePlay);
+
+    // Play/Pause state styling & icon updates
+    video.addEventListener('play', () => {
+      if (playBtn) {
+        const icon = playBtn.querySelector('i');
+        if (icon) icon.className = 'fa-solid fa-pause';
+      }
+      resetIdleTimer();
+    });
+
+    video.addEventListener('pause', () => {
+      if (playBtn) {
+        const icon = playBtn.querySelector('i');
+        if (icon) icon.className = 'fa-solid fa-play';
+      }
+      if (idleTimer) clearTimeout(idleTimer);
+      if (customControls) customControls.classList.add('controls-visible');
+      if (playerContainer) playerContainer.style.cursor = 'default';
+    });
+
+    // Time & duration updates
+    video.addEventListener('loadedmetadata', () => {
+      if (durationTimeEl) durationTimeEl.textContent = formatTime(video.duration);
+    });
+
+    video.addEventListener('timeupdate', () => {
+      if (!video.duration) return;
+      const percent = (video.currentTime / video.duration) * 100;
+      if (progressBar) progressBar.style.width = `${percent}%`;
+      if (scrubberHandle) scrubberHandle.style.left = `${percent}%`;
+      if (currentTimeEl) currentTimeEl.textContent = formatTime(video.currentTime);
+    });
+
+    video.addEventListener('progress', () => {
+      if (!video.duration || video.buffered.length === 0) return;
+      const duration = video.duration;
+      const bufferedEnd = video.buffered.end(video.buffered.length - 1);
+      const percent = (bufferedEnd / duration) * 100;
+      if (bufferedBar) bufferedBar.style.width = `${percent}%`;
+    });
+
+    // Timeline seeking logic
+    let isDragging = false;
+
+    function handleSeek(e) {
+      if (!video.duration || !timelineContainer) return;
+      const rect = timelineContainer.getBoundingClientRect();
+      let clientX = e.clientX;
+      if (e.touches && e.touches[0]) {
+        clientX = e.touches[0].clientX;
+      }
+      const pos = (clientX - rect.left) / rect.width;
+      const percentage = Math.max(0, Math.min(1, pos));
+      video.currentTime = percentage * video.duration;
+    }
+
+    if (timelineContainer) {
+      timelineContainer.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        handleSeek(e);
+      });
+
+      timelineContainer.addEventListener('touchstart', (e) => {
+        isDragging = true;
+        handleSeek(e);
+      }, { passive: true });
+    }
+
+    document.addEventListener('mousemove', (e) => {
+      if (isDragging) handleSeek(e);
+    });
+
+    document.addEventListener('touchmove', (e) => {
+      if (isDragging) handleSeek(e);
+    }, { passive: true });
+
+    document.addEventListener('mouseup', () => {
+      isDragging = false;
+    });
+
+    document.addEventListener('touchend', () => {
+      isDragging = false;
+    });
+
+    // Timeline Hover Preview Thumbnail
+    function handleTimelineHover(e) {
+      if (!video.duration || !timelineContainer || !previewTooltip || !previewVideo || !previewTime) return;
+      
+      const rect = timelineContainer.getBoundingClientRect();
+      let clientX = e.clientX;
+      if (e.touches && e.touches[0]) {
+        clientX = e.touches[0].clientX;
+      }
+      const pos = (clientX - rect.left) / rect.width;
+      const percentage = Math.max(0, Math.min(1, pos));
+      const targetTime = percentage * video.duration;
+
+      // Always use the lowest quality source for preview (data-preview-src)
+      // This is much faster to seek than high-quality streams
+      const previewSrcAttr = video.getAttribute('data-preview-src') || video.getAttribute('data-default-src');
+      if (previewSrcAttr) {
+        const tempAnchor = document.createElement('a');
+        tempAnchor.href = previewSrcAttr;
+        const resolvedPreviewSrc = tempAnchor.href;
+        if (previewVideo.src !== resolvedPreviewSrc) {
+          previewVideo.src = previewSrcAttr;
+          previewVideo.load();
+        }
+      }
+
+      // Update hover frame and timestamp
+      if (!isNaN(targetTime) && isFinite(targetTime)) {
+        seekPreviewVideo(targetTime);
+        previewTime.textContent = formatTime(targetTime);
+      }
+
+      // Calculate relative position and clamp inside timeline boundaries
+      const tooltipWidth = previewTooltip.offsetWidth || 160;
+      const timelineWidth = rect.width;
+      const xOffset = clientX - rect.left;
+      const minX = tooltipWidth / 2;
+      const maxX = timelineWidth - (tooltipWidth / 2);
+      const clampedX = Math.max(minX, Math.min(maxX, xOffset));
+
+      previewTooltip.style.left = `${clampedX}px`;
+      previewTooltip.style.opacity = '1';
+    }
+
+    function hideTimelineHover() {
+      if (previewTooltip) previewTooltip.style.opacity = '0';
+    }
+
+    if (timelineContainer) {
+      timelineContainer.addEventListener('mouseenter', handleTimelineHover);
+      timelineContainer.addEventListener('mousemove', handleTimelineHover);
+      timelineContainer.addEventListener('mouseleave', hideTimelineHover);
+
+      timelineContainer.addEventListener('touchstart', handleTimelineHover, { passive: true });
+      timelineContainer.addEventListener('touchmove', handleTimelineHover, { passive: true });
+      timelineContainer.addEventListener('touchend', hideTimelineHover);
+    }
+
+    // Volume & Mute control
+    if (volumeSlider) {
+      volumeSlider.addEventListener('input', (e) => {
+        const val = parseFloat(e.target.value);
+        video.volume = val;
+        video.muted = (val === 0);
+        updateVolumeIcon(val, video.muted);
+      });
+    }
+
+    if (muteBtn) {
+      muteBtn.addEventListener('click', () => {
+        video.muted = !video.muted;
+        if (volumeSlider) {
+          volumeSlider.value = video.muted ? 0 : video.volume;
+        }
+        updateVolumeIcon(video.volume, video.muted);
+      });
+    }
+
+    function updateVolumeIcon(vol, muted) {
+      if (!muteBtn) return;
+      const icon = muteBtn.querySelector('i');
+      if (!icon) return;
+      icon.className = 'fa-solid';
+      if (muted || vol === 0) {
+        icon.classList.add('fa-volume-xmark');
+      } else if (vol < 0.5) {
+        icon.classList.add('fa-volume-low');
+      } else {
+        icon.classList.add('fa-volume-high');
+      }
+    }
+
+    // Fullscreen Toggle
+    function toggleFullscreen() {
+      if (!playerContainer) return;
+      if (!document.fullscreenElement) {
+        playerContainer.requestFullscreen().catch(err => {
+          console.log(`Error entering fullscreen: ${err.message}`);
+        });
+      } else {
+        document.exitFullscreen();
+      }
+    }
+
+    if (fullscreenBtn) fullscreenBtn.addEventListener('click', toggleFullscreen);
+    video.addEventListener('dblclick', toggleFullscreen);
+
+    document.addEventListener('fullscreenchange', () => {
+      if (!fullscreenBtn) return;
+      const icon = fullscreenBtn.querySelector('i');
+      if (!icon) return;
+      if (document.fullscreenElement) {
+        icon.className = 'fa-solid fa-compress';
+      } else {
+        icon.className = 'fa-solid fa-expand';
+      }
+    });
+
+    // Control Auto-Hide on mouse inactivity (playing state)
+    let idleTimer = null;
+    function resetIdleTimer() {
+      if (!customControls || !playerContainer) return;
+      customControls.classList.add('controls-visible');
+      playerContainer.style.cursor = 'default';
+      
+      if (idleTimer) clearTimeout(idleTimer);
+      
+      if (!video.paused) {
+        idleTimer = setTimeout(() => {
+          customControls.classList.remove('controls-visible');
+          playerContainer.style.cursor = 'none';
+        }, 3000);
+      }
+    }
+
+    if (playerContainer) {
+      playerContainer.addEventListener('mousemove', resetIdleTimer);
+    }
+
+    // Keyboard Spacebar Play/Pause
+    document.addEventListener('keydown', (e) => {
+      if (e.code === 'Space' && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'BUTTON') {
+        e.preventDefault();
+        togglePlay();
+      }
+    });
+
+    // Poster Overlay Play Click handler (overwrites original behavior)
+    if (overlay) {
       overlay.addEventListener('click', () => {
         const defaultSrc = video.getAttribute('data-default-src');
         if (!defaultSrc) return;
 
-        // Load source
         video.src = defaultSrc;
         video.load();
 
-        // Hide overlay and show video
+        // Preview video stays on lowest-quality source (already preloaded)
+        // No need to reload it here
+
         overlay.classList.add('play-overlay--hidden');
 
-        // Play once ready
         video.addEventListener('canplay', function onCanPlay() {
-          video.play().catch(err => {
-            console.log('Auto-play prevented:', err);
-          });
+          video.play().catch(err => console.log('Auto-play prevented:', err));
           video.removeEventListener('canplay', onCanPlay);
         });
       });
     }
 
-    // Resolution switching
-    if (video && resolutionButtons.length > 0) {
+    // Resolution switching logic updates
+    if (resolutionButtons.length > 0) {
       resolutionButtons.forEach(button => {
         button.addEventListener('click', () => {
           if (button.classList.contains('active')) return;
@@ -175,16 +637,18 @@ const defaultSource = sources[0] || null;
           video.src = videoUrl;
           video.load();
 
-          // Also update default-src so overlay logic stays consistent
+          // Note: preview video intentionally NOT changed — it stays on
+          // the lowest quality source (data-preview-src) for fast seeking.
+
           video.setAttribute('data-default-src', videoUrl);
           
-          // Hide overlay if still visible (user changed resolution before playing)
           if (overlay && !overlay.classList.contains('play-overlay--hidden')) {
             overlay.classList.add('play-overlay--hidden');
           }
 
           video.addEventListener('loadedmetadata', function onMetadata() {
             video.currentTime = currentTime;
+            if (durationTimeEl) durationTimeEl.textContent = formatTime(video.duration);
             video.removeEventListener('loadedmetadata', onMetadata);
           });
 
