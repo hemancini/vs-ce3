@@ -1,0 +1,158 @@
+---
+// Página para lanzar el scraper desde la web y ver los logs en tiempo real (SSE).
+---
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LustHub - Scraper</title>
+  <style>
+    body { margin:0; padding:20px; background:#0f0f0f; color:#fff; font-family:system-ui; }
+    h1 { text-align:center; color:#ff4088; }
+    .wrap { max-width:1000px; margin:0 auto; }
+    .nav { text-align:center; margin-bottom:16px; }
+    .nav a { color:#ff4088; text-decoration:none; font-weight:bold; }
+    .controls { background:#1a1a1a; border-radius:12px; padding:18px; display:flex; flex-wrap:wrap; gap:18px; align-items:flex-end; }
+    .field { display:flex; flex-direction:column; gap:6px; font-size:0.85rem; }
+    .field label { color:#aaa; }
+    .field input[type="number"] { width:90px; }
+    input[type="number"], select { background:#0f0f0f; border:1px solid #333; color:#fff; border-radius:6px; padding:8px; }
+    select { cursor:pointer; }
+    .check { flex-direction:row; align-items:center; gap:8px; }
+    .check input { width:18px; height:18px; }
+    .btn { padding:10px 22px; border:none; border-radius:8px; cursor:pointer; font-weight:bold; font-size:0.95rem; }
+    .btn-start { background:#ff4088; color:#fff; }
+    .btn-stop { background:#333; color:#fff; }
+    .btn:disabled { opacity:0.45; cursor:not-allowed; }
+    .status { margin-left:auto; font-size:0.9rem; color:#aaa; display:flex; align-items:center; gap:8px; }
+    .dot { width:10px; height:10px; border-radius:50%; background:#555; }
+    .dot.running { background:#3fb950; animation:pulse 1.2s infinite; }
+    .dot.error { background:#f85149; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+    .console { margin-top:18px; background:#000; border:1px solid #222; border-radius:12px; height:60vh; overflow-y:auto;
+               font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:0.82rem; line-height:1.5; padding:14px; white-space:pre-wrap; word-break:break-word; }
+    .console .err { color:#f85149; }
+    .console .out { color:#d4d4d4; }
+    .console .meta { color:#3fb950; }
+    .console-bar { display:flex; justify-content:space-between; align-items:center; margin-top:18px; margin-bottom:-8px; }
+    .console-bar .small { font-size:0.8rem; color:#777; cursor:pointer; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>🕷️ LustHub - Scraper</h1>
+    <div class="nav"><a href="/ph">← Volver al reproductor</a></div>
+
+    <div class="controls">
+      <div class="field">
+        <label for="source">Fuente</label>
+        <select id="source">
+          <option value="all">Todo</option>
+          <option value="model">Modelo</option>
+          <option value="favorites">Favoritos</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="maxPages">Máx. páginas (0 = todas)</label>
+        <input type="number" id="maxPages" value="0" min="0" />
+      </div>
+      <div class="field">
+        <label for="concurrency">Concurrencia</label>
+        <input type="number" id="concurrency" value="2" min="1" max="6" />
+      </div>
+      <div class="field check">
+        <input type="checkbox" id="skipStreams" />
+        <label for="skipStreams">Omitir streams (rápido)</label>
+      </div>
+      <button class="btn btn-start" id="startBtn">▶ Iniciar</button>
+      <button class="btn btn-stop" id="stopBtn" disabled>■ Detener</button>
+      <div class="status"><span class="dot" id="dot"></span><span id="statusText">Inactivo</span></div>
+    </div>
+
+    <div class="console-bar">
+      <span class="small" id="autoscrollToggle">⬇ Auto-scroll: ON</span>
+      <span class="small" id="clearBtn">🗑 Limpiar</span>
+    </div>
+    <div class="console" id="console"></div>
+  </div>
+
+  <script is:inline>
+    const consoleEl = document.getElementById('console');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const dot = document.getElementById('dot');
+    const statusText = document.getElementById('statusText');
+    const autoscrollToggle = document.getElementById('autoscrollToggle');
+    const clearBtn = document.getElementById('clearBtn');
+
+    let es = null;
+    let autoscroll = true;
+
+    function append(line, kind) {
+      const div = document.createElement('div');
+      div.className = kind || 'out';
+      div.textContent = line;
+      consoleEl.appendChild(div);
+      if (autoscroll) consoleEl.scrollTop = consoleEl.scrollHeight;
+    }
+
+    function setRunning(on) {
+      startBtn.disabled = on;
+      stopBtn.disabled = !on;
+      dot.className = on ? 'dot running' : 'dot';
+      statusText.textContent = on ? 'Ejecutando…' : 'Inactivo';
+    }
+
+    function start() {
+      const maxPages = document.getElementById('maxPages').value || '0';
+      const concurrency = document.getElementById('concurrency').value || '2';
+      const skipStreams = document.getElementById('skipStreams').checked ? '1' : '0';
+      const source = document.getElementById('source').value;
+      const qs = new URLSearchParams({ maxPages, concurrency, skipStreams, source });
+
+      setRunning(true);
+      append('── Conectando al scraper… ──', 'meta');
+
+      es = new EventSource(`/api/ph/scrape-stream?${qs}`);
+
+      es.addEventListener('log', (e) => {
+        const { line, stream } = JSON.parse(e.data);
+        append(line, stream === 'err' ? 'err' : 'out');
+      });
+
+      es.addEventListener('done', (e) => {
+        const { code } = JSON.parse(e.data);
+        append(`── Proceso finalizado (código ${code}) ──`, code === 0 ? 'meta' : 'err');
+        if (code !== 0) { dot.className = 'dot error'; statusText.textContent = 'Error'; }
+        stop(false);
+      });
+
+      es.onerror = () => {
+        // EventSource reintenta solo; si el server cerró el stream tras 'done'
+        // esto es esperado. Solo lo tratamos como error si seguíamos corriendo.
+        if (es && es.readyState === EventSource.CLOSED && !startBtn.disabled === false) {
+          append('── Conexión perdida ──', 'err');
+        }
+        stop(false);
+      };
+    }
+
+    function stop(closeOnly) {
+      if (es) { es.close(); es = null; }
+      setRunning(false);
+      if (closeOnly) append('── Detenido por el usuario ──', 'err');
+    }
+
+    startBtn.addEventListener('click', start);
+    stopBtn.addEventListener('click', () => stop(true));
+    autoscrollToggle.addEventListener('click', () => {
+      autoscroll = !autoscroll;
+      autoscrollToggle.textContent = `⬇ Auto-scroll: ${autoscroll ? 'ON' : 'OFF'}`;
+    });
+    clearBtn.addEventListener('click', () => { consoleEl.innerHTML = ''; });
+    window.addEventListener('beforeunload', () => { if (es) es.close(); });
+  </script>
+</body>
+</html>

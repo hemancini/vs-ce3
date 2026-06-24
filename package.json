@@ -19,9 +19,10 @@
   "devDependencies": {
     "@astrojs/check": "^0.9.6",
     "@cloudflare/workers-types": "^4.20260301.1",
+    "node-html-parser": "^8.0.3",
     "puppeteer-core": "^24.37.5",
     "typescript": "^5.0.0",
-    "wrangler": "^3.0.0"
+    "wrangler": "^4.104.0"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
