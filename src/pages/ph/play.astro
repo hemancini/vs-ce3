@@ -1,0 +1,106 @@
+---
+// Página de reproducción individual: /ph/play?viewkey=XXXX
+// Pide los streams frescos a /api/ph/stream.json y reproduce vía hls.js a través
+// del proxy (mismo origen). El título se busca en los catálogos ya generados.
+import '../../styles/global.css';
+---
+
+<!DOCTYPE html>
+<html lang="es" class="bg-vs-bg">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LustHub - Reproducir</title>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js"></script>
+</head>
+<body class="m-0 bg-black text-white font-sans min-h-screen">
+  <div class="w-full max-w-[1400px] mx-auto p-4 flex flex-col gap-3">
+    <!-- Player 16:9 responsive, limitado por el alto del viewport: el ancho se
+         capa para que el alto (56.25% del ancho) no supere 82vh. -->
+    <div class="mx-auto w-full" style="max-width: min(100%, calc(82vh * 16 / 9));">
+      <div class="relative w-full pt-[56.25%] bg-black rounded-lg overflow-hidden">
+        <video id="video" class="absolute inset-0 w-full h-full bg-black" controls autoplay playsinline></video>
+      </div>
+    </div>
+    <h1 id="title" class="text-lg font-semibold m-0">Cargando…</h1>
+    <p id="status" class="text-sm text-gray-400 m-0 min-h-4"></p>
+    <div class="flex flex-wrap gap-3">
+      <a id="open-original" target="_blank" rel="noopener" class="px-4 py-2 bg-vs-pink text-white rounded-md no-underline font-semibold">Abrir en Pornhub</a>
+      <a href="/ph" class="px-4 py-2 bg-vs-surface border border-vs-border text-gray-300 rounded-md no-underline hover:text-white">← Volver al reproductor</a>
+    </div>
+  </div>
+
+  <script is:inline>
+    const params = new URLSearchParams(location.search);
+    const vkey = params.get('viewkey') || params.get('vkey');
+    const videoEl = document.getElementById('video');
+    const titleEl = document.getElementById('title');
+    const statusEl = document.getElementById('status');
+    const openBtn = document.getElementById('open-original');
+    let hls = null;
+
+    // Mismo proxy que el reproductor principal: evita CORS y añade el Referer.
+    const proxied = (u) => `/api/ph/proxy?url=${encodeURIComponent(u)}`;
+
+    if (!vkey) {
+      titleEl.textContent = 'Falta el parámetro ?viewkey=';
+    } else {
+      openBtn.href = `https://es.pornhub.com/view_video.php?viewkey=${vkey}`;
+      loadTitle(vkey);
+      play(vkey);
+    }
+
+    function loadStreams(streams) {
+      if (hls) { hls.destroy(); hls = null; }
+      if (!streams || !streams.length) { statusEl.textContent = 'Sin streams disponibles.'; return; }
+
+      const m3u8 = streams.find(s => s.videoUrl && s.videoUrl.includes('.m3u8'));
+      if (m3u8) {
+        if (window.Hls && Hls.isSupported()) {
+          hls = new Hls();
+          hls.loadSource(proxied(m3u8.videoUrl));
+          hls.attachMedia(videoEl);
+          hls.on(Hls.Events.ERROR, (_e, data) => {
+            if (data.fatal) statusEl.textContent = 'El stream caducó o no está disponible. Usa «Abrir en Pornhub».';
+          });
+        } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+          videoEl.src = proxied(m3u8.videoUrl);
+        }
+        return;
+      }
+
+      const mp4 = streams.find(s => s.videoUrl && /\.mp4(\?|$)/.test(s.videoUrl));
+      if (mp4) { videoEl.src = proxied(mp4.videoUrl); return; }
+
+      statusEl.textContent = 'Sin streams reproducibles.';
+    }
+
+    async function play(vk) {
+      statusEl.textContent = 'Obteniendo stream…';
+      try {
+        const res = await fetch(`/api/ph/stream.json?vkey=${encodeURIComponent(vk)}`);
+        const data = await res.json();
+        statusEl.textContent = '';
+        loadStreams(data.streams);
+      } catch (e) {
+        statusEl.textContent = 'Error al cargar el stream.';
+      }
+    }
+
+    // Busca el título en los catálogos ya generados (modelo + favoritos).
+    async function loadTitle(vk) {
+      try {
+        const lists = await Promise.all([
+          fetch('/api/ph/videos.json').then(r => r.json()).catch(() => []),
+          fetch('/api/ph/favorites.json').then(r => r.json()).catch(() => []),
+        ]);
+        const v = lists.flat().find(x => x.vkey === vk);
+        titleEl.textContent = v ? v.title : vk;
+        if (v) document.title = 'LustHub - ' + v.title;
+      } catch {
+        titleEl.textContent = vk;
+      }
+    }
+  </script>
+</body>
+</html>

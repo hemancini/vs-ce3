@@ -3,7 +3,8 @@
  *
  * Extrae los metadatos de todos los videos del modelo Nico Grey en Pornhub
  * incluyendo las URLs directas del stream (HLS m3u8 por calidad + mp4), y los
- * guarda en src/pages/api/ph/videos.json.
+ * guarda en src/pages/api/ph replicando la ruta del listado
+ * (p. ej. /model/nico-grey/videos → src/pages/api/ph/model/nico-grey/videos.json).
  *
  * Usa fetch() + node-html-parser (sin navegador): el HTML server-side de Pornhub
  * ya trae el listado y los flashvars con mediaDefinitions. Solo hace falta enviar
@@ -29,15 +30,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BASE_URL = 'https://es.pornhub.com';
 const API_DIR = path.resolve(__dirname, '../../src/pages/api/ph');
 
-// Fuentes a scrapear. Cada una tiene su listado, cookies y JSON de salida. Los
-// JSON se generan dentro de src/pages/api/ph para servirlos como API
-// (/api/ph/videos.json, /api/ph/favorites.json) y empaquetarlos en el build.
+// Fuentes a scrapear. Cada una tiene su listado y cookies; el JSON de salida se
+// genera replicando la ruta del listado dentro de src/pages/api/ph para servirlo
+// como API y empaquetarlo en el build.
 const SOURCES = {
   model: {
     label: 'Modelo (nico-grey)',
     listUrl: `${BASE_URL}/model/nico-grey/videos`,
     cookiesPath: path.resolve(__dirname, 'cookies.json'),
-    output: path.join(API_DIR, 'videos.json'),
   },
   favorites: {
     label: 'Favoritos',
@@ -46,9 +46,20 @@ const SOURCES = {
     // `o=newest` para que `?page=N` devuelva la página correcta (si no, da 403).
     query: 'o=newest',
     cookiesPath: path.resolve(__dirname, 'cookies-fav.json'),
-    output: path.join(API_DIR, 'favorites.json'),
+    // La ruta del listado es /users/77b53b8/videos/favorites; la simplificamos a
+    // <userId>/favorites para el JSON de salida.
+    outputRoute: '77b53b8/favorites',
   },
 };
+
+// El JSON de cada fuente se genera replicando su ruta dentro de src/pages/api/ph.
+// Por defecto se usa el pathname del listado (p. ej. /model/nico-grey/videos →
+// src/pages/api/ph/model/nico-grey/videos.json); una fuente puede sobrescribir la
+// ruta con `outputRoute`.
+for (const src of Object.values(SOURCES)) {
+  const route = src.outputRoute ?? new URL(src.listUrl).pathname;
+  src.output = `${path.join(API_DIR, ...route.replace(/^\/+|\/+$/g, '').split('/'))}.json`;
+}
 
 // Construye la URL de la página N de un listado (incluye el query extra si lo hay).
 const buildPageUrl = (src, n) => `${src.listUrl}?${src.query ? `${src.query}&` : ''}page=${n}`;
@@ -322,6 +333,7 @@ async function scrapeSource(src) {
     throw new Error(`0 videos extraídos. No se sobrescribe ${path.basename(src.output)}.`);
   }
 
+  fs.mkdirSync(path.dirname(src.output), { recursive: true });
   fs.writeFileSync(src.output, JSON.stringify(unique, null, 2), 'utf8');
   console.log(`\n🎉  [${src.label}] ${unique.length} videos guardados en:\n   ${src.output}`);
 }

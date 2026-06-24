@@ -12,7 +12,7 @@
 // Si la extracción falla, caemos a los streams guardados en videos.json (pueden
 // estar caducados, pero evita el 500).
 
-import storedVideos from './videos.json';
+import storedVideos from './model/nico-grey/videos.json';
 import rawCookies from '../../../../scripts/ph/cookies.json';
 
 export const prerender = false;

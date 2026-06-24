@@ -1,0 +1,24 @@
+---
+interface Props {
+  title: string;
+  noAuth?: boolean;
+}
+const { title = "LustHub - Reproductor", noAuth = false } = Astro.props;
+import "../styles/global.css";
+---
+
+<!doctype html>
+<html lang="es" class="bg-vs-bg">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{title}</title>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js"
+    ></script>
+  </head>
+  <body
+    class="min-h-screen w-full max-w-[1600px] mx-auto bg-vs-bg text-gray-300 font-sans p-4 md:p-8"
+  >
+    <slot />
+  </body>
+</html>

@@ -6,6 +6,8 @@ interface Props {
 }
 const { title = 'vodscene', noAuth = false } = Astro.props;
 import '../styles/global.css';
+
+const isDev =import.meta.env.DEV;
 ---
 <!DOCTYPE html>
 <html lang="es" class="bg-vs-bg">
@@ -18,8 +20,8 @@ import '../styles/global.css';
 </head>
 <body class="min-h-screen bg-vs-bg text-gray-300 font-sans p-8">
 
-  {!noAuth && (
-    <script>
+  {!isDev && !noAuth && (
+    <script is:inline>
       /**
        * Guarda de sesión del lado del cliente.
        * sessionStorage se borra automáticamente al cerrar la ventana/pestaña,
