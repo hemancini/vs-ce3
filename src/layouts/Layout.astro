@@ -18,7 +18,7 @@ const isDev =import.meta.env.DEV;
   <title>{title}</title>
   <slot name="head" />
 </head>
-<body class="min-h-screen bg-vs-bg text-gray-300 font-sans p-8">
+<body class="min-h-screen w-full mx-auto bg-vs-bg text-gray-300 font-sans p-4 md:p-8">
 
   {!isDev && !noAuth && (
     <script is:inline>

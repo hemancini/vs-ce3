@@ -13,7 +13,7 @@
 // estar caducados, pero evita el 500).
 
 import storedVideos from './model/nico-grey/videos.json';
-import rawCookies from '../../../../scripts/ph/cookies.json';
+import rawCookiesFallback from '../../../../scripts/ph/cookies.json';
 
 export const prerender = false;
 
@@ -31,8 +31,13 @@ const AGE_COOKIES = {
   platform: 'pc',
 };
 
-function cookieHeader() {
-  const pairs = rawCookies.map((c) => `${c.name}=${c.value}`);
+async function cookieHeader(env) {
+  let cookies = rawCookiesFallback;
+  try {
+    const raw = await env?.VS_C3_KV?.get('ph:cookies');
+    if (raw) cookies = JSON.parse(raw);
+  } catch {}
+  const pairs = cookies.map((c) => `${c.name}=${c.value}`);
   for (const [k, v] of Object.entries(AGE_COOKIES)) pairs.push(`${k}=${v}`);
   return pairs.join('; ');
 }
@@ -68,6 +73,65 @@ const json = (data, status = 200) =>
     },
   });
 
+// Extras de los flashvars que alimentan los controles personalizados del player:
+// los sprites de scrubbing (vista previa), la gráfica de popularidad (hotspots),
+// los marcadores de acción y la duración. Todo opcional: si falta, el player
+// degrada con elegancia (sin preview/hotspots/tags).
+function parseExtras(fv) {
+  const thumbs =
+    fv.thumbs && typeof fv.thumbs === 'object'
+      ? {
+          samplingFrequency: Number(fv.thumbs.samplingFrequency) || 0,
+          urlPattern: fv.thumbs.urlPattern || '',
+          spritePatterns: Array.isArray(fv.thumbs.spritePatterns) ? fv.thumbs.spritePatterns : [],
+        }
+      : null;
+
+  const hotspots = Array.isArray(fv.hotspots) ? fv.hotspots.map(Number).filter(Number.isFinite) : [];
+
+  // "Fingering:65,Missionary:428" → [{ label: 'Fingering', time: 65 }, …]
+  const actionTags =
+    typeof fv.actionTags === 'string' && fv.actionTags
+      ? fv.actionTags
+          .split(',')
+          .map((p) => {
+            const i = p.lastIndexOf(':');
+            return { label: p.slice(0, i).trim(), time: Number(p.slice(i + 1)) };
+          })
+          .filter((t) => t.label && Number.isFinite(t.time))
+      : [];
+
+  return {
+    duration: Number(fv.video_duration) || 0,
+    thumbs: thumbs && (thumbs.spritePatterns.length || thumbs.urlPattern) ? thumbs : null,
+    hotspots,
+    actionTags,
+  };
+}
+
+// Estado de favoritos del usuario logueado, leído del bloque GS_LIKE_FAV que PH
+// embebe en la página. Sirve para pintar el corazón con el estado correcto sin
+// una petición extra. Si no hay sesión (loggedIn=0) el botón se oculta.
+function parseFavorite(html) {
+  const m = html.match(/GS_LIKE_FAV\s*=\s*\{([\s\S]*?)\}\s*;/);
+  const scope = m ? m[1] : html;
+  const id = (scope.match(/"itemId(?:Num)?":(\d+)/) || html.match(/"video_id":(\d+)/) || [])[1];
+  if (!id) return null;
+  const isFav = (scope.match(/"isFavourite":(\d+)/) || [])[1];
+  const loggedIn = (scope.match(/"loggedIn":(\d+)/) || html.match(/"isLoggedIn":(\d+)/) || [])[1];
+  return { id: Number(id), isFavourite: isFav === '1', loggedIn: loggedIn === '1' };
+}
+
+// Estado de suscripción al canal/modelo del uploader, leído del botón de
+// suscripción que PH embebe (`data-subscribe-url` + `data-subscribed`). null si
+// el video no tiene un uploader suscribible.
+function parseSubscribe(html) {
+  const url = (html.match(/data-subscribe-url="([^"]+)"/) || [])[1];
+  if (!url) return null;
+  const subscribed = (html.match(/data-subscribed="(\d)"/) || [])[1] === '1';
+  return { subscribed };
+}
+
 function parseStreams(mediaDefs) {
   return mediaDefs
     .filter((d) => typeof d.videoUrl === 'string' && d.videoUrl.length > 0)
@@ -82,7 +146,8 @@ function parseStreams(mediaDefs) {
     }));
 }
 
-export const GET = async ({ url }) => {
+export const GET = async ({ url, locals }) => {
+  const env = locals?.runtime?.env;
   const params = url.searchParams;
   const vkey = params.get('vkey');
   let pageUrl = params.get('url');
@@ -93,7 +158,7 @@ export const GET = async ({ url }) => {
 
   try {
     const res = await fetch(pageUrl, {
-      headers: { ...BROWSER_HEADERS, cookie: cookieHeader() },
+      headers: { ...BROWSER_HEADERS, cookie: await cookieHeader(env) },
       redirect: 'follow',
     });
     const html = await res.text();
@@ -109,18 +174,24 @@ export const GET = async ({ url }) => {
       });
     }
 
-    let mediaDefs;
+    let fv;
     try {
-      mediaDefs = JSON.parse(m[1]).mediaDefinitions ?? [];
+      fv = JSON.parse(m[1]);
     } catch (e) {
       return json({ streams: stored(), source: 'stored', error: 'flashvars no parseable: ' + e.message });
     }
 
-    const streams = parseStreams(mediaDefs);
+    const streams = parseStreams(fv.mediaDefinitions ?? []);
     if (!streams.length) {
       return json({ streams: stored(), source: 'stored', error: 'mediaDefinitions sin videoUrl' });
     }
-    return json({ streams, source: 'fresh' });
+    return json({
+      streams,
+      source: 'fresh',
+      ...parseExtras(fv),
+      favorite: parseFavorite(html),
+      subscribe: parseSubscribe(html),
+    });
   } catch (err) {
     return json({ streams: stored(), source: 'stored', error: err.message });
   }

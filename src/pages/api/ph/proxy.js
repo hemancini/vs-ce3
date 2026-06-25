@@ -24,6 +24,13 @@ const PASS_HEADERS = {
 
 const wrap = (absUrl) => `${SELF}?url=${encodeURIComponent(absUrl)}`;
 
+// El CDN de PH a veces responde 200 con cuerpo vacío para el manifiesto (.m3u8),
+// un fallo transitorio externo. Reintentamos la descarga del manifiesto hasta 3
+// veces antes de rendirnos para que el reproductor no falle a la primera.
+const MANIFEST_FETCH_ATTEMPTS = 3;
+const RETRY_BASE_MS = 300;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 // Reescribe un manifiesto m3u8 para que todas las URIs pasen por el proxy.
 function rewriteManifest(text, baseUrl) {
   const resolve = (u) => new URL(u, baseUrl).toString();
@@ -66,6 +73,46 @@ export const GET = async ({ url, request }) => {
   const range = request.headers.get('range');
   if (range) fwdHeaders['range'] = range;
 
+  // ¿Esperamos un manifiesto? Lo sabemos por la extensión de la URL pedida; así
+  // podemos reintentar la descarga ante un cuerpo vacío del CDN (fallo externo).
+  const isManifestUrl = /\.m3u8(\?|$)/.test(parsed.pathname + parsed.search);
+
+  const baseHeaders = {
+    'access-control-allow-origin': '*',
+    'cache-control': 'no-store',
+  };
+
+  // ── Manifiestos (.m3u8): descargar el texto reintentando si llega vacío ──
+  if (isManifestUrl) {
+    let lastErr = '';
+    for (let attempt = 1; attempt <= MANIFEST_FETCH_ATTEMPTS; attempt++) {
+      let upstream;
+      try {
+        upstream = await fetch(target, { headers: fwdHeaders, redirect: 'follow' });
+      } catch (err) {
+        lastErr = 'Error upstream: ' + err.message;
+        if (attempt < MANIFEST_FETCH_ATTEMPTS) { await sleep(RETRY_BASE_MS * attempt); continue; }
+        return new Response(lastErr, { status: 502 });
+      }
+
+      const body = await upstream.text();
+      // Cuerpo vacío (o solo espacios) = fallo transitorio del CDN: reintentamos.
+      if (!body.trim()) {
+        lastErr = `Manifiesto vacío del CDN (intento ${attempt}/${MANIFEST_FETCH_ATTEMPTS})`;
+        if (attempt < MANIFEST_FETCH_ATTEMPTS) { await sleep(RETRY_BASE_MS * attempt); continue; }
+        return new Response(lastErr, { status: 502 });
+      }
+
+      // upstream.url refleja la URL final tras redirecciones: base correcta para resolver.
+      const rewritten = rewriteManifest(body, upstream.url || target);
+      return new Response(rewritten, {
+        status: 200,
+        headers: { ...baseHeaders, 'content-type': 'application/vnd.apple.mpegurl' },
+      });
+    }
+  }
+
+  // ── Segmentos / mp4: una sola descarga, passthrough binario ──
   let upstream;
   try {
     upstream = await fetch(target, { headers: fwdHeaders, redirect: 'follow' });
@@ -73,26 +120,6 @@ export const GET = async ({ url, request }) => {
     return new Response('Error upstream: ' + err.message, { status: 502 });
   }
 
-  const ct = upstream.headers.get('content-type') || '';
-  const isManifest =
-    ct.includes('mpegurl') || /\.m3u8(\?|$)/.test(parsed.pathname + parsed.search);
-
-  const baseHeaders = {
-    'access-control-allow-origin': '*',
-    'cache-control': 'no-store',
-  };
-
-  if (isManifest) {
-    const body = await upstream.text();
-    // upstream.url refleja la URL final tras redirecciones: base correcta para resolver.
-    const rewritten = rewriteManifest(body, upstream.url || target);
-    return new Response(rewritten, {
-      status: 200,
-      headers: { ...baseHeaders, 'content-type': 'application/vnd.apple.mpegurl' },
-    });
-  }
-
-  // Segmentos / mp4: passthrough del stream binario.
   const headers = { ...baseHeaders };
   for (const h of ['content-type', 'content-length', 'content-range', 'accept-ranges']) {
     const v = upstream.headers.get(h);

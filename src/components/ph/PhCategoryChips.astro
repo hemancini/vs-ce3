@@ -1,0 +1,60 @@
+---
+// Accesos rápidos entre categorías + indicador de total de vídeos.
+// Replica la barra de chips de Pornhub ("Mostrando … de 20000" + categorías
+// relacionadas) en /ph/categories/<slug> y /ph/video?c=<id>.
+interface Chip {
+  id: string;
+  slug: string;
+  label: string;
+  href: string;
+}
+interface Props {
+  chips?: Chip[];
+  activeId?: string;   // id de la categoría activa (/video?c=<id>)
+  activeSlug?: string; // slug de la categoría activa (/categories/<slug>)
+  total?: number;      // total de vídeos de la categoría (indicador)
+}
+const { chips = [], activeId = "", activeSlug = "", total = 0 } = Astro.props;
+const totalFmt = total > 0 ? total.toLocaleString("es-ES") : "";
+---
+
+{(chips.length > 0 || total > 0) && (
+  <section class="max-w-[1600px] mx-auto mb-4">
+    {total > 0 && (
+      <p class="flex items-center gap-1.5 text-sm text-gray-400 mb-2">
+        <span aria-hidden="true">📊</span>
+        <span class="text-gray-300 font-medium tabular-nums">{totalFmt}</span> vídeos en esta categoría
+      </p>
+    )}
+
+    {chips.length > 0 && (
+      <div
+        id="cat-chips"
+        class="flex gap-2 overflow-x-auto pb-2 -mx-2 px-2 [scrollbar-width:thin] [-webkit-overflow-scrolling:touch]"
+      >
+        {chips.map((c) => {
+          const active =
+            (!!activeId && c.id === activeId) || (!!activeSlug && c.slug === activeSlug);
+          return (
+            <a
+              href={c.href}
+              data-active={active ? "1" : undefined}
+              class:list={[
+                "shrink-0 px-3 py-1.5 rounded-full text-sm no-underline border whitespace-nowrap transition-colors",
+                active
+                  ? "bg-vs-pink text-white border-vs-pink font-semibold"
+                  : "bg-vs-surface text-gray-300 border-vs-border hover:text-white hover:border-vs-pink",
+              ]}
+            >{c.label}</a>
+          );
+        })}
+      </div>
+    )}
+  </section>
+)}
+
+<script is:inline>
+  // Desplaza el chip activo a la vista (queda centrado en la barra horizontal).
+  const active = document.querySelector("#cat-chips a[data-active]");
+  if (active) active.scrollIntoView({ inline: "center", block: "nearest" });
+</script>

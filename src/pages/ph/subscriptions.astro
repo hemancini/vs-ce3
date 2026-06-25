@@ -1,0 +1,86 @@
+---
+// Feed de videos de mis suscripciones: /ph/subscriptions
+// → https://es.pornhub.com/subscriptions
+// A diferencia de /ph/users/<id>/subscriptions (lista de canales/modelos), esta
+// página es el feed de VIDEOS de las cuentas a las que el usuario está suscrito.
+// Requiere cookies de sesión (las de KV en runtime).
+import Layout from "../../layouts/Ph.astro";
+import PhHeader from "../../components/ph/PhHeader.astro";
+import PhScraperControls from "../../components/ph/PhScraperControls.astro";
+import VideoGrid from "../../components/ph/VideoGrid.astro";
+import { scrapeSource } from "../../lib/ph/scraper.js";
+
+export const prerender = false;
+
+const env = (Astro.locals as any)?.runtime?.env;
+
+const params = Astro.url.searchParams;
+const pages = Math.min(Math.max(parseInt(params.get("paginas") || "1", 10) || 1, 1), 20);
+const q = (params.get("q") || "").trim();
+const withStreams = params.get("streams") === "1";
+
+const listUrl = "https://es.pornhub.com/subscriptions";
+
+let videos = [];
+let totalPages = 0;
+let error = null;
+let authenticated = true;
+const startedAt = Date.now();
+
+try {
+  const result = await scrapeSource({ listUrl, label: "Mis Suscripciones", maxPages: pages, withStreams, env });
+  videos = result.videos;
+  totalPages = result.totalPages;
+  authenticated = result.authenticated;
+} catch (e) {
+  error = e.message;
+}
+
+// El feed /subscriptions es personal: sin sesión válida Pornhub solo devuelve
+// recomendaciones del header (que el scraper filtra) → 0 videos. Avisamos en vez
+// de mostrar un silencioso "Sin resultados".
+const sessionExpired = !error && !authenticated;
+
+let cookieFromKV = false;
+let cookieCount = 0;
+try {
+  const raw = await env?.VS_C3_KV?.get("ph:cookies");
+  if (raw) { cookieFromKV = true; cookieCount = JSON.parse(raw).length; }
+} catch {}
+
+const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
+---
+
+<Layout title="LustHub - Mis Suscripciones">
+  <PhHeader
+    title="🔔 Mis Suscripciones"
+    stats={error ? "Error al scrapear" : `${videos.length} videos · ${elapsed}s · ${totalPages} págs.`}
+    cookieFromKV={cookieFromKV}
+    cookieCount={cookieCount}
+    sourceUrl={listUrl}
+  >
+    <PhScraperControls pages={pages} withStreams={withStreams} q={q} />
+  </PhHeader>
+
+  {sessionExpired ? (
+    <div class="max-w-xl mx-auto my-12 rounded-xl border border-yellow-600/50 bg-yellow-950/30 px-5 py-4 text-center">
+      <p class="text-yellow-400 font-medium m-0">🔒 Sesión expirada o no iniciada</p>
+      <p class="text-sm text-gray-400 mt-2 mb-0">
+        El feed de suscripciones es personal y requiere una sesión válida. Actualizá
+        las cookies con el botón <span class="text-gray-200">🍪 Cookies</span> (arriba a la
+        derecha) → pestaña <span class="text-gray-200">Importar JSON</span> → pegá las cookies
+        de tu navegador logueado y <span class="text-gray-200">Guardar en KV</span>.
+      </p>
+    </div>
+  ) : (
+    <VideoGrid
+      videos={videos}
+      totalPages={totalPages}
+      nextPage={pages + 1}
+      listUrl={listUrl}
+      withStreams={withStreams}
+      q={q}
+      error={error}
+    />
+  )}
+</Layout>

@@ -5,12 +5,18 @@ import { verifyToken, COOKIE_NAME } from "@/lib/auth";
 const PUBLIC_PREFIXES = ["/login", "/api/auth/"];
 
 export const onRequest = defineMiddleware(async (context, next) => {
+  const { pathname } = new URL(context.request.url);
+
+  // Chrome DevTools solicita este archivo automáticamente ("Automatic Workspace
+  // Folders"). No lo servimos: respondemos 204 para evitar el 404 en los logs.
+  if (pathname === "/.well-known/appspecific/com.chrome.devtools.json") {
+    return new Response(null, { status: 204 });
+  }
+
   // En desarrollo no se valida la autenticación
   if (import.meta.env.DEV) {
     return next();
   }
-
-  const { pathname } = new URL(context.request.url);
 
   // Rutas públicas: login y endpoints de autenticación
   if (PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))) {

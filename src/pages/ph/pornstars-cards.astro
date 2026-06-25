@@ -1,0 +1,22 @@
+---
+// Ruta parcial (sin layout): scrapea UNA página de pornstars y devuelve solo las
+// tarjetas. La consume el scroll infinito de /ph/pornstars vía fetch().
+import PornstarCard from "../../components/ph/PornstarCard.astro";
+import { scrapePornstars } from "../../lib/ph/scraper.js";
+
+export const partial = true;
+export const prerender = false;
+
+const env = (Astro.locals as any)?.runtime?.env;
+const page = Math.max(parseInt(Astro.url.searchParams.get("pagina") || "1", 10) || 1, 1);
+
+let pornstars = [];
+try {
+  const result = await scrapePornstars({ page, env });
+  pornstars = result.pornstars;
+} catch {
+  pornstars = [];
+}
+---
+
+{pornstars.map((star) => <PornstarCard star={star} />)}

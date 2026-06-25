@@ -1,0 +1,89 @@
+---
+// Búsqueda de videos: /ph/video/search?search=<texto>
+//   → https://es.pornhub.com/video/search?search=<texto>
+// Reutiliza scrapeSource() con un listUrl arbitrario de Pornhub; el catálogo de
+// resultados usa el mismo markup pcVideoListItem que el resto de listados, así
+// que la grilla, el scroll infinito (vía /ph/scraper-cards?url=…) y el reproductor
+// funcionan sin cambios. El parámetro `search` es el de Pornhub; `q` se reserva
+// para el filtro client-side por título dentro de los resultados.
+import Layout from "../../../layouts/Ph.astro";
+import PhHeader from "../../../components/ph/PhHeader.astro";
+import PhScraperControls from "../../../components/ph/PhScraperControls.astro";
+import VideoGrid from "../../../components/ph/VideoGrid.astro";
+import { scrapeSource, titleToSearchQuery } from "../../../lib/ph/scraper.js";
+
+export const prerender = false;
+
+const env = (Astro.locals as any)?.runtime?.env;
+
+const params = Astro.url.searchParams;
+// Normalizamos el término al formato que usa Pornhub (minúsculas, sin tildes ni
+// puntuación, conservando la ñ): así se puede pegar un título completo de video
+// y obtener los mismos resultados que la web.
+const search = titleToSearchQuery(params.get("search") || "");
+const pages = Math.min(Math.max(parseInt(params.get("paginas") || "1", 10) || 1, 1), 20);
+const q = (params.get("q") || "").trim();
+const withStreams = params.get("streams") === "1";
+
+const listUrl = `https://es.pornhub.com/video/search?search=${encodeURIComponent(search)}`;
+
+let videos = [];
+let totalPages = 0;
+let error = null;
+const startedAt = Date.now();
+
+if (!search) {
+  error = null; // sin búsqueda aún: mostramos solo el formulario.
+} else {
+  try {
+    const result = await scrapeSource({ listUrl, label: `search=${search}`, maxPages: pages, withStreams, env });
+    videos = result.videos;
+    totalPages = result.totalPages;
+  } catch (e) {
+    error = e.message;
+  }
+}
+
+let cookieFromKV = false;
+let cookieCount = 0;
+try {
+  const raw = await env?.VS_C3_KV?.get("ph:cookies");
+  if (raw) { cookieFromKV = true; cookieCount = JSON.parse(raw).length; }
+} catch {}
+
+const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
+---
+
+<Layout title={search ? `LustHub - Búsqueda: ${search}` : "LustHub - Buscar videos"}>
+  <PhHeader
+    title={search ? `🔎 “${search}”` : "🔎 Buscar videos"}
+    stats={!search ? "" : error ? "Error al scrapear" : `${videos.length} videos · ${elapsed}s · ${totalPages} págs.`}
+    cookieFromKV={cookieFromKV}
+    cookieCount={cookieCount}
+    sourceUrl={search ? listUrl : undefined}
+  >
+    {search && (
+      <PhScraperControls
+        pages={pages}
+        withStreams={withStreams}
+        q={q}
+        action="/ph/video/search"
+        hidden={[{ name: "search", value: search }]}
+      />
+    )}
+  </PhHeader>
+
+  {search ? (
+    <VideoGrid
+      videos={videos}
+      totalPages={totalPages}
+      nextPage={pages + 1}
+      listUrl={listUrl}
+      withStreams={withStreams}
+      q={q}
+      error={error}
+    />
+  ) : (
+    <p class="text-center text-gray-500 my-12">Escribe un término para buscar videos.</p>
+  )}
+</Layout>

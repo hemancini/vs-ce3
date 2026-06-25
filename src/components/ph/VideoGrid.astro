@@ -1,0 +1,1061 @@
+---
+import VideoCard from "./VideoCard.astro";
+
+interface Props {
+  videos: any[];
+  totalPages: number;
+  nextPage: number;
+  source?: string;      // clave de SOURCES para el scroll infinito
+  listUrl?: string;     // URL arbitraria para el scroll infinito
+  withStreams?: boolean;
+  q?: string;
+  error?: string | null;
+}
+
+const {
+  videos,
+  totalPages,
+  nextPage,
+  source = "",
+  listUrl = "",
+  withStreams = false,
+  q = "",
+  error = null,
+} = Astro.props;
+---
+
+<!-- Filtros client-side. En mobile solo la búsqueda + el toggle ⚙️ Filtros están
+     visibles; los selects se colapsan (.ph-collapsible). En desktop todo inline. -->
+<div class="max-w-[1600px] mx-auto mb-3 flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2 sm:gap-3">
+  <div class="flex items-center gap-2 sm:flex-1 sm:min-w-[220px]">
+    <input
+      id="search"
+      type="search"
+      value={q}
+      placeholder="Buscar por título…"
+      class="flex-1 min-w-0 bg-vs-surface text-white placeholder-gray-500 border border-vs-border rounded-lg px-4 py-2.5 outline-none focus:border-vs-pink"
+    />
+    <button
+      id="toggle-filters"
+      type="button"
+      aria-expanded="false"
+      aria-label="Mostrar filtros"
+      class="sm:hidden shrink-0 flex items-center gap-1.5 px-3 py-2.5 bg-vs-surface border border-vs-border rounded-lg text-gray-300 hover:text-white hover:border-vs-pink cursor-pointer"
+    >
+      ⚙️ Filtros
+      <span data-chevron class="inline-block transition-transform duration-200">▾</span>
+    </button>
+  </div>
+  <div class="ph-collapsible hidden sm:flex sm:flex-wrap sm:items-center gap-2 sm:gap-3 space-y-2 sm:space-y-0 w-full sm:w-auto">
+    <select
+      id="uploader"
+      class="w-full sm:w-auto bg-vs-surface text-white border border-vs-border rounded-lg px-3 py-2.5 outline-none focus:border-vs-pink cursor-pointer"
+    >
+      <option value="">Todos los canales</option>
+    </select>
+    {withStreams && (
+      <select
+        id="quality"
+        class="w-full sm:w-auto bg-vs-surface text-white border border-vs-border rounded-lg px-3 py-2.5 outline-none focus:border-vs-pink cursor-pointer"
+      >
+        <option value="">Cualquier calidad</option>
+        <option value="1080">1080p+</option>
+        <option value="720">720p+</option>
+        <option value="480">480p+</option>
+      </select>
+    )}
+    <select
+      id="sort"
+      class="w-full sm:w-auto bg-vs-surface text-white border border-vs-border rounded-lg px-3 py-2.5 outline-none focus:border-vs-pink cursor-pointer"
+    >
+      <option value="">Orden original</option>
+      <option value="views">Más vistas</option>
+      <option value="duration-desc">Más largos</option>
+      <option value="duration-asc">Más cortos</option>
+    </select>
+    <button
+      id="reset"
+      class="w-full sm:w-auto px-3 py-2.5 bg-vs-surface border border-vs-border rounded-lg text-gray-300 hover:text-white hover:border-vs-pink cursor-pointer"
+    >Limpiar</button>
+  </div>
+</div>
+
+{error && (
+  <p class="text-center text-red-500 my-8">No se pudo scrapear: {error}</p>
+)}
+{!error && videos.length === 0 && (
+  <p class="text-center text-gray-500 my-8">Sin resultados.</p>
+)}
+
+<div
+  id="grid"
+  class="grid grid-cols-2 lg:grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3 sm:gap-5 max-w-[1600px] mx-auto"
+  data-source={source}
+  data-list-url={listUrl}
+  data-next-page={nextPage}
+  data-total-pages={totalPages}
+  data-streams={withStreams ? "1" : ""}
+>
+  {videos.map((video) => <VideoCard video={video} />)}
+</div>
+
+<div id="sentinel" class="h-8"></div>
+<p id="loadingMore" class="hidden text-center text-gray-500 py-4">Cargando más…</p>
+<p id="endOfList"   class="hidden text-center text-gray-600 py-4 text-sm"></p>
+
+<style is:global>
+  /* Auto-ocultado: con el video reproduciendo y el ratón inactivo, ocultamos la
+     barra y el cursor. Cualquier movimiento (gestionado en JS) lo revierte. */
+  #player[data-state="playing"][data-idle="true"] #pv-bar { opacity: 0; pointer-events: none; }
+  #player[data-state="playing"][data-idle="true"] { cursor: none; }
+
+  /* Indicador central (play/pausa) con un pop de 0.5s al alternar. */
+  #pv-center.pv-pop { animation: pv-pop 0.5s ease-out forwards; }
+  @keyframes pv-pop {
+    0%   { opacity: 0.9; transform: scale(0.85); }
+    100% { opacity: 0;   transform: scale(1.25); }
+  }
+
+  /* Slider de volumen: pista fina y pulgar rosa. */
+  .pv-vol { -webkit-appearance: none; appearance: none; height: 4px; border-radius: 9999px;
+            background: rgba(255,255,255,0.35); outline: none; }
+  .pv-vol::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 12px; height: 12px;
+            border-radius: 9999px; background: #ff4088; cursor: pointer; }
+  .pv-vol::-moz-range-thumb { width: 12px; height: 12px; border: none; border-radius: 9999px;
+            background: #ff4088; cursor: pointer; }
+</style>
+
+<!-- Modal de reproducción (hls.js vía proxy de mismo origen) -->
+<div
+  id="modal"
+  class="hidden fixed inset-0 bg-black/95 items-center justify-center z-[1000] p-2 sm:p-4"
+>
+  <div class="relative w-full sm:w-[95%] max-w-[1100px] max-h-[95vh] overflow-y-auto bg-[#111] rounded-xl">
+    <span
+      id="close"
+      class="absolute top-2 right-3 sm:top-[15px] sm:right-[25px] leading-none text-4xl sm:text-[2.8rem] text-white cursor-pointer z-20 drop-shadow-lg"
+    >×</span>
+    <div id="player" class="pv-root group/pv relative w-full pt-[56.25%] bg-black overflow-hidden" data-state="paused" data-idle="false">
+      <video id="video" class="absolute inset-0 w-full h-full bg-black" autoplay playsinline></video>
+
+      <!-- Controles personalizados (barra de progreso + indicadores + vista previa) -->
+      <div id="pv" class="absolute inset-0 text-white">
+        <!-- Capa de click: play/pause -->
+        <button id="pv-surface" class="absolute inset-0 w-full cursor-pointer" aria-label="Reproducir/Pausar"></button>
+
+        <!-- Indicador central al alternar play/pausa -->
+        <div class="pointer-events-none absolute inset-0 flex items-center justify-center">
+          <div id="pv-center" class="flex h-16 w-16 items-center justify-center rounded-full bg-black/55 opacity-0 scale-75">
+            <svg id="pv-center-icon" xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"></path></svg>
+          </div>
+        </div>
+
+        <!-- Barra inferior -->
+        <div id="pv-bar" class="pv-bar absolute inset-x-0 bottom-0 px-3 pb-2 pt-10 bg-gradient-to-t from-black/85 via-black/35 to-transparent transition-opacity duration-200">
+          <!-- Seekbar -->
+          <div id="pv-seek" class="group/seek relative flex h-6 items-end cursor-pointer select-none touch-none">
+            <!-- Vista previa (sprite + tiempo + tag) -->
+            <div id="pv-preview" class="pointer-events-none absolute bottom-8 left-0 hidden -translate-x-1/2 flex-col items-center">
+              <div id="pv-preview-thumb" class="rounded border border-white/25 bg-black bg-no-repeat shadow-lg" style="width:160px;height:90px"></div>
+              <span id="pv-preview-tag" class="mt-1 hidden max-w-[160px] truncate rounded bg-vs-pink px-1.5 py-0.5 text-[11px] font-semibold"></span>
+              <span id="pv-preview-time" class="mt-1 rounded bg-black/80 px-1.5 py-0.5 text-xs font-semibold tabular-nums"></span>
+            </div>
+
+            <!-- Pista -->
+            <div id="pv-track" class="relative h-1 w-full rounded-full bg-white/25 transition-[height] duration-150 group-hover/seek:h-1.5">
+              <!-- Gráfica de popularidad (hotspots) -->
+              <svg id="pv-hotspots" class="pointer-events-none absolute bottom-0 left-0 h-11 w-full opacity-70 transition-opacity duration-150 group-hover/pv:opacity-100" viewBox="0 0 1000 100" preserveAspectRatio="none"></svg>
+              <div id="pv-buffer" class="absolute inset-y-0 left-0 rounded-full bg-white/30" style="width:0%"></div>
+              <div id="pv-elapsed" class="absolute inset-y-0 left-0 rounded-full bg-vs-pink" style="width:0%">
+                <div class="absolute right-0 top-1/2 h-3 w-3 -translate-y-1/2 translate-x-1/2 scale-0 rounded-full bg-vs-pink shadow transition-transform duration-150 group-hover/seek:scale-100"></div>
+              </div>
+              <!-- Marcadores de action tags -->
+              <div id="pv-tags" class="pointer-events-none absolute inset-0"></div>
+            </div>
+          </div>
+
+          <!-- Fila de botones -->
+          <div class="mt-2 flex items-center gap-3 text-white">
+            <button id="pv-play" class="shrink-0 opacity-90 hover:opacity-100" aria-label="Reproducir">
+              <svg id="pv-play-icon" xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"></path></svg>
+            </button>
+
+            <div class="flex items-center group/vol">
+              <button id="pv-mute" class="shrink-0 opacity-90 hover:opacity-100" aria-label="Silenciar">
+                <svg id="pv-vol-icon" xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"></path></svg>
+              </button>
+              <input id="pv-vol" type="range" min="0" max="1" step="0.05" value="1"
+                     class="pv-vol w-0 opacity-0 transition-all duration-200 group-hover/vol:w-16 group-hover/vol:opacity-100 group-hover/vol:ml-2" aria-label="Volumen" />
+            </div>
+
+            <span class="text-xs font-semibold tabular-nums text-white/90">
+              <span id="pv-cur">0:00</span> <span class="text-white/50">/</span> <span id="pv-dur">0:00</span>
+            </span>
+
+            <div class="ml-auto flex items-center gap-3">
+              <!-- Selector de calidad -->
+              <div id="pv-quality" class="relative hidden">
+                <button id="pv-quality-btn" class="flex items-center gap-1 rounded px-2 py-0.5 text-xs font-semibold opacity-90 hover:bg-white/10 hover:opacity-100" aria-haspopup="true" aria-expanded="false" aria-label="Calidad">
+                  <span id="pv-quality-label">Auto</span>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M7 10l5 5 5-5z"></path></svg>
+                </button>
+                <div id="pv-quality-menu" class="absolute bottom-full right-0 mb-2 hidden min-w-[120px] overflow-hidden rounded-lg bg-black/95 py-1 text-sm shadow-lg ring-1 ring-white/10"></div>
+              </div>
+              <!-- Menú de opciones (velocidad + picture in picture) -->
+              <div id="pv-more" class="relative">
+                <button id="pv-more-btn" class="flex items-center rounded px-1 py-0.5 opacity-90 hover:bg-white/10 hover:opacity-100" aria-haspopup="true" aria-expanded="false" aria-label="Más opciones" title="Más opciones">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"></path></svg>
+                </button>
+                <div id="pv-more-menu" class="absolute bottom-full right-0 mb-2 hidden min-w-[180px] overflow-hidden rounded-lg bg-black/95 py-1 text-sm shadow-lg ring-1 ring-white/10">
+                  <div class="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-white/50">Velocidad</div>
+                  <div id="pv-speed-list"></div>
+                  <div id="pv-pip-sep" class="my-1 border-t border-white/10"></div>
+                  <button id="pv-pip" class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-white hover:bg-white/10">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19 7h-8v6h8V7zm2-4H3c-1.1 0-2 .9-2 2v14c0 1.1.9 1.98 2 1.98h18c1.1 0 2-.88 2-1.98V5c0-1.1-.9-2-2-2zm0 16.01H3V4.98h18v14.03z"></path></svg>
+                    <span>Picture in picture</span>
+                  </button>
+                </div>
+              </div>
+              <button id="pv-fs" class="shrink-0 opacity-90 hover:opacity-100" aria-label="Pantalla completa">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"></path></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="px-4 sm:px-5 py-3 sm:py-4 flex items-start justify-between gap-3">
+      <h2 id="modal-title" class="text-base sm:text-xl font-semibold flex-1 text-white"></h2>
+      <div class="relative shrink-0">
+        <button
+          id="menu-toggle"
+          aria-label="Opciones"
+          aria-haspopup="true"
+          aria-expanded="false"
+          class="p-2 rounded-md text-gray-300 hover:text-white hover:bg-white/10 cursor-pointer"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <circle cx="12" cy="5" r="2"></circle><circle cx="12" cy="12" r="2"></circle><circle cx="12" cy="19" r="2"></circle>
+          </svg>
+        </button>
+        <div
+          id="menu"
+          class="hidden absolute right-0 bottom-full mb-2 w-56 bg-vs-surface border border-vs-border rounded-md shadow-lg overflow-hidden z-[1100]"
+        >
+          <button id="open-original" class="block w-full text-left px-4 py-2.5 text-white hover:bg-vs-pink cursor-pointer">
+            Abrir en Pornhub (Recomendado)
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script is:inline>
+  // ── Video player ────────────────────────────────────────────────────────────
+  // Controles personalizados (los mismos que /ph/play): barra de progreso con
+  // buffer, gráfica de popularidad (hotspots), marcadores de acción, vista previa
+  // por sprites, selector de calidad/velocidad, PiP y pantalla completa. El player
+  // vive en el modal y se reutiliza entre videos: los listeners se cablean una sola
+  // vez (initPlayer) y los datos por-video se refrescan en cada apertura (pvApplyData).
+  const proxied = (u) => `/api/ph/proxy?url=${encodeURIComponent(u)}`;
+
+  let hls = null;
+  let currentVideo = null;
+  let playToken = 0;
+
+  // Calidades reproducibles (un m3u8 por calidad en PH) y la activa.
+  let qualityList = [];
+  let activeQuality = null;
+  let pvData = null; // datos completos de stream.json del video en reproducción
+
+  const STREAM_FETCH_ATTEMPTS = 3;   // intentos al pedir streams frescos
+  const STREAM_REFRESH_LIMIT = 2;    // refrescos tras error fatal de HLS
+  const RETRY_BASE_MS = 800;
+  let refreshCount = 0;
+  let refreshing = false;
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  const modal      = document.getElementById("modal");
+  const videoEl    = document.getElementById("video");
+  const titleEl    = document.getElementById("modal-title");
+  const openBtn    = document.getElementById("open-original");
+  const menuToggle = document.getElementById("menu-toggle");
+  const menu       = document.getElementById("menu");
+
+  const setStatus = (msg) =>
+    (titleEl.textContent = (currentVideo?.title || "") + (msg ? " — " + msg : ""));
+
+  // Etiqueta de calidad ("720p HD"); con badge HD para 720 o más.
+  const qualityLabel = (q) =>
+    q ? `${q}p${Number(q) >= 720 ? ' <b class="text-[10px] align-top text-vs-pink">HD</b>' : ""}` : "Auto";
+
+  // Pinta el botón + menú de calidad (si el reproductor ya está montado).
+  function renderQualityMenu() {
+    const wrap = document.getElementById("pv-quality");
+    const menuEl = document.getElementById("pv-quality-menu");
+    const label = document.getElementById("pv-quality-label");
+    if (!wrap || !menuEl || !label) return;
+    if (qualityList.length < 2) { wrap.classList.add("hidden"); return; }
+    wrap.classList.remove("hidden");
+    label.innerHTML = qualityLabel(activeQuality);
+    menuEl.innerHTML = qualityList
+      .map((q) => {
+        const active = q.quality === activeQuality;
+        return `<button data-q="${q.quality}" class="flex w-full items-center justify-between gap-4 px-3 py-1.5 text-left whitespace-nowrap hover:bg-white/10 ${active ? "text-vs-pink" : "text-white"}">
+          <span>${qualityLabel(q.quality)}</span>
+          ${active ? '<span aria-hidden="true">✓</span>' : "<span></span>"}
+        </button>`;
+      })
+      .join("");
+  }
+
+  function loadStreams(streams) {
+    if (hls) { hls.destroy(); hls = null; }
+    if (!streams || !streams.length) { setStatus("sin streams disponibles"); return; }
+
+    // PH expone un m3u8 independiente por calidad; los listamos para el menú.
+    qualityList = streams
+      .filter((s) => s.videoUrl && s.videoUrl.includes(".m3u8"))
+      .map((s) => ({ quality: String(s.quality), url: s.videoUrl, default: !!s.default }));
+
+    if (qualityList.length) {
+      // Mantenemos la calidad elegida si seguimos viva tras un refresco; si no,
+      // la marcada como default por PH (o la más alta).
+      const had = activeQuality != null;
+      const pick =
+        qualityList.find((q) => q.quality === activeQuality) ||
+        qualityList.find((q) => q.default) ||
+        qualityList[0];
+      playQuality(pick.quality, { keepTime: had });
+      return;
+    }
+
+    const mp4 = streams.find((s) => s.videoUrl && /\.mp4(\?|$)/.test(s.videoUrl));
+    if (mp4) {
+      activeQuality = null;
+      renderQualityMenu();
+      videoEl.src = proxied(mp4.videoUrl);
+      videoEl.addEventListener("error", refreshStreams, { once: true });
+      return;
+    }
+    setStatus("sin streams reproducibles");
+  }
+
+  // Carga (o recarga) una calidad concreta. keepTime preserva la posición y el
+  // estado de reproducción — clave al cambiar de calidad en caliente.
+  function playQuality(quality, { keepTime = true } = {}) {
+    const item = qualityList.find((q) => q.quality === quality);
+    if (!item) return;
+    const resumeAt = keepTime ? videoEl.currentTime : 0;
+    const wasPlaying = keepTime ? !videoEl.paused : true;
+    activeQuality = quality;
+    renderQualityMenu();
+
+    if (hls) { hls.destroy(); hls = null; }
+
+    if (window.Hls && Hls.isSupported()) {
+      hls = new Hls();
+      hls.loadSource(proxied(item.url));
+      hls.attachMedia(videoEl);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        if (resumeAt > 0) videoEl.currentTime = resumeAt;
+        if (wasPlaying) videoEl.play().catch(() => {});
+      });
+      hls.on(Hls.Events.ERROR, (_e, data) => {
+        if (!data.fatal) return;
+        // 1º recuperación nativa de hls.js (red/media puntuales); si no, refrescamos.
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
+        else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
+        else refreshStreams();
+      });
+    } else if (videoEl.canPlayType("application/vnd.apple.mpegurl")) {
+      videoEl.src = proxied(item.url);
+      if (resumeAt > 0) videoEl.addEventListener("loadedmetadata", () => { videoEl.currentTime = resumeAt; }, { once: true });
+      if (wasPlaying) videoEl.addEventListener("canplay", () => videoEl.play().catch(() => {}), { once: true });
+      videoEl.addEventListener("error", refreshStreams, { once: true });
+    }
+  }
+
+  // Pide streams frescos a stream.json reintentando ante fallos transitorios.
+  // Devuelve el objeto completo (streams + thumbs/hotspots/actionTags/duration) o null.
+  async function fetchStreamData(vk) {
+    for (let attempt = 1; attempt <= STREAM_FETCH_ATTEMPTS; attempt++) {
+      try {
+        const res = await fetch(`/api/ph/stream.json?vkey=${encodeURIComponent(vk)}`);
+        const data = await res.json();
+        if (data.streams && data.streams.length) return data;
+      } catch (e) { /* reintentamos abajo */ }
+      if (attempt < STREAM_FETCH_ATTEMPTS) {
+        setStatus(`reintentando stream… (${attempt}/${STREAM_FETCH_ATTEMPTS})`);
+        await sleep(RETRY_BASE_MS * attempt); // backoff lineal
+      }
+    }
+    return null;
+  }
+
+  // Refresca los streams cuando la reproducción falla (URL caducada). Limitado
+  // para no entrar en bucle si el video ya no está disponible.
+  async function refreshStreams() {
+    if (refreshing) return;
+    if (refreshCount >= STREAM_REFRESH_LIMIT) { setStatus("el stream caducó. Usa «Abrir en Pornhub»."); return; }
+    refreshing = true;
+    refreshCount++;
+    const data = await fetchStreamData(currentVideo.vkey);
+    refreshing = false;
+    if (!data) { setStatus("el stream caducó. Usa «Abrir en Pornhub»."); return; }
+    pvData = data;
+    loadStreams(data.streams);
+  }
+
+  async function playVideo(video) {
+    currentVideo = video;
+    refreshCount = 0;
+    activeQuality = null; // cada video arranca en su calidad por defecto
+    titleEl.textContent = video.title + " — cargando…";
+    modal.classList.remove("hidden");
+    modal.classList.add("flex");
+    if (hls) { hls.destroy(); hls = null; }
+    videoEl.removeAttribute("src");
+
+    const reqId = ++playToken;
+    const data = await fetchStreamData(video.vkey);
+    if (reqId !== playToken) return;
+
+    if (!data) {
+      // Fallback a los streams embebidos en la card (sin extras del player).
+      if (video.streams && video.streams.length) {
+        titleEl.textContent = video.title;
+        pvData = { streams: video.streams };
+        loadStreams(video.streams);
+        initPlayer();
+        pvApplyData();
+      } else {
+        titleEl.textContent = video.title + " — no se pudo cargar el stream.";
+      }
+      return;
+    }
+
+    titleEl.textContent = video.title;
+    pvData = data;
+    loadStreams(data.streams);
+    initPlayer();   // cablea los controles una sola vez
+    pvApplyData();  // refresca hotspots/tags/sprite/duración de este video
+  }
+
+  // ── Controles personalizados del reproductor ────────────────────────────────
+  let playerInited = false;
+  let pvApplyData = () => {};
+  let pvOnClose = () => {};
+  function initPlayer() {
+    if (playerInited) return;
+    playerInited = true;
+
+    const root = document.getElementById("player");
+    const pv = document.getElementById("pv");
+    const surface = document.getElementById("pv-surface");
+    const center = document.getElementById("pv-center");
+    const centerIcon = document.getElementById("pv-center-icon");
+    const seek = document.getElementById("pv-seek");
+    const track = document.getElementById("pv-track");
+    const bufferEl = document.getElementById("pv-buffer");
+    const elapsedEl = document.getElementById("pv-elapsed");
+    const tagsEl = document.getElementById("pv-tags");
+    const hotspotsSvg = document.getElementById("pv-hotspots");
+    const preview = document.getElementById("pv-preview");
+    const previewThumb = document.getElementById("pv-preview-thumb");
+    const previewTime = document.getElementById("pv-preview-time");
+    const previewTag = document.getElementById("pv-preview-tag");
+    const playBtn = document.getElementById("pv-play");
+    const playIcon = document.getElementById("pv-play-icon");
+    const muteBtn = document.getElementById("pv-mute");
+    const volIcon = document.getElementById("pv-vol-icon");
+    const volInput = document.getElementById("pv-vol");
+    const fsBtn = document.getElementById("pv-fs");
+    const curEl = document.getElementById("pv-cur");
+    const durEl = document.getElementById("pv-dur");
+
+    const PLAY_PATH = "M8 5v14l11-7z";
+    const PAUSE_PATH = "M6 5h4v14H6zm8 0h4v14h-4z";
+    const VOL_FULL = "M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z";
+    const VOL_MUTE = "M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3 3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4 9.91 6.09 12 8.18V4z";
+
+    const fmt = (s) => {
+      s = Math.max(0, Math.floor(s || 0));
+      const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+      const mm = h ? String(m).padStart(2, "0") : String(m);
+      return (h ? h + ":" : "") + mm + ":" + String(sec).padStart(2, "0");
+    };
+    const setIcon = (el, d) => { const p = el.querySelector("path"); if (p) p.setAttribute("d", d); };
+
+    // Duración: preferimos la del elemento (más fiable) y caemos al dato del scraper.
+    const dur = () => (isFinite(videoEl.duration) && videoEl.duration > 0 ? videoEl.duration : (Number(pvData && pvData.duration) || 0));
+
+    // ── Play / pausa ──
+    const flashCenter = (playing) => {
+      setIcon(centerIcon, playing ? PLAY_PATH : PAUSE_PATH);
+      center.classList.remove("pv-pop"); void center.offsetWidth; center.classList.add("pv-pop");
+    };
+    const togglePlay = () => {
+      if (videoEl.paused) { videoEl.play().catch(() => {}); flashCenter(true); }
+      else { videoEl.pause(); flashCenter(false); }
+    };
+    surface.addEventListener("click", togglePlay);
+    playBtn.addEventListener("click", togglePlay);
+
+    function syncState() {
+      const playing = !videoEl.paused;
+      root.dataset.state = playing ? "playing" : "paused";
+      setIcon(playIcon, playing ? PAUSE_PATH : PLAY_PATH);
+      if (playing) showBar(); else { root.dataset.idle = "false"; clearTimeout(idleTimer); }
+    }
+    videoEl.addEventListener("play", syncState);
+    videoEl.addEventListener("pause", syncState);
+    videoEl.addEventListener("ended", syncState);
+
+    // ── Tiempo / progreso / buffer ──
+    function update() {
+      const d = dur();
+      const pct = d ? Math.min(100, (videoEl.currentTime / d) * 100) : 0;
+      if (!scrubbing) elapsedEl.style.width = pct + "%";
+      if (hotFill) hotFill.setAttribute("width", String(pct * 10));
+      curEl.textContent = fmt(videoEl.currentTime);
+    }
+    function updateBuffer() {
+      const d = dur();
+      if (!d || !videoEl.buffered.length) return;
+      try {
+        const end = videoEl.buffered.end(videoEl.buffered.length - 1);
+        bufferEl.style.width = Math.min(100, (end / d) * 100) + "%";
+      } catch {}
+    }
+    function reflectDuration() { durEl.textContent = fmt(dur()); buildTags(); update(); }
+    videoEl.addEventListener("timeupdate", update);
+    videoEl.addEventListener("progress", updateBuffer);
+    videoEl.addEventListener("loadedmetadata", reflectDuration);
+    videoEl.addEventListener("durationchange", reflectDuration);
+
+    // ── Volumen ──
+    function reflectVolume() {
+      const muted = videoEl.muted || videoEl.volume === 0;
+      setIcon(volIcon, muted ? VOL_MUTE : VOL_FULL);
+      volInput.value = String(videoEl.muted ? 0 : videoEl.volume);
+    }
+    muteBtn.addEventListener("click", () => { videoEl.muted = !videoEl.muted; reflectVolume(); });
+    volInput.addEventListener("input", () => {
+      videoEl.volume = Number(volInput.value);
+      videoEl.muted = videoEl.volume === 0;
+      reflectVolume();
+    });
+    videoEl.addEventListener("volumechange", reflectVolume);
+
+    // ── Pantalla completa ──
+    fsBtn.addEventListener("click", () => {
+      if (document.fullscreenElement) { document.exitFullscreen(); return; }
+      if (root.requestFullscreen) root.requestFullscreen().catch(() => {});
+      else if (videoEl.webkitEnterFullscreen) videoEl.webkitEnterFullscreen();
+    });
+
+    // ── Auto-ocultar la barra cuando el ratón está inactivo y el video corre ──
+    let idleTimer = null;
+    function showBar() {
+      root.dataset.idle = "false";
+      clearTimeout(idleTimer);
+      if (!videoEl.paused) idleTimer = setTimeout(() => { root.dataset.idle = "true"; }, 2600);
+    }
+    ["mousemove", "pointerdown", "touchstart"].forEach((ev) =>
+      pv.addEventListener(ev, showBar, { passive: true }));
+    pv.addEventListener("mouseleave", () => { if (!videoEl.paused) root.dataset.idle = "true"; });
+
+    // ── Gráfica de popularidad (hotspots) ──
+    let hotFill = null;
+    function buildHotspots() {
+      hotFill = null;
+      const hs = Array.isArray(pvData && pvData.hotspots) ? pvData.hotspots : [];
+      if (hs.length < 2) { hotspotsSvg.innerHTML = ""; hotspotsSvg.classList.add("hidden"); return; }
+      hotspotsSvg.classList.remove("hidden");
+      const max = Math.max(...hs), min = Math.min(...hs), span = max - min || 1, n = hs.length;
+      const pts = hs.map((v, i) => {
+        const x = (i / (n - 1)) * 1000;
+        const y = 100 - ((v - min) / span) * 88 - 6; // deja cabecera para no tocar el borde
+        return `${x.toFixed(2)},${y.toFixed(2)}`;
+      });
+      const cid = "pvHot_" + Math.random().toString(36).slice(2);
+      hotspotsSvg.innerHTML =
+        `<defs><clipPath id="${cid}" clipPathUnits="userSpaceOnUse">` +
+        `<polygon points="0,100 ${pts.join(" ")} 1000,100"/></clipPath></defs>` +
+        `<g clip-path="url(#${cid})">` +
+        `<rect x="0" y="0" width="1000" height="100" fill="rgba(190,190,190,0.45)"/>` +
+        `<rect class="pv-hot-fill" x="0" y="0" width="0" height="100" fill="#ff4088"/>` +
+        `</g>`;
+      hotFill = hotspotsSvg.querySelector(".pv-hot-fill");
+    }
+
+    // ── Marcadores de action tags ──
+    function buildTags() {
+      const tags = Array.isArray(pvData && pvData.actionTags) ? pvData.actionTags : [];
+      const d = dur();
+      tagsEl.innerHTML = "";
+      if (!tags.length || !d) return;
+      tagsEl.innerHTML = tags.map((t) => {
+        const left = Math.max(0, Math.min(100, (t.time / d) * 100));
+        return `<span class="absolute top-1/2 h-2 w-[3px] -translate-y-1/2 -translate-x-1/2 rounded-sm bg-amber-300/90" style="left:${left}%"></span>`;
+      }).join("");
+    }
+    function nearestTag(t) {
+      const tags = Array.isArray(pvData && pvData.actionTags) ? pvData.actionTags : [];
+      let best = null, bestD = Infinity;
+      for (const tag of tags) { const dd = Math.abs(tag.time - t); if (dd < bestD) { bestD = dd; best = tag; } }
+      return bestD <= 8 ? best : null;
+    }
+
+    // ── Vista previa por sprites ──
+    // PH genera hojas de sprites muestreadas cada `samplingFrequency` segundos.
+    let pvSprite = null;
+    function buildSprite(thumbs) {
+      if (!thumbs || !thumbs.samplingFrequency) return null;
+      const freq = thumbs.samplingFrequency;
+      const patterns = Array.isArray(thumbs.spritePatterns) ? thumbs.spritePatterns : [];
+      const baseTpl = patterns[0] || thumbs.urlPattern || "";
+      if (!baseTpl) return null;
+      const sheetUrl = (n) => {
+        if (patterns[n]) return patterns[n];
+        if (/S\d+\.jpg(\?.*)?$/.test(baseTpl)) return baseTpl.replace(/S\d+(\.jpg)/, "S" + n + "$1");
+        return baseTpl.replace("{6}", String(n));
+      };
+      const sheetSrc = (n) => proxied(sheetUrl(n));
+
+      const W = 160, H = 90;
+      let cols = 5, rows = 5, perSheet = 25; // valores por defecto (hoja 800×450)
+      const probe = new Image();
+      probe.onload = () => {
+        if (probe.naturalWidth && probe.naturalHeight) {
+          cols = Math.max(1, Math.round(probe.naturalWidth / W));
+          rows = Math.max(1, Math.round(probe.naturalHeight / H));
+          perSheet = cols * rows;
+        }
+      };
+      probe.src = sheetSrc(0);
+
+      let lastUrl = "";
+      return {
+        apply(el, time) {
+          const idx = Math.max(0, Math.floor(time / freq));
+          const sheet = Math.floor(idx / perSheet), within = idx % perSheet;
+          const col = within % cols, row = Math.floor(within / cols);
+          const url = sheetSrc(sheet);
+          if (url !== lastUrl) { el.style.backgroundImage = `url("${url}")`; lastUrl = url; }
+          el.style.backgroundSize = (cols * W) + "px " + (rows * H) + "px";
+          el.style.backgroundPosition = `-${col * W}px -${row * H}px`;
+        },
+      };
+    }
+
+    // ── Seek + vista previa (hover en desktop, arrastre en táctil) ──
+    function ratioFromEvent(e) {
+      const r = track.getBoundingClientRect();
+      return Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+    }
+    const showPreview = () => { preview.classList.remove("hidden"); preview.classList.add("flex"); };
+    const hidePreview = () => { preview.classList.add("hidden"); preview.classList.remove("flex"); };
+
+    function updatePreview(ratio) {
+      const d = dur(), t = ratio * d;
+      previewTime.textContent = fmt(t);
+      const r = track.getBoundingClientRect();
+      const px = Math.max(80, Math.min(r.width - 80, ratio * r.width)); // centra el thumb (160px)
+      preview.style.left = px + "px";
+      if (pvSprite) pvSprite.apply(previewThumb, t);
+      const near = nearestTag(t);
+      if (near) { previewTag.textContent = near.label; previewTag.classList.remove("hidden"); }
+      else previewTag.classList.add("hidden");
+    }
+
+    seek.addEventListener("mousemove", (e) => { showPreview(); updatePreview(ratioFromEvent(e)); });
+    seek.addEventListener("mouseleave", () => { if (!scrubbing) hidePreview(); });
+
+    let scrubbing = false, wasPlaying = false;
+    function doScrub(e) {
+      const ratio = ratioFromEvent(e);
+      updatePreview(ratio);
+      elapsedEl.style.width = (ratio * 100) + "%";
+    }
+    function endScrub(e) {
+      videoEl.currentTime = ratioFromEvent(e) * dur();
+      scrubbing = false;
+      window.removeEventListener("pointermove", doScrub);
+      hidePreview();
+      if (wasPlaying) videoEl.play().catch(() => {});
+    }
+    seek.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      scrubbing = true;
+      wasPlaying = !videoEl.paused;
+      if (wasPlaying) videoEl.pause();
+      showPreview();
+      doScrub(e);
+      window.addEventListener("pointermove", doScrub);
+      window.addEventListener("pointerup", endScrub, { once: true });
+    });
+
+    // ── Selector de calidad ──
+    const qualityBtn = document.getElementById("pv-quality-btn");
+    const qualityMenu = document.getElementById("pv-quality-menu");
+    qualityBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      document.getElementById("pv-more-menu")?.classList.add("hidden");
+      qualityMenu.classList.toggle("hidden");
+      showBar();
+    });
+    qualityMenu.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-q]");
+      if (!b) return;
+      playQuality(b.dataset.q, { keepTime: true });
+      qualityMenu.classList.add("hidden");
+    });
+    document.addEventListener("click", () => qualityMenu.classList.add("hidden"));
+
+    // ── Menú de opciones (velocidad + picture in picture) ──
+    const moreBtn = document.getElementById("pv-more-btn");
+    const moreMenu = document.getElementById("pv-more-menu");
+    const speedList = document.getElementById("pv-speed-list");
+    const pipBtn = document.getElementById("pv-pip");
+    const pipSep = document.getElementById("pv-pip-sep");
+    const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+
+    const speedLabel = (r) => (r === 1 ? "Normal" : r + "x");
+    function renderSpeeds() {
+      speedList.innerHTML = SPEEDS.map((r) => {
+        const active = videoEl.playbackRate === r;
+        return `<button data-speed="${r}" class="flex w-full items-center justify-between gap-4 px-3 py-1.5 text-left whitespace-nowrap hover:bg-white/10 ${active ? "text-vs-pink" : "text-white"}">
+          <span>${speedLabel(r)}</span>
+          ${active ? '<span aria-hidden="true">✓</span>' : "<span></span>"}
+        </button>`;
+      }).join("");
+    }
+    speedList.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-speed]");
+      if (!b) return;
+      videoEl.playbackRate = Number(b.dataset.speed);
+      renderSpeeds();
+    });
+    videoEl.addEventListener("ratechange", renderSpeeds);
+
+    // Picture in picture: lo ocultamos si el navegador no lo soporta.
+    if (!document.pictureInPictureEnabled || videoEl.disablePictureInPicture) {
+      pipBtn.classList.add("hidden");
+      pipSep.classList.add("hidden");
+    } else {
+      pipBtn.addEventListener("click", async () => {
+        try {
+          if (document.pictureInPictureElement) await document.exitPictureInPicture();
+          else await videoEl.requestPictureInPicture();
+        } catch {}
+        moreMenu.classList.add("hidden");
+      });
+    }
+
+    moreBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      qualityMenu.classList.add("hidden");
+      moreMenu.classList.toggle("hidden");
+      moreBtn.setAttribute("aria-expanded", String(!moreMenu.classList.contains("hidden")));
+      showBar();
+    });
+    moreMenu.addEventListener("click", (e) => e.stopPropagation());
+    document.addEventListener("click", () => moreMenu.classList.add("hidden"));
+
+    // Refresca los datos por-video (hotspots/tags/sprite/duración) y el estado.
+    pvApplyData = function () {
+      buildHotspots();
+      pvSprite = buildSprite(pvData && pvData.thumbs);
+      if (!pvSprite) previewThumb.classList.add("hidden"); else previewThumb.classList.remove("hidden");
+      elapsedEl.style.width = "0%";
+      bufferEl.style.width = "0%";
+      curEl.textContent = "0:00";
+      reflectDuration();
+      setIcon(playIcon, videoEl.paused ? PLAY_PATH : PAUSE_PATH);
+      root.dataset.state = videoEl.paused ? "paused" : "playing";
+      reflectVolume();
+      renderQualityMenu();
+      renderSpeeds();
+      showBar();
+    };
+    // Al cerrar el modal: cancela el auto-ocultado y restablece estado/cursor.
+    pvOnClose = function () { clearTimeout(idleTimer); root.dataset.idle = "false"; root.dataset.state = "paused"; };
+
+    // Estado inicial
+    setIcon(playIcon, videoEl.paused ? PLAY_PATH : PAUSE_PATH);
+    reflectVolume();
+  }
+
+  function toggleMenu(open) {
+    const show = open ?? menu.classList.contains("hidden");
+    menu.classList.toggle("hidden", !show);
+    menuToggle.setAttribute("aria-expanded", String(show));
+  }
+  menuToggle.addEventListener("click", (e) => { e.stopPropagation(); toggleMenu(); });
+  document.addEventListener("click", (e) => {
+    if (!menu.classList.contains("hidden") && !menu.contains(e.target) && e.target !== menuToggle)
+      toggleMenu(false);
+  });
+  openBtn.addEventListener("click", () => {
+    toggleMenu(false);
+    if (currentVideo?.pageUrl) window.open(currentVideo.pageUrl, "_blank");
+  });
+
+  function closeModal() {
+    toggleMenu(false);
+    playToken++;
+    if (hls) { hls.destroy(); hls = null; }
+    videoEl.pause();
+    videoEl.removeAttribute("src");
+    pvOnClose();
+    modal.classList.add("hidden");
+    modal.classList.remove("flex");
+  }
+  document.getElementById("close").addEventListener("click", closeModal);
+  modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
+
+  // ── Card wiring ─────────────────────────────────────────────────────────────
+  function wireCards(root) {
+    root.querySelectorAll(".card:not([data-wired])").forEach((card) => {
+      card.dataset.wired = "1";
+      const video = {
+        vkey:    card.dataset.vkey,
+        title:   card.dataset.title || "",
+        pageUrl: card.dataset.pageUrl || "",
+        streams: card.dataset.streams ? JSON.parse(card.dataset.streams) : [],
+      };
+
+      let longPressed = false;
+      card.addEventListener("click", (e) => {
+        if (e.target.closest("[data-stop]")) return;
+        if (longPressed) { longPressed = false; return; }
+        playVideo(video);
+      });
+
+      const previewUrl = card.dataset.preview;
+      if (!previewUrl) return;
+      const prev = card.querySelector(".preview");
+
+      const show = () => {
+        if (!prev.src) prev.src = proxied(previewUrl);
+        prev.currentTime = 0;
+        prev.play().then(() => prev.classList.replace("opacity-0", "opacity-100")).catch(() => {});
+      };
+      const hide = () => {
+        prev.classList.replace("opacity-100", "opacity-0");
+        prev.pause();
+      };
+
+      card.addEventListener("mouseenter", show);
+      card.addEventListener("mouseleave", hide);
+
+      let timer = null;
+      card.addEventListener("touchstart", () => {
+        longPressed = false;
+        timer = setTimeout(() => { longPressed = true; show(); }, 350);
+      }, { passive: true });
+      const endTouch = () => { clearTimeout(timer); if (longPressed) hide(); };
+      card.addEventListener("touchend",   endTouch);
+      card.addEventListener("touchcancel",endTouch);
+      card.addEventListener("touchmove",  () => {
+        clearTimeout(timer);
+        if (longPressed) { hide(); longPressed = false; }
+      }, { passive: true });
+    });
+  }
+
+  // ── Filters + infinite scroll ───────────────────────────────────────────────
+  const grid      = document.getElementById("grid");
+  const sentinel  = document.getElementById("sentinel");
+  const loadingEl = document.getElementById("loadingMore");
+  const endEl     = document.getElementById("endOfList");
+  const statsEl   = document.getElementById("stats");
+
+  const searchEl   = document.getElementById("search");
+  const uploaderEl = document.getElementById("uploader");
+  const qualityEl  = document.getElementById("quality");
+  const sortEl     = document.getElementById("sort");
+  const resetEl    = document.getElementById("reset");
+  const qHidden    = document.getElementById("q-hidden");
+
+  const gridSource  = grid.dataset.source;
+  const gridListUrl = grid.dataset.listUrl;
+  const totalPages  = parseInt(grid.dataset.totalPages || "1", 10);
+  const wantStreams  = grid.dataset.streams === "1";
+  let nextPage = parseInt(grid.dataset.nextPage || "2", 10);
+  let loading  = false;
+  let hasMore  = nextPage <= totalPages;
+
+  const seen = new Set([...grid.querySelectorAll(".card")].map((c) => c.dataset.vkey));
+
+  function parseViews(s) {
+    if (!s) return 0;
+    const m = String(s).trim().replace(/,/g, "").match(/^([\d.]+)\s*([KMB])?/i);
+    if (!m) return 0;
+    return Math.round(parseFloat(m[1]) * ({ K: 1e3, M: 1e6, B: 1e9 }[(m[2] || "").toUpperCase()] || 1));
+  }
+  function parseDuration(s) {
+    if (!s) return 0;
+    const parts = String(s).split(":").map(Number);
+    return parts.some(isNaN) ? 0 : parts.reduce((a, n) => a * 60 + n, 0);
+  }
+  function cardMaxQuality(card) {
+    if (card._maxq != null) return card._maxq;
+    let max = 0;
+    try {
+      for (const st of JSON.parse(card.dataset.streams || "[]")) {
+        const qn = parseInt(st.quality, 10);
+        if (!isNaN(qn) && qn > max) max = qn;
+      }
+    } catch {}
+    return (card._maxq = max);
+  }
+
+  function populateUploaders() {
+    const prev = uploaderEl.value;
+    const names = [...new Set([...grid.querySelectorAll(".card")].map((c) => c.dataset.uploader).filter(Boolean))].sort();
+    uploaderEl.length = 1;
+    for (const name of names) {
+      const opt = document.createElement("option");
+      opt.value = opt.textContent = name;
+      uploaderEl.appendChild(opt);
+    }
+    uploaderEl.value = prev;
+  }
+
+  function applyFilters() {
+    const term  = searchEl.value.trim().toLowerCase();
+    const up    = uploaderEl.value;
+    const minQ  = qualityEl ? parseInt(qualityEl.value, 10) || 0 : 0;
+    const sort  = sortEl.value;
+    const visible = [];
+
+    for (const card of grid.querySelectorAll(".card")) {
+      const ok =
+        (!term || (card.dataset.title || "").toLowerCase().includes(term)) &&
+        (!up   || (card.dataset.uploader || "") === up) &&
+        (!minQ || cardMaxQuality(card) >= minQ);
+      card.classList.toggle("hidden", !ok);
+      if (ok) visible.push(card);
+    }
+
+    if (sort) {
+      const cmp = {
+        views:          (a, b) => parseViews(b.dataset.views) - parseViews(a.dataset.views),
+        "duration-desc":(a, b) => parseDuration(b.dataset.duration) - parseDuration(a.dataset.duration),
+        "duration-asc": (a, b) => parseDuration(a.dataset.duration) - parseDuration(b.dataset.duration),
+      }[sort];
+      if (cmp) { visible.sort(cmp); for (const c of visible) grid.appendChild(c); }
+    }
+
+    const total = grid.querySelectorAll(".card").length;
+    if (statsEl) statsEl.textContent = `${visible.length} / ${total} videos · ${totalPages} págs.`;
+    return visible.length;
+  }
+
+  function syncUrl() {
+    const url = new URL(location.href);
+    const set = (k, v) => (v ? url.searchParams.set(k, v) : url.searchParams.delete(k));
+    set("q",      searchEl.value.trim());
+    set("canal",  uploaderEl.value);
+    set("calidad",qualityEl ? qualityEl.value : "");
+    set("orden",  sortEl.value);
+    history.replaceState(null, "", url);
+    if (qHidden) qHidden.value = searchEl.value.trim();
+  }
+
+  function onFilterChange() {
+    applyFilters();
+    syncUrl();
+    if (hasMore && isSentinelVisible()) loadMore();
+  }
+
+  [searchEl, uploaderEl, qualityEl, sortEl].forEach((el) => {
+    if (!el) return;
+    el.addEventListener(el === searchEl ? "input" : "change", onFilterChange);
+  });
+  resetEl.addEventListener("click", () => {
+    searchEl.value = "";
+    uploaderEl.value = "";
+    if (qualityEl) qualityEl.value = "";
+    sortEl.value = "";
+    onFilterChange();
+  });
+
+  function finishList() {
+    hasMore = false;
+    loadingEl.classList.add("hidden");
+    const n = grid.querySelectorAll(".card").length;
+    endEl.textContent = n ? "— Fin de la lista —" : "Sin resultados.";
+    endEl.classList.remove("hidden");
+    observer.disconnect();
+  }
+
+  async function loadMore() {
+    if (loading || !hasMore) return;
+    loading = true;
+    loadingEl.classList.remove("hidden");
+
+    const u = new URLSearchParams({ pagina: String(nextPage) });
+    if (gridListUrl) {
+      u.set("url", gridListUrl);
+    } else if (gridSource) {
+      u.set("fuente", gridSource);
+    }
+    if (wantStreams) u.set("streams", "1");
+
+    try {
+      const res  = await fetch(`/ph/scraper-cards?${u}`);
+      const html = await res.text();
+      const tmp  = document.createElement("div");
+      tmp.innerHTML = html;
+
+      tmp.querySelectorAll(".card").forEach((card) => {
+        const vk = card.dataset.vkey;
+        if (vk && seen.has(vk)) return;
+        if (vk) seen.add(vk);
+        grid.appendChild(card);
+      });
+
+      wireCards(grid);
+      populateUploaders();
+      applyFilters();
+      nextPage++;
+      hasMore = nextPage <= totalPages;
+      loading = false;
+
+      if (!hasMore) { finishList(); return; }
+      loadingEl.classList.add("hidden");
+      if (isSentinelVisible()) loadMore();
+    } catch {
+      loading = false;
+      loadingEl.classList.add("hidden");
+    }
+  }
+
+  function isSentinelVisible() {
+    const r = sentinel.getBoundingClientRect();
+    return r.top < window.innerHeight + 400;
+  }
+
+  const observer = new IntersectionObserver(
+    (entries) => { if (entries.some((e) => e.isIntersecting)) loadMore(); },
+    { rootMargin: "400px" },
+  );
+
+  // Init
+  wireCards(document);
+  populateUploaders();
+  const urlParams = new URLSearchParams(location.search);
+  uploaderEl.value = urlParams.get("canal") || "";
+  if (qualityEl) qualityEl.value = urlParams.get("calidad") || "";
+  sortEl.value = urlParams.get("orden") || "";
+  applyFilters();
+
+  if (hasMore) observer.observe(sentinel);
+  else finishList();
+</script>

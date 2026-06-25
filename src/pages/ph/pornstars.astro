@@ -1,0 +1,271 @@
+---
+// Listado de pornstars: /ph/pornstars → https://es.pornhub.com/pornstars
+// Cada tarjeta enlaza a /ph/pornstar/<slug> o /ph/model/<slug> (videos de la persona).
+import Layout from "../../layouts/Ph.astro";
+import PhHeader from "../../components/ph/PhHeader.astro";
+import PornstarCard from "../../components/ph/PornstarCard.astro";
+import { scrapePornstars } from "../../lib/ph/scraper.js";
+
+export const prerender = false;
+
+const env = (Astro.locals as any)?.runtime?.env;
+
+// Páginas iniciales a recorrer en el primer render (1..20, default 1).
+const pages = Math.min(Math.max(parseInt(Astro.url.searchParams.get("paginas") || "1", 10) || 1, 1), 20);
+
+let pornstars = [];
+let totalPages = 0;
+let error = null;
+const startedAt = Date.now();
+
+try {
+  const result = await scrapePornstars({ page: 1, maxPages: pages, env });
+  pornstars = result.pornstars;
+  totalPages = result.totalPages;
+} catch (e) {
+  error = e.message;
+}
+
+let cookieFromKV = false;
+let cookieCount = 0;
+try {
+  const raw = await env?.VS_C3_KV?.get("ph:cookies");
+  if (raw) { cookieFromKV = true; cookieCount = JSON.parse(raw).length; }
+} catch {}
+
+const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
+---
+
+<Layout title="LustHub - Pornstars">
+  <PhHeader
+    title="⭐ Pornstars"
+    searching
+    stats={error ? "Error al scrapear" : `${pornstars.length} · ${elapsed}s · ${totalPages} págs.`}
+    cookieFromKV={cookieFromKV}
+    cookieCount={cookieCount}
+    nav={["scraper"]}
+  />
+
+  <!-- En mobile solo la búsqueda + ⚙️ Filtros están visibles; el resto se colapsa. -->
+  <div class="max-w-[1600px] mx-auto mb-4 flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2 sm:gap-3">
+    <div class="flex items-center gap-2 sm:flex-1 sm:min-w-[220px]">
+      <input
+        id="search"
+        type="search"
+        placeholder="Filtrar por nombre…"
+        class="flex-1 min-w-0 bg-vs-surface text-white placeholder-gray-500 border border-vs-border rounded-lg px-4 py-2.5 outline-none focus:border-vs-pink"
+      />
+      <button
+        id="toggle-filters"
+        type="button"
+        aria-expanded="false"
+        aria-label="Mostrar filtros"
+        class="sm:hidden shrink-0 flex items-center gap-1.5 px-3 py-2.5 bg-vs-surface border border-vs-border rounded-lg text-gray-300 hover:text-white hover:border-vs-pink cursor-pointer"
+      >
+        ⚙️ Filtros
+        <span data-chevron class="inline-block transition-transform duration-200">▾</span>
+      </button>
+    </div>
+    <div class="ph-collapsible hidden sm:flex sm:flex-wrap sm:items-center gap-2 sm:gap-3 space-y-2 sm:space-y-0 w-full sm:w-auto">
+      <select
+        id="type"
+        class="w-full sm:w-auto bg-vs-surface text-white border border-vs-border rounded-lg px-3 py-2.5 outline-none focus:border-vs-pink cursor-pointer"
+      >
+        <option value="">Todos los tipos</option>
+        <option value="pornstar">Pornstars</option>
+        <option value="model">Modelos</option>
+      </select>
+      <select
+        id="sort"
+        class="w-full sm:w-auto bg-vs-surface text-white border border-vs-border rounded-lg px-3 py-2.5 outline-none focus:border-vs-pink cursor-pointer"
+      >
+        <option value="">Orden original</option>
+        <option value="views">Más vistas</option>
+        <option value="videos">Más videos</option>
+        <option value="name">Nombre A-Z</option>
+      </select>
+      <button
+        id="reset"
+        class="w-full sm:w-auto px-3 py-2.5 bg-vs-surface border border-vs-border rounded-lg text-gray-300 hover:text-white hover:border-vs-pink cursor-pointer"
+      >Limpiar</button>
+      <form method="get" action="/ph/pornstars" class="flex flex-col sm:flex-row sm:items-center gap-2 w-full sm:w-auto">
+        <label class="flex items-center gap-2 text-sm text-gray-400 whitespace-nowrap">
+          Páginas iniciales
+          <input
+            type="number"
+            name="paginas"
+            value={pages}
+            min="1"
+            max="20"
+            class="w-20 bg-vs-surface text-white border border-vs-border rounded-lg px-3 py-2.5 outline-none focus:border-vs-pink"
+          />
+        </label>
+        <button
+          type="submit"
+          class="w-full sm:w-auto px-3 py-2.5 bg-vs-surface border border-vs-border rounded-lg text-gray-200 hover:border-vs-pink cursor-pointer"
+        >🔄 Recargar</button>
+      </form>
+    </div>
+  </div>
+
+  {error && <p class="text-center text-red-500 my-8">No se pudo scrapear: {error}</p>}
+  {!error && pornstars.length === 0 && <p class="text-center text-gray-500 my-8">Sin resultados.</p>}
+
+  <div
+    id="grid"
+    class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3 sm:gap-5 max-w-[1600px] mx-auto"
+    data-next-page={pages + 1}
+    data-total-pages={totalPages}
+  >
+    {pornstars.map((star) => <PornstarCard star={star} />)}
+  </div>
+
+  <div id="sentinel" class="h-8"></div>
+  <p id="loadingMore" class="hidden text-center text-gray-500 py-4">Cargando más…</p>
+  <p id="endOfList"   class="hidden text-center text-gray-600 py-4 text-sm"></p>
+
+  <script is:inline>
+    const grid      = document.getElementById("grid");
+    const sentinel  = document.getElementById("sentinel");
+    const loadingEl = document.getElementById("loadingMore");
+    const endEl     = document.getElementById("endOfList");
+    const statsEl   = document.getElementById("stats");
+    const searchEl  = document.getElementById("search");
+    const typeEl    = document.getElementById("type");
+    const sortEl    = document.getElementById("sort");
+    const resetEl   = document.getElementById("reset");
+    const searchingEl = document.getElementById("searching");
+
+    const totalPages = parseInt(grid.dataset.totalPages || "1", 10);
+    let nextPage = parseInt(grid.dataset.nextPage || "2", 10);
+    let loading = false;
+    let hasMore = nextPage <= totalPages;
+
+    const seen = new Set([...grid.querySelectorAll(".card")].map((c) => c.getAttribute("href")));
+
+    function applyFilter() {
+      const term = searchEl.value.trim().toLowerCase();
+      const type = typeEl.value;
+      const sort = sortEl.value;
+      const cards = [...grid.querySelectorAll(".card")];
+      let visible = 0;
+      for (const card of cards) {
+        const name = (card.dataset.name || card.querySelector("h3")?.textContent || "").toLowerCase();
+        const ok = (!term || name.includes(term)) && (!type || card.dataset.type === type);
+        card.classList.toggle("hidden", !ok);
+        if (ok) visible++;
+      }
+      if (sort) {
+        const cmp = {
+          views: (a, b) => (+b.dataset.views || 0) - (+a.dataset.views || 0),
+          videos: (a, b) => (+b.dataset.videos || 0) - (+a.dataset.videos || 0),
+          name: (a, b) => (a.dataset.name || "").localeCompare(b.dataset.name || ""),
+        }[sort];
+        if (cmp) for (const c of [...cards].sort(cmp)) grid.appendChild(c);
+      }
+      if (statsEl) statsEl.textContent = `${visible} / ${cards.length} · ${totalPages} págs.`;
+    }
+    [searchEl, typeEl, sortEl].forEach((el) =>
+      el.addEventListener("input", () => {
+        applyFilter();
+        if (hasMore && isSentinelVisible()) loadMore();
+      }),
+    );
+
+    // Búsqueda server-side: encuentra pornstars/modelos que no están en el
+    // directorio ya cargado (consulta Pornhub en vivo y añade tarjetas nuevas).
+    let searchSeq = 0;
+    let searchTimer;
+    async function serverSearch(term) {
+      const t = term.trim();
+      if (t.length < 2) return;
+      const seq = ++searchSeq;
+      searchingEl.classList.remove("hidden");
+      try {
+        const res = await fetch(`/ph/pornstars-search?q=${encodeURIComponent(t)}`);
+        const html = await res.text();
+        if (seq !== searchSeq) return; // ignora respuestas obsoletas
+        const tmp = document.createElement("div");
+        tmp.innerHTML = html;
+        let added = 0;
+        tmp.querySelectorAll(".card").forEach((card) => {
+          const key = card.getAttribute("href");
+          if (!key || seen.has(key)) return;
+          seen.add(key);
+          grid.appendChild(card);
+          added++;
+        });
+        if (added) applyFilter();
+      } catch {
+      } finally {
+        if (seq === searchSeq) searchingEl.classList.add("hidden");
+      }
+    }
+    searchEl.addEventListener("input", () => {
+      clearTimeout(searchTimer);
+      const term = searchEl.value;
+      searchTimer = setTimeout(() => serverSearch(term), 450);
+    });
+
+    resetEl.addEventListener("click", () => {
+      clearTimeout(searchTimer);
+      searchSeq++; // descarta cualquier búsqueda en vuelo
+      searchingEl.classList.add("hidden");
+      searchEl.value = "";
+      typeEl.value = "";
+      sortEl.value = "";
+      applyFilter();
+    });
+
+    function finishList() {
+      hasMore = false;
+      loadingEl.classList.add("hidden");
+      const n = grid.querySelectorAll(".card").length;
+      endEl.textContent = n ? "— Fin de la lista —" : "Sin resultados.";
+      endEl.classList.remove("hidden");
+      observer.disconnect();
+    }
+
+    async function loadMore() {
+      if (loading || !hasMore) return;
+      loading = true;
+      loadingEl.classList.remove("hidden");
+      try {
+        const res  = await fetch(`/ph/pornstars-cards?pagina=${nextPage}`);
+        const html = await res.text();
+        const tmp  = document.createElement("div");
+        tmp.innerHTML = html;
+        tmp.querySelectorAll(".card").forEach((card) => {
+          const key = card.getAttribute("href");
+          if (key && seen.has(key)) return;
+          if (key) seen.add(key);
+          grid.appendChild(card);
+        });
+        applyFilter();
+        nextPage++;
+        hasMore = nextPage <= totalPages;
+        loading = false;
+        if (!hasMore) { finishList(); return; }
+        loadingEl.classList.add("hidden");
+        if (isSentinelVisible()) loadMore();
+      } catch {
+        loading = false;
+        loadingEl.classList.add("hidden");
+      }
+    }
+
+    function isSentinelVisible() {
+      const r = sentinel.getBoundingClientRect();
+      return r.top < window.innerHeight + 400;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => { if (entries.some((e) => e.isIntersecting)) loadMore(); },
+      { rootMargin: "400px" },
+    );
+
+    applyFilter();
+    if (hasMore) observer.observe(sentinel);
+    else finishList();
+  </script>
+</Layout>

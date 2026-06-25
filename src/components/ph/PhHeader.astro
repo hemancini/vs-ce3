@@ -1,0 +1,168 @@
+---
+// Header unificado de /ph: título + stats, barra de navegación (CookieManager +
+// enlaces estándar + enlace externo a Pornhub) y un <slot /> para los controles
+// o filtros propios de cada página. Reemplaza el bloque repetido en todas las
+// vistas de /ph (index, categories, pornstars, model/<x>, pornstar/<x>, etc.).
+import CookieManager from "./CookieManager.astro";
+
+// Enlaces de navegación estándar; cada página elige cuáles mostrar vía `nav`.
+const NAV = {
+  scraper: { href: "/ph", label: "🕷️ Scraper" },
+  pornstars: { href: "/ph/pornstars", label: "⭐ Pornstars" },
+  categories: { href: "/ph/categories", label: "📂 Categorías" },
+};
+
+interface Props {
+  title: string;
+  capitalize?: boolean;
+  // Texto inicial del contador #stats (la grilla puede actualizarlo en cliente).
+  stats?: string;
+  // Muestra el indicador "🔎 buscando…" (búsqueda server-side en /ph/pornstars).
+  searching?: boolean;
+  cookieFromKV?: boolean;
+  cookieCount?: number;
+  nav?: (keyof typeof NAV)[];
+  // Muestra el buscador de videos (GET → /ph/video/search). Activado por defecto.
+  showSearch?: boolean;
+  // Muestra las tabs de fuente (Inicio/Favoritos/Suscripciones/Modelos) en /ph.
+  showTabs?: boolean;
+}
+
+const {
+  title,
+  capitalize = false,
+  stats,
+  searching = false,
+  cookieFromKV = false,
+  cookieCount = 0,
+  nav = ["scraper", "pornstars", "categories"],
+  showSearch = true,
+  showTabs = false,
+} = Astro.props;
+
+// "Estás aquí": resalta el enlace de la ruta actual (cuando aparece en la nav).
+const pathname = Astro.url.pathname.replace(/\/$/, "");
+
+// Prefill del buscador con el término actual (solo aplica en /ph/video/search).
+const currentSearch = Astro.url.searchParams.get("search") || "";
+
+// Tabs de fuente (solo /ph). Replican rutas del sitio:
+//   ⭐ Favoritos        → /ph/users/<id>/videos/favorites (videos favoritos)
+//   🔔 Mis Suscripciones → /ph/subscriptions              (feed de videos de mis subs)
+//   👥 Mis Modelos      → /ph/users/<id>/subscriptions    (lista de canales suscritos)
+const PH_USER_ID = "77b53b8";
+const SOURCE_TABS = [
+  { id: "home", label: "🏠 Inicio" },
+  { id: "favorites", label: "⭐ Favoritos", href: `/ph/users/${PH_USER_ID}/videos/favorites` },
+  { id: "subscriptions", label: "🔔 Mis Suscripciones", href: `/ph/subscriptions` },
+  { id: "channels", label: "👥 Mis Modelos", href: `/ph/users/${PH_USER_ID}/subscriptions` },
+];
+
+// Estado actual de la fuente/parámetros para construir los enlaces de las tabs.
+const params = Astro.url.searchParams;
+const tabSource = params.get("fuente") || "home";
+const tabUrl = (src: string) => {
+  const u = new URLSearchParams();
+  u.set("fuente", src);
+  const pages = params.get("paginas");
+  if (pages && pages !== "1") u.set("paginas", pages);
+  const q = (params.get("q") || "").trim();
+  if (q) u.set("q", q);
+  if (params.get("streams") === "1") u.set("streams", "1");
+  return `/ph?${u}`;
+};
+---
+
+<header class="mb-5 sm:mb-6 space-y-4 border-b border-vs-border pb-5">
+  {/* ── Barra de utilidades: navegación principal (izq) + acciones (der) ── */}
+  <div class="flex items-center justify-between gap-3">
+    <nav
+      aria-label="Secciones de Pornhub"
+      class="flex items-center gap-1 overflow-x-auto rounded-full border border-vs-border bg-vs-surface p-1 scrollbar-none"
+    >
+      {nav.map((k) => {
+        const active = pathname === NAV[k].href;
+        return (
+          <a
+            href={NAV[k].href}
+            aria-current={active ? "page" : undefined}
+            class:list={[
+              "whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm font-medium no-underline transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vs-pink/60",
+              active ? "bg-vs-pink text-white" : "text-gray-400 hover:bg-vs-hover hover:text-white",
+            ]}
+          >{NAV[k].label}</a>
+        );
+      })}
+    </nav>
+
+    <div class="flex shrink-0 items-center gap-2">
+      <CookieManager cookieFromKV={cookieFromKV} cookieCount={cookieCount} />
+    </div>
+  </div>
+
+  {/* ── Encabezado de página: título + contador ── */}
+  <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+    <h1 class:list={["text-2xl font-bold tracking-tight text-vs-pink sm:text-3xl", capitalize && "capitalize"]}>
+      {title}
+    </h1>
+    <span class="flex items-center gap-2 whitespace-nowrap text-sm">
+      {searching && <span id="searching" class="hidden text-vs-pink">🔎 buscando…</span>}
+      <span id="stats" class="tabular-nums text-gray-500">{stats}</span>
+    </span>
+  </div>
+
+  {/* ── Buscador de videos ── */}
+  {showSearch && (
+    <form method="get" action="/ph/video/search" role="search" class="flex gap-2">
+      <div class="relative min-w-0 flex-1">
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          class="pointer-events-none absolute left-3.5 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-500"
+        >
+          <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
+        </svg>
+        <input
+          type="search"
+          name="search"
+          value={currentSearch}
+          placeholder="Buscar videos en Pornhub…"
+          aria-label="Buscar videos en Pornhub"
+          class="w-full rounded-xl border border-vs-border bg-vs-surface py-2.5 pl-11 pr-4 text-white outline-none transition-colors placeholder-gray-500 focus:border-vs-pink focus:ring-2 focus:ring-vs-pink/30"
+        />
+      </div>
+      <button
+        type="submit"
+        class="shrink-0 cursor-pointer rounded-xl bg-vs-pink px-5 py-2.5 font-medium text-white transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vs-pink/60"
+      >Buscar</button>
+    </form>
+  )}
+
+  {/* ── Tabs de fuente (solo /ph) ── */}
+  {showTabs && (
+    <div class="flex gap-1.5 overflow-x-auto scrollbar-none">
+      {SOURCE_TABS.map((t) => {
+        const active = tabSource === t.id;
+        return (
+          <a
+            href={t.href ?? tabUrl(t.id)}
+            aria-current={active ? "page" : undefined}
+            class:list={[
+              "whitespace-nowrap rounded-lg border px-4 py-2 text-sm no-underline transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vs-pink/60",
+              active
+                ? "border-vs-pink bg-vs-pink text-white"
+                : "border-vs-border bg-vs-surface text-gray-300 hover:border-vs-pink/50 hover:text-white",
+            ]}
+          >{t.label}</a>
+        );
+      })}
+    </div>
+  )}
+</header>
+
+<slot />

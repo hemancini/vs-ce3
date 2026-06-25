@@ -1,0 +1,23 @@
+---
+// Ruta parcial (sin layout): busca performers en Pornhub por nombre y devuelve
+// solo las tarjetas. La consume el buscador de /ph/pornstars vía fetch() para
+// encontrar pornstars/modelos que no están en el directorio ya scrapeado.
+//   ?q=texto   término de búsqueda (>= 2 caracteres)
+import PornstarCard from "../../components/ph/PornstarCard.astro";
+import { searchPerformers } from "../../lib/ph/scraper.js";
+
+export const partial = true;
+export const prerender = false;
+
+const env = (Astro.locals as any)?.runtime?.env;
+const q = (Astro.url.searchParams.get("q") || "").trim();
+
+let results = [];
+try {
+  results = await searchPerformers({ query: q, env });
+} catch {
+  results = [];
+}
+---
+
+{results.map((star) => <PornstarCard star={star} />)}

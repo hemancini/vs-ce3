@@ -1,0 +1,44 @@
+---
+// Ruta parcial (sin layout): scrapea UNA página y devuelve solo las tarjetas.
+// La consume el scroll infinito de las grillas vía fetch(); el HTML resultante
+// se inyecta en la grilla y se cablea con el mismo script de <VideoGrid>.
+//
+// Parámetros (GET):
+//   ?fuente=home|favorites    fuente predefinida (default: home)
+//   ?url=<listUrl>            URL de catálogo arbitraria (model/pornstar, etc.)
+//   ?pagina=N                 página de catálogo (default: 1)
+//   ?q=texto                  filtro por título (server-side)
+//   ?streams=1                extraer streams de cada video (lento)
+import VideoCard from "../../components/ph/VideoCard.astro";
+import { scrapePage, SOURCES } from "../../lib/ph/scraper.js";
+
+export const partial = true;
+export const prerender = false;
+
+const params = Astro.url.searchParams;
+const listUrl = params.get("url") ?? "";
+const fuente = params.get("fuente") ?? "";
+const source = (fuente in SOURCES ? fuente : "home") as "home" | "favorites";
+const page = Math.max(parseInt(params.get("pagina") || "1", 10) || 1, 1);
+const withStreams = params.get("streams") === "1";
+const q = (params.get("q") || "").trim().toLowerCase();
+
+const env = (Astro.locals as any)?.runtime?.env;
+
+// Solo permitimos URLs de catálogo de Pornhub para el scroll infinito por `url`.
+const safeListUrl = /^https:\/\/[a-z]+\.pornhub\.com\//.test(listUrl) ? listUrl : "";
+
+let videos = [];
+try {
+  const result = safeListUrl
+    ? await scrapePage({ listUrl: safeListUrl, page, withStreams, env })
+    : await scrapePage({ source, page, withStreams, env });
+  videos = q
+    ? result.videos.filter((v) => (v.title || "").toLowerCase().includes(q))
+    : result.videos;
+} catch {
+  videos = [];
+}
+---
+
+{videos.map((video) => <VideoCard video={video} />)}

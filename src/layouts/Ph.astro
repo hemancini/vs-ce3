@@ -20,5 +20,23 @@ import "../styles/global.css";
     class="min-h-screen w-full max-w-[1600px] mx-auto bg-vs-bg text-gray-300 font-sans p-4 md:p-8"
   >
     <slot />
+
+    <!-- Toggle compartido de los paneles colapsables (.ph-collapsible) en mobile.
+         En desktop esos paneles siempre se ven (sm:flex), así que el botón
+         #toggle-filters está oculto (sm:hidden) y este script no interfiere. -->
+    <script is:inline>
+      (function () {
+        const btn = document.getElementById("toggle-filters");
+        if (!btn) return;
+        const panels = document.querySelectorAll(".ph-collapsible");
+        const chevron = btn.querySelector("[data-chevron]");
+        btn.addEventListener("click", () => {
+          const open = panels.length > 0 && panels[0].classList.contains("hidden");
+          panels.forEach((el) => el.classList.toggle("hidden", !open));
+          btn.setAttribute("aria-expanded", String(open));
+          if (chevron) chevron.classList.toggle("rotate-180", open);
+        });
+      })();
+    </script>
   </body>
 </html>

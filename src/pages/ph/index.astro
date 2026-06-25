@@ -1,569 +1,86 @@
 ---
+// Scraper SSR principal: en cada request scrapea Pornhub en vivo (model/favorites)
+// y renderiza la grilla. La lógica de grilla, filtros y reproductor vive en el
+// componente reutilizable <VideoGrid>, compartido con /ph/model/<x>,
+// /ph/pornstar/<x>, etc.
+//
+// Parámetros (GET):
+//   ?fuente=home|favorites    fuente a scrapear (default: home)
+//   ?paginas=N                páginas de catálogo a recorrer (1..20, default: 1)
+//   ?q=texto                  filtro por título (server-side)
+//   ?streams=1                además extrae los streams de cada video (lento)
 import Layout from "../../layouts/Ph.astro";
+import PhHeader from "../../components/ph/PhHeader.astro";
+import PhScraperControls from "../../components/ph/PhScraperControls.astro";
+import PhCategoryChips from "../../components/ph/PhCategoryChips.astro";
+import VideoGrid from "../../components/ph/VideoGrid.astro";
+import { scrapeSource, SOURCES } from "../../lib/ph/scraper.js";
+
+export const prerender = false;
+
+const env = (Astro.locals as any)?.runtime?.env;
+
+const params = Astro.url.searchParams;
+const source = SOURCES[params.get("fuente") ?? ""] ? params.get("fuente") : "home";
+const pages = Math.min(Math.max(parseInt(params.get("paginas") || "1", 10) || 1, 1), 20);
+const q = (params.get("q") || "").trim();
+const withStreams = params.get("streams") === "1";
+
+let videos = [];
+let totalPages = 0;
+let searches = [];
+let error = null;
+const startedAt = Date.now();
+
+try {
+  const result = await scrapeSource({ source, maxPages: pages, withStreams, env });
+  videos = result.videos;
+  totalPages = result.totalPages;
+  searches = result.searches ?? [];
+} catch (e) {
+  error = e.message;
+}
+
+// Estado de las cookies para mostrar en el panel editor
+let cookieFromKV = false;
+let cookieCount = 0;
+try {
+  const raw = await env?.VS_C3_KV?.get("ph:cookies");
+  if (raw) { cookieFromKV = true; cookieCount = JSON.parse(raw).length; }
+} catch {}
+
+const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
 ---
 
-<Layout title="LustHub - Reproductor">
-  <div class="flex items-center justify-between gap-2">
-    <h1 class="text-center text-vs-pink text-2xl sm:text-3xl font-bold">
-      🎬 LustHub - Reproductor
-    </h1>
-    <span
-      id="count"
-      class="col-span-2 text-center sm:text-left text-sm text-gray-500 whitespace-nowrap"
-    ></span>
-  </div>
-
-  <p class="text-end mb-4">
-    <a href="/ph/scraper" class="text-vs-pink no-underline font-bold"
-      >🕷️ Ir al scraper</a
-    >
-  </p>
-  <div class="mx-auto mb-4 flex justify-center md:justify-end gap-2" id="tabs">
-    <button
-      data-src="model"
-      class="tab flex-1 sm:flex-none px-4 sm:px-5 py-2.5 sm:py-2 rounded-lg border border-vs-border cursor-pointer transition-colors"
-      >🎬 Modelo</button
-    >
-    <button
-      data-src="favorites"
-      class="tab flex-1 sm:flex-none px-4 sm:px-5 py-2.5 sm:py-2 rounded-lg border border-vs-border cursor-pointer transition-colors"
-      >⭐ Favoritos</button
-    >
-  </div>
-
-  <div
-    class="max-w-[1600px] mx-auto mb-5 grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 sm:gap-3"
+<Layout title="LustHub - Scraper SSR">
+  <PhHeader
+    title="🕷️ LustHub - Scraper SSR"
+    stats={error ? "Error al scrapear" : `${videos.length} videos · ${elapsed}s · ${totalPages} págs.`}
+    cookieFromKV={cookieFromKV}
+    cookieCount={cookieCount}
+    nav={["pornstars", "categories"]}
+    showTabs
   >
-    <input
-      id="search"
-      type="search"
-      placeholder="Buscar por título…"
-      class="col-span-2 sm:flex-1 sm:min-w-[220px] bg-vs-surface text-white placeholder-gray-500 border border-vs-border rounded-lg px-4 py-2.5 outline-none focus:border-vs-pink"
+    <!-- Controles de scraping (recargan la página). -->
+    <PhScraperControls
+      pages={pages}
+      withStreams={withStreams}
+      q={q}
+      action="/ph"
+      hidden={[{ name: "fuente", value: source ?? "home" }]}
     />
-    <select
-      id="uploader"
-      class="w-full sm:w-auto bg-vs-surface text-white border border-vs-border rounded-lg px-3 py-2.5 outline-none focus:border-vs-pink cursor-pointer"
-    >
-      <option value="">Todos los canales</option>
-    </select>
-    <select
-      id="quality"
-      class="w-full sm:w-auto bg-vs-surface text-white border border-vs-border rounded-lg px-3 py-2.5 outline-none focus:border-vs-pink cursor-pointer"
-    >
-      <option value="">Cualquier calidad</option>
-      <option value="1080">1080p+</option>
-      <option value="720">720p+</option>
-      <option value="480">480p+</option>
-    </select>
-    <select
-      id="sort"
-      class="w-full sm:w-auto bg-vs-surface text-white border border-vs-border rounded-lg px-3 py-2.5 outline-none focus:border-vs-pink cursor-pointer"
-    >
-      <option value="">Orden original</option>
-      <option value="views">Más vistas</option>
-      <option value="duration-desc">Más largos</option>
-      <option value="duration-asc">Más cortos</option>
-    </select>
-    <button
-      id="reset"
-      class="w-full sm:w-auto px-3 py-2.5 bg-vs-surface border border-vs-border rounded-lg text-gray-300 hover:text-white hover:border-vs-pink cursor-pointer"
-      >Limpiar</button
-    >
-  </div>
+  </PhHeader>
 
-  <div
-    class="grid grid-cols-2 lg:grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3 sm:gap-5 max-w-[1600px] mx-auto"
-    id="grid"
-  >
-  </div>
+  {/* Chips de Búsquedas de Tendencia de la portada (culos enormes, milica xxx, …). */}
+  <PhCategoryChips chips={searches} />
 
-  <div
-    id="modal"
-    class="hidden fixed inset-0 bg-black/95 items-center justify-center z-[1000] p-2 sm:p-4"
-  >
-    <div
-      class="relative w-full sm:w-[95%] max-w-[1100px] max-h-[95vh] overflow-y-auto bg-[#111] rounded-xl"
-    >
-      <span
-        class="absolute top-2 right-3 sm:top-[15px] sm:right-[25px] leading-none text-4xl sm:text-[2.8rem] text-white cursor-pointer z-20 drop-shadow-lg"
-        id="close">×</span
-      >
-      <div class="relative pt-[56.25%]">
-        <video
-          id="video"
-          class="absolute top-0 left-0 w-full h-full bg-black"
-          controls
-          autoplay
-          playsinline></video>
-      </div>
-      <div
-        class="px-4 sm:px-5 py-3 sm:py-4 flex items-start justify-between gap-3"
-      >
-        <h2 id="modal-title" class="text-base sm:text-xl font-semibold flex-1">
-        </h2>
-        <div class="relative shrink-0">
-          <button
-            id="menu-toggle"
-            aria-label="Opciones"
-            aria-haspopup="true"
-            aria-expanded="false"
-            class="p-2 rounded-md text-gray-300 hover:text-white hover:bg-white/10 cursor-pointer"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="currentColor"
-              ><circle cx="12" cy="5" r="2"></circle><circle
-                cx="12"
-                cy="12"
-                r="2"></circle><circle cx="12" cy="19" r="2"></circle></svg
-            >
-          </button>
-          <div
-            id="menu"
-            class="hidden absolute right-0 bottom-full mb-2 w-56 bg-vs-surface border border-vs-border rounded-md shadow-lg overflow-hidden z-1100"
-          >
-            <button
-              id="open-original"
-              class="block w-full text-left px-4 py-2.5 text-white hover:bg-vs-pink cursor-pointer"
-            >
-              Abrir en Pornhub (Recomendado)
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <script is:inline>
-    let hls = null;
-    const grid = document.getElementById("grid");
-    const modal = document.getElementById("modal");
-    const videoEl = document.getElementById("video");
-    const titleEl = document.getElementById("modal-title");
-    const openBtn = document.getElementById("open-original");
-    const menuToggle = document.getElementById("menu-toggle");
-    const menu = document.getElementById("menu");
-
-    const searchEl = document.getElementById("search");
-    const uploaderEl = document.getElementById("uploader");
-    const qualityEl = document.getElementById("quality");
-    const sortEl = document.getElementById("sort");
-    const resetEl = document.getElementById("reset");
-    const countEl = document.getElementById("count");
-
-    let currentVideo = null;
-    let playToken = 0;
-    let allVideos = [];
-
-    // ── Helpers de parseo ─────────────────────────────────────────────
-    // "616K" → 616000, "1.2M" → 1200000, "1,234" → 1234
-    function parseViews(s) {
-      if (!s) return 0;
-      const m = String(s)
-        .trim()
-        .replace(/,/g, "")
-        .match(/^([\d.]+)\s*([KMB])?/i);
-      if (!m) return 0;
-      const mult = { K: 1e3, M: 1e6, B: 1e9 }[(m[2] || "").toUpperCase()] || 1;
-      return Math.round(parseFloat(m[1]) * mult);
-    }
-
-    // "16:12" → 972s, "1:02:03" → 3723s
-    function parseDuration(s) {
-      if (!s) return 0;
-      const parts = String(s).split(":").map(Number);
-      if (parts.some(isNaN)) return 0;
-      return parts.reduce((acc, n) => acc * 60 + n, 0);
-    }
-
-    // Máxima resolución disponible entre los streams (1080, 720, …)
-    function maxQuality(streams) {
-      return (streams || []).reduce((max, s) => {
-        const q = parseInt(s.quality, 10);
-        return !isNaN(q) && q > max ? q : max;
-      }, 0);
-    }
-
-    // Todo el media del CDN de Pornhub se sirve a través de /api/ph/proxy (mismo
-    // origen): evita el bloqueo CORS de hls.js y añade el Referer que exige el CDN
-    // (sin él las previews/streams devuelven 410 "hotlink denegado").
-    const proxied = (u) => `/api/ph/proxy?url=${encodeURIComponent(u)}`;
-
-    function renderGrid(videos) {
-      grid.innerHTML = "";
-      videos.forEach((video) => {
-        const card = document.createElement("div");
-        card.className =
-          "bg-vs-surface rounded-xl overflow-hidden cursor-pointer transition-transform duration-200 active:scale-[0.98] md:hover:-translate-y-2";
-        card.innerHTML = `
-          <div class="relative aspect-video bg-black">
-            <img class="w-full h-full object-cover" src="${video.thumbnail}" loading="lazy">
-            <video class="preview absolute inset-0 w-full h-full object-cover opacity-0 transition-opacity duration-300 pointer-events-none" muted loop playsinline preload="none"></video>
-            <a href="/ph/play?viewkey=${video.vkey}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Reproducir en nueva pestaña" aria-label="Reproducir en nueva pestaña"
-               class="absolute top-2 right-2 z-10 bg-black/85 hover:bg-vs-pink text-white rounded p-2 flex items-center justify-center transition-colors">
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-            </a>
-            ${video.duration ? `<div class="absolute bottom-2 right-2 bg-black/85 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded text-xs sm:text-sm font-bold">${video.duration}</div>` : ""}
-          </div>
-          <div class="p-2.5 sm:p-3.5">
-            <h3 class="m-0 leading-snug text-sm sm:text-[1.05rem] line-clamp-2">${video.title}</h3>
-          </div>
-        `;
-        // Si el usuario mantiene pulsado para previsualizar (táctil), el "click"
-        // posterior no debe abrir el modal.
-        let longPressed = false;
-        card.addEventListener("click", () => {
-          if (longPressed) {
-            longPressed = false;
-            return;
-          }
-          playVideo(video);
-        });
-
-        // Vista previa perezosa: cargamos el .webm solo al activarse (hover en
-        // desktop, mantener pulsado en táctil) para no descargar todas.
-        if (video.preview) {
-          const prev = card.querySelector(".preview");
-          const showPreview = () => {
-            if (!prev.src) prev.src = proxied(video.preview);
-            prev.currentTime = 0;
-            prev
-              .play()
-              .then(() => {
-                prev.classList.remove("opacity-0");
-                prev.classList.add("opacity-100");
-              })
-              .catch(() => {});
-          };
-          const hidePreview = () => {
-            prev.classList.add("opacity-0");
-            prev.classList.remove("opacity-100");
-            prev.pause();
-          };
-
-          // Desktop: hover.
-          card.addEventListener("mouseenter", showPreview);
-          card.addEventListener("mouseleave", hidePreview);
-
-          // Táctil: mantener pulsado ~350ms inicia la preview; al soltar o
-          // desplazar (scroll) se oculta. Un scroll cancela el temporizador.
-          let pressTimer = null;
-          card.addEventListener(
-            "touchstart",
-            () => {
-              longPressed = false;
-              pressTimer = setTimeout(() => {
-                longPressed = true;
-                showPreview();
-              }, 350);
-            },
-            { passive: true },
-          );
-          const endTouch = () => {
-            clearTimeout(pressTimer);
-            if (longPressed) hidePreview();
-          };
-          card.addEventListener("touchend", endTouch);
-          card.addEventListener("touchcancel", endTouch);
-          card.addEventListener(
-            "touchmove",
-            () => {
-              clearTimeout(pressTimer);
-              if (longPressed) {
-                hidePreview();
-                longPressed = false;
-              }
-            },
-            { passive: true },
-          );
-        }
-
-        grid.appendChild(card);
-      });
-    }
-
-    function applyFilter() {
-      const q = searchEl.value.trim().toLowerCase();
-      const uploader = uploaderEl.value;
-      const minQuality = parseInt(qualityEl.value, 10) || 0;
-      const sort = sortEl.value;
-
-      let list = allVideos.filter((v) => {
-        if (q && !(v.title || "").toLowerCase().includes(q)) return false;
-        if (uploader && (v.uploader?.name || "") !== uploader) return false;
-        if (minQuality && maxQuality(v.streams) < minQuality) return false;
-        return true;
-      });
-
-      if (sort === "views") {
-        list = [...list].sort(
-          (a, b) => parseViews(b.views) - parseViews(a.views),
-        );
-      } else if (sort === "duration-desc") {
-        list = [...list].sort(
-          (a, b) => parseDuration(b.duration) - parseDuration(a.duration),
-        );
-      } else if (sort === "duration-asc") {
-        list = [...list].sort(
-          (a, b) => parseDuration(a.duration) - parseDuration(b.duration),
-        );
-      }
-
-      renderGrid(list);
-      countEl.textContent = `${list.length} / ${allVideos.length} videos`;
-    }
-
-    // Fuentes de datos: cada una sirve su propio JSON generado por el scraper.
-    const ENDPOINTS = {
-      model: "/api/ph/videos.json",
-      favorites: "/api/ph/favorites.json",
-    };
-    let currentSource = "model";
-    const tabs = [...document.querySelectorAll("#tabs .tab")];
-
-    // Sincroniza fuente + filtros con la URL (sin recargar) para poder
-    // compartir/recargar manteniendo el estado.
-    function syncUrl() {
-      const url = new URL(window.location.href);
-      const set = (key, val) => {
-        val ? url.searchParams.set(key, val) : url.searchParams.delete(key);
-      };
-      set("fuente", currentSource === "model" ? "" : currentSource);
-      set("q", searchEl.value.trim());
-      set("canal", uploaderEl.value);
-      set("calidad", qualityEl.value);
-      set("orden", sortEl.value);
-      window.history.replaceState(null, "", url);
-    }
-
-    function readUrl() {
-      const p = new URLSearchParams(window.location.search);
-      searchEl.value = p.get("q") || "";
-      uploaderEl.value = p.get("canal") || "";
-      qualityEl.value = p.get("calidad") || "";
-      sortEl.value = p.get("orden") || "";
-    }
-
-    // Rellena el desplegable de canales con los uploaders únicos de la fuente
-    // actual, preservando la selección si sigue existiendo.
-    function populateUploaders() {
-      const prev = uploaderEl.value;
-      uploaderEl.length = 1; // conserva la opción "Todos los canales"
-      const names = [
-        ...new Set(allVideos.map((v) => v.uploader?.name).filter(Boolean)),
-      ].sort();
-      for (const name of names) {
-        const opt = document.createElement("option");
-        opt.value = name;
-        opt.textContent = name;
-        uploaderEl.appendChild(opt);
-      }
-      uploaderEl.value = prev; // queda '' si la opción ya no existe en esta fuente
-    }
-
-    function setActiveTab(src) {
-      tabs.forEach((t) => {
-        const active = t.dataset.src === src;
-        t.classList.toggle("bg-vs-pink", active);
-        t.classList.toggle("border-vs-pink", active);
-        t.classList.toggle("text-white", active);
-        t.classList.toggle("bg-vs-surface", !active);
-        t.classList.toggle("text-gray-300", !active);
-      });
-    }
-
-    // Carga una fuente (model | favorites): trae su JSON, repuebla filtros y pinta.
-    async function loadSource(src) {
-      currentSource = ENDPOINTS[src] ? src : "model";
-      setActiveTab(currentSource);
-      grid.innerHTML = '<p class="text-center text-gray-500">Cargando…</p>';
-      try {
-        const res = await fetch(ENDPOINTS[currentSource]);
-        allVideos = await res.json();
-        populateUploaders();
-        applyFilter();
-      } catch (err) {
-        grid.innerHTML =
-          '<p class="text-center text-red-500">No se pudieron cargar los videos.</p>';
-      }
-    }
-
-    [searchEl, uploaderEl, qualityEl, sortEl].forEach((el) => {
-      const evt = el === searchEl ? "input" : "change";
-      el.addEventListener(evt, () => {
-        applyFilter();
-        syncUrl();
-      });
-    });
-
-    resetEl.addEventListener("click", () => {
-      searchEl.value = "";
-      uploaderEl.value = "";
-      qualityEl.value = "";
-      sortEl.value = "";
-      applyFilter();
-      syncUrl();
-    });
-
-    // Cambio de fuente: al cambiar de pestaña, reseteamos el filtro de canal
-    // (los uploaders difieren entre fuentes) y recargamos.
-    tabs.forEach((t) =>
-      t.addEventListener("click", async () => {
-        if (t.dataset.src === currentSource) return;
-        uploaderEl.value = "";
-        await loadSource(t.dataset.src);
-        syncUrl();
-      }),
-    );
-
-    // Si el usuario navega atrás/adelante, reflejar fuente + filtros.
-    // Cargamos la fuente primero (puebla los canales) y luego leemos la URL.
-    window.addEventListener("popstate", async () => {
-      const src =
-        new URLSearchParams(window.location.search).get("fuente") || "model";
-      if (src !== currentSource) await loadSource(src);
-      readUrl();
-      applyFilter();
-    });
-
-    (async () => {
-      try {
-        const initial =
-          new URLSearchParams(window.location.search).get("fuente") || "model";
-        await loadSource(initial); // puebla canales de la fuente
-        readUrl(); // ahora las opciones existen → fija filtros de la URL
-        applyFilter();
-      } catch (err) {
-        grid.innerHTML =
-          '<p class="text-center text-red-500">No se pudieron cargar los videos.</p>';
-      }
-    })();
-
-    function loadStreams(streams) {
-      if (hls) {
-        hls.destroy();
-        hls = null;
-      }
-      if (!streams || !streams.length) {
-        titleEl.textContent =
-          (currentVideo?.title || "") + " — sin streams disponibles";
-        return;
-      }
-
-      // Priorizamos HLS (master.m3u8). Los streams "mp4" de Pornhub no son
-      // archivos: su videoUrl apunta a /video/get_media (devuelve JSON), así que
-      // no se pueden poner en videoEl.src. Solo usamos mp4 si es un .mp4 real.
-      const m3u8 = streams.find(
-        (s) => s.videoUrl && s.videoUrl.includes(".m3u8"),
-      );
-      if (m3u8) {
-        if (Hls.isSupported()) {
-          hls = new Hls();
-          hls.loadSource(proxied(m3u8.videoUrl));
-          hls.attachMedia(videoEl);
-          hls.on(Hls.Events.ERROR, (_e, data) => {
-            if (data.fatal) {
-              titleEl.textContent =
-                (currentVideo?.title || "") +
-                " — el stream caducó o no está disponible. Usa «Abrir en Pornhub».";
-            }
-          });
-        } else if (videoEl.canPlayType("application/vnd.apple.mpegurl")) {
-          videoEl.src = proxied(m3u8.videoUrl); // Safari reproduce HLS nativo
-        }
-        return;
-      }
-
-      const realMp4 = streams.find(
-        (s) => s.videoUrl && /\.mp4(\?|$)/.test(s.videoUrl),
-      );
-      if (realMp4) {
-        videoEl.src = proxied(realMp4.videoUrl);
-        return;
-      }
-
-      titleEl.textContent =
-        (currentVideo?.title || "") + " — sin streams reproducibles";
-    }
-
-    async function playVideo(video) {
-      currentVideo = video;
-      titleEl.textContent = video.title + " — cargando…";
-      modal.classList.remove("hidden");
-      modal.classList.add("flex");
-
-      if (hls) {
-        hls.destroy();
-        hls = null;
-      }
-      videoEl.removeAttribute("src");
-
-      // Las URLs guardadas en videos.json caducan (~minutos). Pedimos streams
-      // frescos en el momento del click; si el endpoint falla, usamos las del JSON.
-      const reqId = ++playToken;
-      try {
-        const res = await fetch(
-          `/api/ph/stream.json?vkey=${encodeURIComponent(video.vkey)}`,
-        );
-        const data = await res.json();
-        if (reqId !== playToken) return; // el usuario abrió otro video / cerró
-        titleEl.textContent = video.title;
-        loadStreams(
-          data.streams && data.streams.length ? data.streams : video.streams,
-        );
-      } catch (err) {
-        if (reqId !== playToken) return;
-        titleEl.textContent = video.title;
-        loadStreams(video.streams);
-      }
-    }
-
-    function toggleMenu(open) {
-      const show = open ?? menu.classList.contains("hidden");
-      menu.classList.toggle("hidden", !show);
-      menuToggle.setAttribute("aria-expanded", String(show));
-    }
-
-    menuToggle.addEventListener("click", (e) => {
-      e.stopPropagation();
-      toggleMenu();
-    });
-    document.addEventListener("click", (e) => {
-      if (
-        !menu.classList.contains("hidden") &&
-        !menu.contains(e.target) &&
-        e.target !== menuToggle
-      ) {
-        toggleMenu(false);
-      }
-    });
-
-    openBtn.addEventListener("click", () => {
-      toggleMenu(false);
-      if (currentVideo && currentVideo.pageUrl) {
-        window.open(currentVideo.pageUrl, "_blank");
-      }
-    });
-
-    function closeModal() {
-      toggleMenu(false);
-      playToken++; // invalida cualquier fetch de stream en curso
-      if (hls) hls.destroy();
-      videoEl.pause();
-      videoEl.src = "";
-      modal.classList.add("hidden");
-      modal.classList.remove("flex");
-    }
-
-    document.getElementById("close").addEventListener("click", closeModal);
-    modal.addEventListener("click", (e) => {
-      if (e.target === modal) closeModal();
-    });
-    document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") closeModal();
-    });
-  </script>
+  <VideoGrid
+    videos={videos}
+    totalPages={totalPages}
+    nextPage={pages + 1}
+    source={source}
+    withStreams={withStreams}
+    q={q}
+    error={error}
+  />
 </Layout>

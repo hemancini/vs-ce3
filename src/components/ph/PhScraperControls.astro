@@ -1,0 +1,44 @@
+---
+// Controles de scraping colapsables (.ph-collapsible): páginas iniciales, toggle
+// de streams y botón "Re-scrapear". Idéntico en /ph/video, /ph/categories/<x>,
+// /ph/model/<x>, /ph/pornstar/<x>, /ph/language/<x>, /ph/user/<x> e index.
+interface Props {
+  pages: number;
+  withStreams: boolean;
+  q?: string;
+  // action explícito (sólo index usa /ph); el resto reenvía a la URL actual.
+  action?: string;
+  // Campos ocultos extra que el GET debe conservar (ej. fuente, c).
+  hidden?: { name: string; value: string }[];
+}
+
+const { pages, withStreams, q = "", action, hidden = [] } = Astro.props;
+---
+
+<form
+  method="get"
+  action={action}
+  class="ph-collapsible hidden sm:flex sm:flex-wrap sm:items-center gap-3 space-y-3 sm:space-y-0 max-w-[1600px] mx-auto mb-5 text-sm text-gray-400"
+>
+  {hidden.map((h) => <input type="hidden" name={h.name} value={h.value} />)}
+  <input type="hidden" id="q-hidden" name="q" value={q} />
+  <label class="flex items-center gap-2">
+    Páginas iniciales
+    <input
+      type="number"
+      name="paginas"
+      value={pages}
+      min="1"
+      max="20"
+      class="w-20 bg-vs-surface text-white border border-vs-border rounded-lg px-3 py-2 outline-none focus:border-vs-pink"
+    />
+  </label>
+  <label class="flex items-center gap-2 whitespace-nowrap">
+    <input type="checkbox" name="streams" value="1" checked={withStreams} class="w-4 h-4" />
+    Extraer streams (habilita filtro de calidad)
+  </label>
+  <button
+    type="submit"
+    class="px-4 py-2 bg-vs-surface border border-vs-border rounded-lg text-gray-200 hover:border-vs-pink cursor-pointer"
+  >🔄 Re-scrapear</button>
+</form>

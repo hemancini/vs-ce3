@@ -1,7 +1,8 @@
 ---
 // Página de reproducción individual: /ph/play?viewkey=XXXX
 // Pide los streams frescos a /api/ph/stream.json y reproduce vía hls.js a través
-// del proxy (mismo origen). El título se busca en los catálogos ya generados.
+// del proxy (mismo origen). La ficha (uploader, vistas, fecha, categorías) y las
+// grillas de relacionados/recomendados se piden a /api/ph/video.json.
 import '../../styles/global.css';
 ---
 
@@ -12,22 +13,182 @@ import '../../styles/global.css';
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>LustHub - Reproducir</title>
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js"></script>
+  <style>
+    /* Auto-ocultado: con el video reproduciendo y el ratón inactivo, ocultamos la
+       barra y el cursor. Cualquier movimiento (gestionado en JS) lo revierte. */
+    #player[data-state="playing"][data-idle="true"] #pv-bar { opacity: 0; pointer-events: none; }
+    #player[data-state="playing"][data-idle="true"] { cursor: none; }
+
+    /* Indicador central (play/pausa) con un pop de 0.5s al alternar. */
+    #pv-center.pv-pop { animation: pv-pop 0.5s ease-out forwards; }
+    @keyframes pv-pop {
+      0%   { opacity: 0.9; transform: scale(0.85); }
+      100% { opacity: 0;   transform: scale(1.25); }
+    }
+
+    /* Slider de volumen: pista fina y pulgar rosa. */
+    .pv-vol { -webkit-appearance: none; appearance: none; height: 4px; border-radius: 9999px;
+              background: rgba(255,255,255,0.35); outline: none; }
+    .pv-vol::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 12px; height: 12px;
+              border-radius: 9999px; background: #ff4088; cursor: pointer; }
+    .pv-vol::-moz-range-thumb { width: 12px; height: 12px; border: none; border-radius: 9999px;
+              background: #ff4088; cursor: pointer; }
+  </style>
 </head>
 <body class="m-0 bg-black text-white font-sans min-h-screen">
-  <div class="w-full max-w-[1400px] mx-auto p-4 flex flex-col gap-3">
+  <div class="w-full max-w-[1400px] mx-auto p-4 flex flex-col gap-4">
     <!-- Player 16:9 responsive, limitado por el alto del viewport: el ancho se
          capa para que el alto (56.25% del ancho) no supere 82vh. -->
     <div class="mx-auto w-full" style="max-width: min(100%, calc(82vh * 16 / 9));">
-      <div class="relative w-full pt-[56.25%] bg-black rounded-lg overflow-hidden">
-        <video id="video" class="absolute inset-0 w-full h-full bg-black" controls autoplay playsinline></video>
+      <div id="player" class="pv-root group/pv relative w-full pt-[56.25%] bg-black rounded-lg overflow-hidden" data-state="paused" data-idle="false">
+        <video id="video" class="absolute inset-0 w-full h-full bg-black" autoplay playsinline></video>
+
+        <!-- Controles personalizados (barra de progreso + indicadores + vista previa) -->
+        <div id="pv" class="absolute inset-0 text-white">
+          <!-- Capa de click: play/pause -->
+          <button id="pv-surface" class="absolute inset-0 w-full cursor-pointer" aria-label="Reproducir/Pausar"></button>
+
+          <!-- Indicador central al alternar play/pausa -->
+          <div class="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <div id="pv-center" class="flex h-16 w-16 items-center justify-center rounded-full bg-black/55 opacity-0 scale-75">
+              <svg id="pv-center-icon" xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+            </div>
+          </div>
+
+          <!-- Barra inferior -->
+          <div id="pv-bar" class="pv-bar absolute inset-x-0 bottom-0 px-3 pb-2 pt-10 bg-gradient-to-t from-black/85 via-black/35 to-transparent transition-opacity duration-200">
+            <!-- Seekbar -->
+            <div id="pv-seek" class="group/seek relative flex h-6 items-end cursor-pointer select-none touch-none">
+              <!-- Vista previa (sprite + tiempo + tag) -->
+              <div id="pv-preview" class="pointer-events-none absolute bottom-8 left-0 hidden -translate-x-1/2 flex-col items-center">
+                <div id="pv-preview-thumb" class="rounded border border-white/25 bg-black bg-no-repeat shadow-lg" style="width:160px;height:90px"></div>
+                <span id="pv-preview-tag" class="mt-1 hidden max-w-[160px] truncate rounded bg-vs-pink px-1.5 py-0.5 text-[11px] font-semibold"></span>
+                <span id="pv-preview-time" class="mt-1 rounded bg-black/80 px-1.5 py-0.5 text-xs font-semibold tabular-nums"></span>
+              </div>
+
+              <!-- Pista -->
+              <div id="pv-track" class="relative h-1 w-full rounded-full bg-white/25 transition-[height] duration-150 group-hover/seek:h-1.5">
+                <!-- Gráfica de popularidad (hotspots) -->
+                <svg id="pv-hotspots" class="pointer-events-none absolute bottom-0 left-0 h-11 w-full opacity-70 transition-opacity duration-150 group-hover/pv:opacity-100" viewBox="0 0 1000 100" preserveAspectRatio="none"></svg>
+                <div id="pv-buffer" class="absolute inset-y-0 left-0 rounded-full bg-white/30" style="width:0%"></div>
+                <div id="pv-elapsed" class="absolute inset-y-0 left-0 rounded-full bg-vs-pink" style="width:0%">
+                  <div class="absolute right-0 top-1/2 h-3 w-3 -translate-y-1/2 translate-x-1/2 scale-0 rounded-full bg-vs-pink shadow transition-transform duration-150 group-hover/seek:scale-100"></div>
+                </div>
+                <!-- Marcadores de action tags -->
+                <div id="pv-tags" class="pointer-events-none absolute inset-0"></div>
+              </div>
+            </div>
+
+            <!-- Fila de botones -->
+            <div class="mt-2 flex items-center gap-3 text-white">
+              <button id="pv-play" class="shrink-0 opacity-90 hover:opacity-100" aria-label="Reproducir">
+                <svg id="pv-play-icon" xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+              </button>
+
+              <div class="flex items-center group/vol">
+                <button id="pv-mute" class="shrink-0 opacity-90 hover:opacity-100" aria-label="Silenciar">
+                  <svg id="pv-vol-icon" xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>
+                </button>
+                <input id="pv-vol" type="range" min="0" max="1" step="0.05" value="1"
+                       class="pv-vol w-0 opacity-0 transition-all duration-200 group-hover/vol:w-16 group-hover/vol:opacity-100 group-hover/vol:ml-2" aria-label="Volumen" />
+              </div>
+
+              <span class="text-xs font-semibold tabular-nums text-white/90">
+                <span id="pv-cur">0:00</span> <span class="text-white/50">/</span> <span id="pv-dur">0:00</span>
+              </span>
+
+              <div class="ml-auto flex items-center gap-3">
+                <!-- Selector de calidad -->
+                <div id="pv-quality" class="relative hidden">
+                  <button id="pv-quality-btn" class="flex items-center gap-1 rounded px-2 py-0.5 text-xs font-semibold opacity-90 hover:bg-white/10 hover:opacity-100" aria-haspopup="true" aria-expanded="false" aria-label="Calidad">
+                    <span id="pv-quality-label">Auto</span>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>
+                  </button>
+                  <div id="pv-quality-menu" class="absolute bottom-full right-0 mb-2 hidden min-w-[120px] overflow-hidden rounded-lg bg-black/95 py-1 text-sm shadow-lg ring-1 ring-white/10"></div>
+                </div>
+                <!-- Menú de opciones (velocidad + picture in picture) -->
+                <div id="pv-more" class="relative">
+                  <button id="pv-more-btn" class="flex items-center rounded px-1 py-0.5 opacity-90 hover:bg-white/10 hover:opacity-100" aria-haspopup="true" aria-expanded="false" aria-label="Más opciones" title="Más opciones">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
+                  </button>
+                  <div id="pv-more-menu" class="absolute bottom-full right-0 mb-2 hidden min-w-[180px] overflow-hidden rounded-lg bg-black/95 py-1 text-sm shadow-lg ring-1 ring-white/10">
+                    <div class="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-white/50">Velocidad</div>
+                    <div id="pv-speed-list"></div>
+                    <div id="pv-pip-sep" class="my-1 border-t border-white/10"></div>
+                    <button id="pv-pip" class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-white hover:bg-white/10">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19 7h-8v6h8V7zm2-4H3c-1.1 0-2 .9-2 2v14c0 1.1.9 1.98 2 1.98h18c1.1 0 2-.88 2-1.98V5c0-1.1-.9-2-2-2zm0 16.01H3V4.98h18v14.03z"/></svg>
+                      <span>Picture in picture</span>
+                    </button>
+                  </div>
+                </div>
+                <button id="pv-fs" class="shrink-0 opacity-90 hover:opacity-100" aria-label="Pantalla completa">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
-    <h1 id="title" class="text-lg font-semibold m-0">Cargando…</h1>
-    <p id="status" class="text-sm text-gray-400 m-0 min-h-4"></p>
-    <div class="flex flex-wrap gap-3">
-      <a id="open-original" target="_blank" rel="noopener" class="px-4 py-2 bg-vs-pink text-white rounded-md no-underline font-semibold">Abrir en Pornhub</a>
-      <a href="/ph" class="px-4 py-2 bg-vs-surface border border-vs-border text-gray-300 rounded-md no-underline hover:text-white">← Volver al reproductor</a>
+
+    <h1 id="title" class="text-lg sm:text-xl font-semibold m-0 leading-snug">Cargando…</h1>
+
+    <!-- Fila de info: vistas · fecha · likes -->
+    <div id="meta-row" class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-400">
+      <span id="views"></span>
+      <span id="date"></span>
+      <span id="likes" class="hidden items-center gap-1">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M2 21h4V9H2v12zm20-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L13.17 1 6.59 7.59C6.22 7.95 6 8.45 6 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"/></svg>
+        <span id="likes-count"></span>
+      </span>
+      <!-- Favoritos: añade/quita el video de la cuenta de Pornhub (requiere sesión) -->
+      <button id="fav-btn" class="hidden items-center gap-1.5 rounded-full border border-vs-border bg-vs-surface px-3 py-1.5 font-semibold text-gray-200 hover:border-vs-pink hover:text-white disabled:opacity-60" aria-pressed="false">
+        <svg id="fav-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+        <span id="fav-label">Favoritos</span>
+      </button>
+      <!-- Suscripción al canal/modelo del uploader (requiere sesión) -->
+      <button id="sub-btn" class="hidden items-center gap-1.5 rounded-full border border-vs-border bg-vs-surface px-3 py-1.5 font-semibold text-gray-200 hover:border-vs-pink hover:text-white disabled:opacity-60" aria-pressed="false">
+        <svg id="sub-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg>
+        <span id="sub-label">Suscribirte</span>
+      </button>
     </div>
+
+    <p id="status" class="text-sm text-gray-400 m-0 min-h-4"></p>
+
+    <!-- Tarjeta del uploader (canal / modelo) -->
+    <div id="uploader" class="hidden flex-wrap items-center gap-3 border-y border-vs-border py-3">
+      <a id="up-link" class="flex items-center gap-3 no-underline group min-w-0">
+        <img id="up-avatar" class="w-12 h-12 rounded-full object-cover bg-vs-surface shrink-0" alt="" />
+        <div class="min-w-0">
+          <div class="flex items-center gap-1.5">
+            <span id="up-name" class="font-semibold text-white group-hover:text-vs-pink truncate"></span>
+            <span id="up-badges" class="flex items-center gap-1 shrink-0"></span>
+          </div>
+          <div id="up-stats" class="text-xs text-gray-400"></div>
+        </div>
+      </a>
+      <div class="flex gap-2 sm:ml-auto">
+        <a id="up-channel" class="hidden px-4 py-2 bg-vs-surface border border-vs-border text-gray-200 rounded-md no-underline text-sm font-semibold hover:text-white hover:border-vs-pink">Ver canal</a>
+        <a id="open-original" target="_blank" rel="noopener" class="px-4 py-2 bg-vs-pink text-white rounded-md no-underline text-sm font-semibold">Abrir en Pornhub</a>
+      </div>
+    </div>
+
+    <!-- Categorías -->
+    <div id="cats-block" class="hidden">
+      <p class="text-xs uppercase tracking-wide text-gray-500 m-0 mb-2">Categorías</p>
+      <div id="cats" class="flex flex-wrap gap-2"></div>
+      <button id="cats-toggle" class="hidden mt-2 text-sm text-vs-pink hover:underline cursor-pointer">Ver más ▾</button>
+    </div>
+
+    <a href="/ph" class="self-start px-4 py-2 bg-vs-surface border border-vs-border text-gray-300 rounded-md no-underline text-sm hover:text-white">← Volver al reproductor</a>
+
+    <!-- Pestañas: Relacionado / Recomendado -->
+    <div class="mt-2 border-b border-vs-border flex gap-1">
+      <button data-tab="related" class="ph-tab px-4 py-2.5 text-sm font-semibold text-gray-400 border-b-2 border-transparent cursor-pointer">Relacionado</button>
+      <button data-tab="recommended" class="ph-tab px-4 py-2.5 text-sm font-semibold text-gray-400 border-b-2 border-transparent cursor-pointer">Recomendado</button>
+    </div>
+    <p id="grid-empty" class="hidden text-center text-gray-500 py-8">Sin videos.</p>
+    <div id="grid" class="grid grid-cols-2 lg:grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-3 sm:gap-5"></div>
   </div>
 
   <script is:inline>
@@ -39,14 +200,33 @@ import '../../styles/global.css';
     const openBtn = document.getElementById('open-original');
     let hls = null;
 
+    // Calidades reproducibles (un m3u8 por calidad en PH) y la activa. El menú de
+    // calidad de los controles las lee; al cambiar recargamos preservando el tiempo.
+    let qualityList = [];      // [{ quality, url, default }]
+    let activeQuality = null;
+
+    // Reintentos: el fetch a stream.json puede fallar por red transitoria y la
+    // URL del .m3u8 caduca con el tiempo, así que refrescamos los streams cuando
+    // hls.js da un error fatal en lugar de rendirnos a la primera.
+    const STREAM_FETCH_ATTEMPTS = 3;   // intentos al pedir streams frescos
+    const STREAM_REFRESH_LIMIT = 2;    // refrescos tras error fatal de HLS
+    const RETRY_BASE_MS = 800;
+    let refreshCount = 0;
+    let refreshing = false;
+
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
     // Mismo proxy que el reproductor principal: evita CORS y añade el Referer.
     const proxied = (u) => `/api/ph/proxy?url=${encodeURIComponent(u)}`;
+    const escapeHtml = (s) => String(s || '').replace(/[&<>"']/g, (c) =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
     if (!vkey) {
       titleEl.textContent = 'Falta el parámetro ?viewkey=';
     } else {
       openBtn.href = `https://es.pornhub.com/view_video.php?viewkey=${vkey}`;
       loadTitle(vkey);
+      loadMeta(vkey);
       play(vkey);
     }
 
@@ -54,40 +234,594 @@ import '../../styles/global.css';
       if (hls) { hls.destroy(); hls = null; }
       if (!streams || !streams.length) { statusEl.textContent = 'Sin streams disponibles.'; return; }
 
-      const m3u8 = streams.find(s => s.videoUrl && s.videoUrl.includes('.m3u8'));
-      if (m3u8) {
-        if (window.Hls && Hls.isSupported()) {
-          hls = new Hls();
-          hls.loadSource(proxied(m3u8.videoUrl));
-          hls.attachMedia(videoEl);
-          hls.on(Hls.Events.ERROR, (_e, data) => {
-            if (data.fatal) statusEl.textContent = 'El stream caducó o no está disponible. Usa «Abrir en Pornhub».';
-          });
-        } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
-          videoEl.src = proxied(m3u8.videoUrl);
-        }
+      // PH expone un m3u8 independiente por calidad; los listamos para el menú.
+      qualityList = streams
+        .filter((s) => s.videoUrl && s.videoUrl.includes('.m3u8'))
+        .map((s) => ({ quality: String(s.quality), url: s.videoUrl, default: !!s.default }));
+
+      if (qualityList.length) {
+        // Mantenemos la calidad elegida si seguimos viva tras un refresco; si no,
+        // la marcada como default por PH (o la más alta).
+        const had = activeQuality != null;
+        const pick =
+          qualityList.find((q) => q.quality === activeQuality) ||
+          qualityList.find((q) => q.default) ||
+          qualityList[0];
+        playQuality(pick.quality, { keepTime: had });
         return;
       }
 
-      const mp4 = streams.find(s => s.videoUrl && /\.mp4(\?|$)/.test(s.videoUrl));
-      if (mp4) { videoEl.src = proxied(mp4.videoUrl); return; }
+      const mp4 = streams.find((s) => s.videoUrl && /\.mp4(\?|$)/.test(s.videoUrl));
+      if (mp4) {
+        activeQuality = null;
+        renderQualityMenu();
+        videoEl.src = proxied(mp4.videoUrl);
+        videoEl.addEventListener('error', refreshStreams, { once: true });
+        return;
+      }
 
       statusEl.textContent = 'Sin streams reproducibles.';
     }
 
-    async function play(vk) {
-      statusEl.textContent = 'Obteniendo stream…';
-      try {
-        const res = await fetch(`/api/ph/stream.json?vkey=${encodeURIComponent(vk)}`);
-        const data = await res.json();
-        statusEl.textContent = '';
-        loadStreams(data.streams);
-      } catch (e) {
-        statusEl.textContent = 'Error al cargar el stream.';
+    // Carga (o recarga) una calidad concreta. keepTime preserva la posición y el
+    // estado de reproducción — clave al cambiar de calidad en caliente.
+    function playQuality(quality, { keepTime = true } = {}) {
+      const item = qualityList.find((q) => q.quality === quality);
+      if (!item) return;
+      const resumeAt = keepTime ? videoEl.currentTime : 0;
+      const wasPlaying = keepTime ? !videoEl.paused : true;
+      activeQuality = quality;
+      renderQualityMenu();
+
+      if (hls) { hls.destroy(); hls = null; }
+
+      if (window.Hls && Hls.isSupported()) {
+        hls = new Hls();
+        hls.loadSource(proxied(item.url));
+        hls.attachMedia(videoEl);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          if (resumeAt > 0) videoEl.currentTime = resumeAt;
+          if (wasPlaying) videoEl.play().catch(() => {});
+        });
+        hls.on(Hls.Events.ERROR, (_e, data) => {
+          if (!data.fatal) return;
+          // 1º intentamos la recuperación nativa de hls.js (errores de red o
+          // media puntuales). Si no aplica, refrescamos streams frescos.
+          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+            hls.startLoad();
+          } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+            hls.recoverMediaError();
+          } else {
+            refreshStreams();
+          }
+        });
+      } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+        videoEl.src = proxied(item.url);
+        if (resumeAt > 0) {
+          videoEl.addEventListener('loadedmetadata', () => { videoEl.currentTime = resumeAt; }, { once: true });
+        }
+        if (wasPlaying) videoEl.addEventListener('canplay', () => videoEl.play().catch(() => {}), { once: true });
+        videoEl.addEventListener('error', refreshStreams, { once: true });
       }
     }
 
-    // Busca el título en los catálogos ya generados (modelo + favoritos).
+    // Etiqueta de calidad ("720p HD"); con badge HD para 720 o más.
+    const qualityLabel = (q) =>
+      q ? `${q}p${Number(q) >= 720 ? ' <b class="text-[10px] align-top text-vs-pink">HD</b>' : ''}` : 'Auto';
+
+    // Pinta el botón + menú de calidad (si el reproductor ya está montado).
+    function renderQualityMenu() {
+      const wrap = document.getElementById('pv-quality');
+      const menu = document.getElementById('pv-quality-menu');
+      const label = document.getElementById('pv-quality-label');
+      if (!wrap || !menu || !label) return;
+      if (qualityList.length < 2) { wrap.classList.add('hidden'); return; }
+      wrap.classList.remove('hidden');
+      label.innerHTML = qualityLabel(activeQuality);
+      menu.innerHTML = qualityList
+        .map((q) => {
+          const active = q.quality === activeQuality;
+          return `<button data-q="${q.quality}" class="flex w-full items-center justify-between gap-4 px-3 py-1.5 text-left whitespace-nowrap hover:bg-white/10 ${active ? 'text-vs-pink' : 'text-white'}">
+            <span>${qualityLabel(q.quality)}</span>
+            ${active ? '<span aria-hidden="true">✓</span>' : '<span></span>'}
+          </button>`;
+        })
+        .join('');
+    }
+
+    // Pide streams frescos a stream.json reintentando ante fallos transitorios
+    // de red o respuestas sin streams. Devuelve el objeto completo (streams +
+    // extras: thumbs/hotspots/actionTags/duration) o null.
+    async function fetchStreamData(vk) {
+      for (let attempt = 1; attempt <= STREAM_FETCH_ATTEMPTS; attempt++) {
+        try {
+          const res = await fetch(`/api/ph/stream.json?vkey=${encodeURIComponent(vk)}`);
+          const data = await res.json();
+          if (data.streams && data.streams.length) return data;
+        } catch (e) { /* reintentamos abajo */ }
+
+        if (attempt < STREAM_FETCH_ATTEMPTS) {
+          statusEl.textContent = `Reintentando stream… (${attempt}/${STREAM_FETCH_ATTEMPTS})`;
+          await sleep(RETRY_BASE_MS * attempt); // backoff lineal
+        }
+      }
+      return null;
+    }
+
+    async function play(vk) {
+      statusEl.textContent = 'Obteniendo stream…';
+      const data = await fetchStreamData(vk);
+      if (!data) { statusEl.textContent = 'No se pudo cargar el stream tras varios intentos.'; return; }
+      statusEl.textContent = '';
+      loadStreams(data.streams);
+      initPlayer(data); // controles personalizados (idempotente)
+      renderFavorite(data.favorite);
+      renderSubscribe(data.subscribe, data.favorite);
+    }
+
+    // ── Botón de favoritos ──────────────────────────────────────────────────
+    // Pinta el corazón con el estado inicial (de stream.json) y cablea el toggle
+    // contra /api/ph/favorite.json, que refresca un token válido y hace el POST.
+    let favState = false;
+    function paintFavorite() {
+      const btn = document.getElementById('fav-btn');
+      const icon = document.getElementById('fav-icon');
+      const label = document.getElementById('fav-label');
+      btn.setAttribute('aria-pressed', String(favState));
+      icon.setAttribute('fill', favState ? '#ff4088' : 'none');
+      icon.setAttribute('stroke', favState ? '#ff4088' : 'currentColor');
+      btn.classList.toggle('border-vs-pink', favState);
+      label.textContent = favState ? 'En favoritos' : 'Favoritos';
+    }
+    function renderFavorite(fav) {
+      if (!fav || !fav.loggedIn) return; // sin sesión, no mostramos el botón
+      const btn = document.getElementById('fav-btn');
+      btn.classList.remove('hidden');
+      btn.classList.add('inline-flex');
+      favState = !!fav.isFavourite;
+      paintFavorite();
+
+      if (btn.dataset.wired) return;
+      btn.dataset.wired = '1';
+      btn.addEventListener('click', async () => {
+        const prev = favState;
+        const next = !favState;
+        // Update optimista: pintamos el nuevo estado ya y bloqueamos el botón
+        // durante el request. Si falla, revertimos al estado anterior.
+        favState = next;
+        paintFavorite();
+        btn.disabled = true;
+        statusEl.textContent = '';
+        try {
+          const res = await fetch('/api/ph/favorite.json', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ vkey, toggle: next ? '1' : '0' }),
+          });
+          const data = await res.json();
+          if (res.ok && data.success) {
+            favState = data.isFavourite;
+          } else {
+            favState = prev; // revertir
+            statusEl.textContent = data.error || 'No se pudo actualizar el favorito.';
+          }
+        } catch {
+          favState = prev; // revertir
+          statusEl.textContent = 'Error de red al actualizar el favorito.';
+        } finally {
+          paintFavorite();
+          btn.disabled = false;
+        }
+      });
+    }
+
+    // ── Botón de suscripción ────────────────────────────────────────────────
+    // Mismo patrón optimista que favoritos, contra /api/ph/subscribe.json.
+    let subState = false;
+    function paintSubscribe() {
+      const btn = document.getElementById('sub-btn');
+      const label = document.getElementById('sub-label');
+      btn.setAttribute('aria-pressed', String(subState));
+      btn.classList.toggle('border-vs-pink', subState);
+      btn.classList.toggle('text-white', subState);
+      label.textContent = subState ? 'Suscrito' : 'Suscribirte';
+    }
+    function renderSubscribe(sub, fav) {
+      // Requiere canal suscribible y sesión iniciada (la sesión la sabe favorite).
+      if (!sub || !fav || !fav.loggedIn) return;
+      const btn = document.getElementById('sub-btn');
+      btn.classList.remove('hidden');
+      btn.classList.add('inline-flex');
+      subState = !!sub.subscribed;
+      paintSubscribe();
+
+      if (btn.dataset.wired) return;
+      btn.dataset.wired = '1';
+      btn.addEventListener('click', async () => {
+        const prev = subState;
+        const next = !subState;
+        subState = next; // optimista
+        paintSubscribe();
+        btn.disabled = true;
+        statusEl.textContent = '';
+        try {
+          const res = await fetch('/api/ph/subscribe.json', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ vkey, subscribe: next }),
+          });
+          const data = await res.json();
+          if (res.ok && data.success) {
+            subState = data.subscribed;
+          } else {
+            subState = prev; // revertir
+            statusEl.textContent = data.error || 'No se pudo actualizar la suscripción.';
+          }
+        } catch {
+          subState = prev; // revertir
+          statusEl.textContent = 'Error de red al actualizar la suscripción.';
+        } finally {
+          paintSubscribe();
+          btn.disabled = false;
+        }
+      });
+    }
+
+    // Refresca los streams cuando la reproducción falla (URL caducada). Limitado
+    // para no entrar en bucle si el video ya no está disponible.
+    async function refreshStreams() {
+      if (refreshing) return;
+      if (refreshCount >= STREAM_REFRESH_LIMIT) {
+        statusEl.textContent = 'El stream caducó o no está disponible. Usa «Abrir en Pornhub».';
+        return;
+      }
+      refreshing = true;
+      refreshCount++;
+      statusEl.textContent = `Refrescando stream… (${refreshCount}/${STREAM_REFRESH_LIMIT})`;
+      const data = await fetchStreamData(vkey);
+      refreshing = false;
+      if (!data) { statusEl.textContent = 'El stream caducó o no está disponible. Usa «Abrir en Pornhub».'; return; }
+      statusEl.textContent = '';
+      loadStreams(data.streams);
+    }
+
+    // ── Controles personalizados del reproductor ────────────────────────────
+    // Reemplazan los nativos para añadir barra de progreso con buffer, gráfica de
+    // popularidad (hotspots), marcadores de acción y vista previa por sprites.
+    // Idempotente: los refrescos de stream no re-inicializan los listeners.
+    let playerInited = false;
+    function initPlayer(data) {
+      if (playerInited) return;
+      playerInited = true;
+
+      const root = document.getElementById('player');
+      const pv = document.getElementById('pv');
+      const surface = document.getElementById('pv-surface');
+      const center = document.getElementById('pv-center');
+      const centerIcon = document.getElementById('pv-center-icon');
+      const seek = document.getElementById('pv-seek');
+      const track = document.getElementById('pv-track');
+      const bufferEl = document.getElementById('pv-buffer');
+      const elapsedEl = document.getElementById('pv-elapsed');
+      const tagsEl = document.getElementById('pv-tags');
+      const hotspotsSvg = document.getElementById('pv-hotspots');
+      const preview = document.getElementById('pv-preview');
+      const previewThumb = document.getElementById('pv-preview-thumb');
+      const previewTime = document.getElementById('pv-preview-time');
+      const previewTag = document.getElementById('pv-preview-tag');
+      const playBtn = document.getElementById('pv-play');
+      const playIcon = document.getElementById('pv-play-icon');
+      const muteBtn = document.getElementById('pv-mute');
+      const volIcon = document.getElementById('pv-vol-icon');
+      const volInput = document.getElementById('pv-vol');
+      const fsBtn = document.getElementById('pv-fs');
+      const curEl = document.getElementById('pv-cur');
+      const durEl = document.getElementById('pv-dur');
+
+      const PLAY_PATH = 'M8 5v14l11-7z';
+      const PAUSE_PATH = 'M6 5h4v14H6zm8 0h4v14h-4z';
+      const VOL_FULL = 'M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z';
+      const VOL_MUTE = 'M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3 3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4 9.91 6.09 12 8.18V4z';
+
+      const fmt = (s) => {
+        s = Math.max(0, Math.floor(s || 0));
+        const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+        const mm = h ? String(m).padStart(2, '0') : String(m);
+        return (h ? h + ':' : '') + mm + ':' + String(sec).padStart(2, '0');
+      };
+      const setIcon = (el, d) => { const p = el.querySelector('path'); if (p) p.setAttribute('d', d); };
+
+      // Duración: preferimos la del elemento (más fiable) y caemos al dato del scraper.
+      const dataDuration = Number(data.duration) || 0;
+      const dur = () => (isFinite(videoEl.duration) && videoEl.duration > 0 ? videoEl.duration : dataDuration);
+
+      // ── Play / pausa ──
+      const flashCenter = (playing) => {
+        setIcon(centerIcon, playing ? PLAY_PATH : PAUSE_PATH);
+        center.classList.remove('pv-pop'); void center.offsetWidth; center.classList.add('pv-pop');
+      };
+      const togglePlay = () => {
+        if (videoEl.paused) { videoEl.play().catch(() => {}); flashCenter(true); }
+        else { videoEl.pause(); flashCenter(false); }
+      };
+      surface.addEventListener('click', togglePlay);
+      playBtn.addEventListener('click', togglePlay);
+
+      function syncState() {
+        const playing = !videoEl.paused;
+        root.dataset.state = playing ? 'playing' : 'paused';
+        setIcon(playIcon, playing ? PAUSE_PATH : PLAY_PATH);
+        if (playing) showBar(); else { root.dataset.idle = 'false'; clearTimeout(idleTimer); }
+      }
+      videoEl.addEventListener('play', syncState);
+      videoEl.addEventListener('pause', syncState);
+      videoEl.addEventListener('ended', syncState);
+
+      // ── Tiempo / progreso / buffer ──
+      function update() {
+        const d = dur();
+        const pct = d ? Math.min(100, (videoEl.currentTime / d) * 100) : 0;
+        if (!scrubbing) elapsedEl.style.width = pct + '%';
+        if (hotFill) hotFill.setAttribute('width', String(pct * 10));
+        curEl.textContent = fmt(videoEl.currentTime);
+      }
+      function updateBuffer() {
+        const d = dur();
+        if (!d || !videoEl.buffered.length) return;
+        try {
+          const end = videoEl.buffered.end(videoEl.buffered.length - 1);
+          bufferEl.style.width = Math.min(100, (end / d) * 100) + '%';
+        } catch {}
+      }
+      function reflectDuration() { durEl.textContent = fmt(dur()); buildTags(); update(); }
+      videoEl.addEventListener('timeupdate', update);
+      videoEl.addEventListener('progress', updateBuffer);
+      videoEl.addEventListener('loadedmetadata', reflectDuration);
+      videoEl.addEventListener('durationchange', reflectDuration);
+
+      // ── Volumen ──
+      function reflectVolume() {
+        const muted = videoEl.muted || videoEl.volume === 0;
+        setIcon(volIcon, muted ? VOL_MUTE : VOL_FULL);
+        volInput.value = String(videoEl.muted ? 0 : videoEl.volume);
+      }
+      muteBtn.addEventListener('click', () => { videoEl.muted = !videoEl.muted; reflectVolume(); });
+      volInput.addEventListener('input', () => {
+        videoEl.volume = Number(volInput.value);
+        videoEl.muted = videoEl.volume === 0;
+        reflectVolume();
+      });
+      videoEl.addEventListener('volumechange', reflectVolume);
+
+      // ── Pantalla completa ──
+      fsBtn.addEventListener('click', () => {
+        if (document.fullscreenElement) { document.exitFullscreen(); return; }
+        if (root.requestFullscreen) root.requestFullscreen().catch(() => {});
+        else if (videoEl.webkitEnterFullscreen) videoEl.webkitEnterFullscreen();
+      });
+
+      // ── Auto-ocultar la barra cuando el ratón está inactivo y el video corre ──
+      let idleTimer = null;
+      function showBar() {
+        root.dataset.idle = 'false';
+        clearTimeout(idleTimer);
+        if (!videoEl.paused) idleTimer = setTimeout(() => { root.dataset.idle = 'true'; }, 2600);
+      }
+      ['mousemove', 'pointerdown', 'touchstart'].forEach((ev) =>
+        pv.addEventListener(ev, showBar, { passive: true }));
+      pv.addEventListener('mouseleave', () => { if (!videoEl.paused) root.dataset.idle = 'true'; });
+
+      // ── Gráfica de popularidad (hotspots) ──
+      // PH entrega un array de valores a lo largo del video. Lo dibujamos como un
+      // polígono y lo coloreamos hasta la posición reproducida (rect recortado).
+      let hotFill = null;
+      (function buildHotspots() {
+        const hs = Array.isArray(data.hotspots) ? data.hotspots : [];
+        if (hs.length < 2) { hotspotsSvg.remove(); return; }
+        const max = Math.max(...hs), min = Math.min(...hs), span = max - min || 1, n = hs.length;
+        const pts = hs.map((v, i) => {
+          const x = (i / (n - 1)) * 1000;
+          const y = 100 - ((v - min) / span) * 88 - 6; // deja cabecera para no tocar el borde
+          return `${x.toFixed(2)},${y.toFixed(2)}`;
+        });
+        const cid = 'pvHot_' + Math.random().toString(36).slice(2);
+        hotspotsSvg.innerHTML =
+          `<defs><clipPath id="${cid}" clipPathUnits="userSpaceOnUse">` +
+          `<polygon points="0,100 ${pts.join(' ')} 1000,100"/></clipPath></defs>` +
+          `<g clip-path="url(#${cid})">` +
+          `<rect x="0" y="0" width="1000" height="100" fill="rgba(190,190,190,0.45)"/>` +
+          `<rect class="pv-hot-fill" x="0" y="0" width="0" height="100" fill="#ff4088"/>` +
+          `</g>`;
+        hotFill = hotspotsSvg.querySelector('.pv-hot-fill');
+      })();
+
+      // ── Marcadores de action tags ──
+      function buildTags() {
+        const tags = Array.isArray(data.actionTags) ? data.actionTags : [];
+        const d = dur();
+        if (!tags.length || !d) return;
+        tagsEl.innerHTML = tags.map((t) => {
+          const left = Math.max(0, Math.min(100, (t.time / d) * 100));
+          return `<span class="absolute top-1/2 h-2 w-[3px] -translate-y-1/2 -translate-x-1/2 rounded-sm bg-amber-300/90" style="left:${left}%"></span>`;
+        }).join('');
+      }
+      function nearestTag(t) {
+        const tags = Array.isArray(data.actionTags) ? data.actionTags : [];
+        let best = null, bestD = Infinity;
+        for (const tag of tags) { const dd = Math.abs(tag.time - t); if (dd < bestD) { bestD = dd; best = tag; } }
+        return bestD <= 8 ? best : null;
+      }
+
+      // ── Vista previa por sprites ──
+      // PH genera hojas de sprites (grilla de miniaturas) muestreadas cada
+      // `samplingFrequency` segundos. Medimos la 1ª hoja para deducir la grilla.
+      const sprite = (function buildSprite(thumbs) {
+        if (!thumbs || !thumbs.samplingFrequency) return null;
+        const freq = thumbs.samplingFrequency;
+        const patterns = Array.isArray(thumbs.spritePatterns) ? thumbs.spritePatterns : [];
+        const baseTpl = patterns[0] || thumbs.urlPattern || '';
+        if (!baseTpl) return null;
+        const sheetUrl = (n) => {
+          if (patterns[n]) return patterns[n];
+          if (/S\d+\.jpg(\?.*)?$/.test(baseTpl)) return baseTpl.replace(/S\d+(\.jpg)/, 'S' + n + '$1');
+          return baseTpl.replace('{6}', String(n));
+        };
+        const sheetSrc = (n) => proxied(sheetUrl(n));
+
+        const W = 160, H = 90;
+        let cols = 5, rows = 5, perSheet = 25; // valores por defecto (hoja 800×450)
+        const probe = new Image();
+        probe.onload = () => {
+          if (probe.naturalWidth && probe.naturalHeight) {
+            cols = Math.max(1, Math.round(probe.naturalWidth / W));
+            rows = Math.max(1, Math.round(probe.naturalHeight / H));
+            perSheet = cols * rows;
+          }
+        };
+        probe.src = sheetSrc(0);
+
+        let lastUrl = '';
+        return {
+          apply(el, time) {
+            const idx = Math.max(0, Math.floor(time / freq));
+            const sheet = Math.floor(idx / perSheet), within = idx % perSheet;
+            const col = within % cols, row = Math.floor(within / cols);
+            const url = sheetSrc(sheet);
+            if (url !== lastUrl) { el.style.backgroundImage = `url("${url}")`; lastUrl = url; }
+            el.style.backgroundSize = (cols * W) + 'px ' + (rows * H) + 'px';
+            el.style.backgroundPosition = `-${col * W}px -${row * H}px`;
+          },
+        };
+      })(data.thumbs);
+      if (!sprite) previewThumb.classList.add('hidden');
+
+      // ── Seek + vista previa (hover en desktop, arrastre en táctil) ──
+      function ratioFromEvent(e) {
+        const r = track.getBoundingClientRect();
+        return Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+      }
+      const showPreview = () => { preview.classList.remove('hidden'); preview.classList.add('flex'); };
+      const hidePreview = () => { preview.classList.add('hidden'); preview.classList.remove('flex'); };
+
+      function updatePreview(ratio) {
+        const d = dur(), t = ratio * d;
+        previewTime.textContent = fmt(t);
+        const r = track.getBoundingClientRect();
+        const px = Math.max(80, Math.min(r.width - 80, ratio * r.width)); // centra el thumb (160px)
+        preview.style.left = px + 'px';
+        if (sprite) sprite.apply(previewThumb, t);
+        const near = nearestTag(t);
+        if (near) { previewTag.textContent = near.label; previewTag.classList.remove('hidden'); }
+        else previewTag.classList.add('hidden');
+      }
+
+      seek.addEventListener('mousemove', (e) => { showPreview(); updatePreview(ratioFromEvent(e)); });
+      seek.addEventListener('mouseleave', () => { if (!scrubbing) hidePreview(); });
+
+      let scrubbing = false, wasPlaying = false;
+      function doScrub(e) {
+        const ratio = ratioFromEvent(e);
+        updatePreview(ratio);
+        elapsedEl.style.width = (ratio * 100) + '%';
+      }
+      function endScrub(e) {
+        videoEl.currentTime = ratioFromEvent(e) * dur();
+        scrubbing = false;
+        window.removeEventListener('pointermove', doScrub);
+        hidePreview();
+        if (wasPlaying) videoEl.play().catch(() => {});
+      }
+      seek.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        scrubbing = true;
+        wasPlaying = !videoEl.paused;
+        if (wasPlaying) videoEl.pause();
+        showPreview();
+        doScrub(e);
+        window.addEventListener('pointermove', doScrub);
+        window.addEventListener('pointerup', endScrub, { once: true });
+      });
+
+      // ── Selector de calidad ──
+      const qualityBtn = document.getElementById('pv-quality-btn');
+      const qualityMenu = document.getElementById('pv-quality-menu');
+      qualityBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        document.getElementById('pv-more-menu')?.classList.add('hidden');
+        qualityMenu.classList.toggle('hidden');
+        showBar();
+      });
+      qualityMenu.addEventListener('click', (e) => {
+        const b = e.target.closest('[data-q]');
+        if (!b) return;
+        playQuality(b.dataset.q, { keepTime: true });
+        qualityMenu.classList.add('hidden');
+      });
+      document.addEventListener('click', () => qualityMenu.classList.add('hidden'));
+
+      // ── Menú de opciones (velocidad + picture in picture) ──
+      const moreBtn = document.getElementById('pv-more-btn');
+      const moreMenu = document.getElementById('pv-more-menu');
+      const speedList = document.getElementById('pv-speed-list');
+      const pipBtn = document.getElementById('pv-pip');
+      const pipSep = document.getElementById('pv-pip-sep');
+      const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+
+      const speedLabel = (r) => (r === 1 ? 'Normal' : r + 'x');
+      function renderSpeeds() {
+        speedList.innerHTML = SPEEDS.map((r) => {
+          const active = videoEl.playbackRate === r;
+          return `<button data-speed="${r}" class="flex w-full items-center justify-between gap-4 px-3 py-1.5 text-left whitespace-nowrap hover:bg-white/10 ${active ? 'text-vs-pink' : 'text-white'}">
+            <span>${speedLabel(r)}</span>
+            ${active ? '<span aria-hidden="true">✓</span>' : '<span></span>'}
+          </button>`;
+        }).join('');
+      }
+      renderSpeeds();
+      speedList.addEventListener('click', (e) => {
+        const b = e.target.closest('[data-speed]');
+        if (!b) return;
+        videoEl.playbackRate = Number(b.dataset.speed);
+        renderSpeeds();
+      });
+      videoEl.addEventListener('ratechange', renderSpeeds);
+
+      // Picture in picture: lo ocultamos si el navegador no lo soporta.
+      if (!document.pictureInPictureEnabled || videoEl.disablePictureInPicture) {
+        pipBtn.classList.add('hidden');
+        pipSep.classList.add('hidden');
+      } else {
+        pipBtn.addEventListener('click', async () => {
+          try {
+            if (document.pictureInPictureElement) await document.exitPictureInPicture();
+            else await videoEl.requestPictureInPicture();
+          } catch {}
+          moreMenu.classList.add('hidden');
+        });
+      }
+
+      moreBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        qualityMenu.classList.add('hidden');
+        moreMenu.classList.toggle('hidden');
+        moreBtn.setAttribute('aria-expanded', String(!moreMenu.classList.contains('hidden')));
+        showBar();
+      });
+      moreMenu.addEventListener('click', (e) => e.stopPropagation());
+      document.addEventListener('click', () => moreMenu.classList.add('hidden'));
+
+      // Estado inicial
+      setIcon(playIcon, videoEl.paused ? PLAY_PATH : PAUSE_PATH);
+      root.dataset.state = videoEl.paused ? 'paused' : 'playing';
+      reflectVolume();
+      reflectDuration();
+      updateBuffer();
+      renderQualityMenu(); // por si los streams ya cargaron antes de montar los controles
+      showBar();
+    }
+
+    // Busca el título en los catálogos ya generados (modelo + favoritos) para un
+    // primer pintado rápido; loadMeta() lo reemplaza con datos frescos al llegar.
     async function loadTitle(vk) {
       try {
         const lists = await Promise.all([
@@ -95,10 +829,194 @@ import '../../styles/global.css';
           fetch('/api/ph/favorites.json').then(r => r.json()).catch(() => []),
         ]);
         const v = lists.flat().find(x => x.vkey === vk);
-        titleEl.textContent = v ? v.title : vk;
+        if (titleEl.textContent === 'Cargando…') titleEl.textContent = v ? v.title : vk;
         if (v) document.title = 'LustHub - ' + v.title;
       } catch {
-        titleEl.textContent = vk;
+        if (titleEl.textContent === 'Cargando…') titleEl.textContent = vk;
+      }
+    }
+
+    // ── Ficha + relacionados/recomendados ──────────────────────────────────────
+    // Convierte la URL de Pornhub del uploader a la ruta interna de la app.
+    function internalHref(url) {
+      const m = (url || '').match(/\/(model|pornstar|users)\/([^/?#]+)/);
+      if (!m) return null;
+      const seg = m[1] === 'users' ? 'user' : m[1];
+      return `/ph/${seg}/${m[2]}`;
+    }
+
+    function badgeIcon(title) {
+      const t = (title || '').toLowerCase();
+      // Trofeo / premio → 🏆; resto (verificado, asociado, etc.) → check azul.
+      if (/premr?o|award|trofeo|trophy|ganador/.test(t)) {
+        return `<span title="${escapeHtml(title)}" class="text-amber-400 text-sm leading-none">🏆</span>`;
+      }
+      return `<svg title="${escapeHtml(title)}" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="#f6921e"><path d="M12 2l2.4 1.8 3-.2 1 2.8 2.6 1.5-.9 2.9.9 2.9-2.6 1.5-1 2.8-3-.2L12 22l-2.4-1.8-3 .2-1-2.8L3 16.3l.9-2.9L3 10.5l2.6-1.5 1-2.8 3 .2L12 2z"/><path d="M10.6 14.6l-2.2-2.2 1.1-1.1 1.1 1.1 3.3-3.3 1.1 1.1-4.4 4.4z" fill="#fff"/></svg>`;
+    }
+
+    function renderMeta(meta) {
+      if (!meta) return;
+      if (meta.title) { titleEl.textContent = meta.title; document.title = 'LustHub - ' + meta.title; }
+
+      const viewsEl = document.getElementById('views');
+      const dateEl = document.getElementById('date');
+      const likesEl = document.getElementById('likes');
+      if (meta.views) viewsEl.textContent = `${meta.views} vistas`;
+      if (meta.date) dateEl.textContent = meta.date;
+      if (meta.votesUp) {
+        document.getElementById('likes-count').textContent = meta.votesUp;
+        likesEl.classList.remove('hidden');
+        likesEl.classList.add('inline-flex');
+      }
+
+      const up = meta.uploader || {};
+      if (up.name) {
+        const box = document.getElementById('uploader');
+        box.classList.remove('hidden');
+        box.classList.add('flex');
+        document.getElementById('up-name').textContent = up.name;
+        const avatar = document.getElementById('up-avatar');
+        if (up.avatar) avatar.src = up.avatar; else avatar.remove();
+
+        const stats = [up.videosCount, up.subscribers].filter(Boolean).join(' · ');
+        document.getElementById('up-stats').textContent = stats;
+        document.getElementById('up-badges').innerHTML = (up.badges || []).map(badgeIcon).join('');
+
+        const internal = internalHref(up.url);
+        const upLink = document.getElementById('up-link');
+        upLink.href = internal || up.url || '#';
+        const channelBtn = document.getElementById('up-channel');
+        if (internal) {
+          channelBtn.href = internal;
+          channelBtn.classList.remove('hidden');
+        }
+      }
+
+      const cats = meta.categories || [];
+      if (cats.length) {
+        const block = document.getElementById('cats-block');
+        const wrap = document.getElementById('cats');
+        block.classList.remove('hidden');
+        wrap.innerHTML = cats.map((c, i) =>
+          `<a href="${escapeHtml(c.href)}"
+              class="ph-cat ${i >= 6 ? 'hidden' : ''} px-3 py-1.5 bg-vs-surface border border-vs-border rounded-full text-sm text-gray-300 no-underline hover:text-white hover:border-vs-pink">${escapeHtml(c.label)}</a>`
+        ).join('');
+        if (cats.length > 6) {
+          const toggle = document.getElementById('cats-toggle');
+          toggle.classList.remove('hidden');
+          let open = false;
+          toggle.addEventListener('click', () => {
+            open = !open;
+            wrap.querySelectorAll('.ph-cat').forEach((el, i) => { if (i >= 6) el.classList.toggle('hidden', !open); });
+            toggle.textContent = open ? 'Ver menos ▴' : 'Ver más ▾';
+          });
+        }
+      }
+    }
+
+    // Tarjeta de video relacionado/recomendado: enlaza a esta misma página.
+    function renderCard(v) {
+      const internal = internalHref(v.uploader?.url);
+      const uploader = v.uploader?.name
+        ? (internal
+            ? `<a href="${internal}" data-stop class="truncate text-gray-400 hover:text-vs-pink no-underline">${escapeHtml(v.uploader.name)}</a>`
+            : `<span class="truncate">${escapeHtml(v.uploader.name)}</span>`)
+        : '<span></span>';
+      return `
+        <div class="card bg-vs-surface rounded-xl overflow-hidden cursor-pointer transition-transform duration-200 active:scale-[0.98] md:hover:-translate-y-2"
+             data-vkey="${escapeHtml(v.vkey)}"
+             data-preview="${escapeHtml(v.preview || '')}">
+          <div class="relative aspect-video bg-black">
+            <img class="w-full h-full object-cover" src="${escapeHtml(v.thumbnail)}" loading="lazy" alt="${escapeHtml(v.title)}" />
+            <video class="preview absolute inset-0 w-full h-full object-cover opacity-0 transition-opacity duration-300 pointer-events-none" muted loop playsinline preload="none"></video>
+            ${v.duration ? `<div class="absolute bottom-2 right-2 bg-black/85 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded text-xs sm:text-sm font-bold text-white">${escapeHtml(v.duration)}</div>` : ''}
+          </div>
+          <div class="p-2.5 sm:p-3.5">
+            <h3 class="m-0 leading-snug text-sm sm:text-[1.05rem] line-clamp-2 text-white">${escapeHtml(v.title)}</h3>
+            <div class="mt-1.5 flex items-center justify-between text-xs text-gray-500">
+              ${uploader}
+              <span class="whitespace-nowrap">${v.views ? `${escapeHtml(v.views)} vistas` : ''}</span>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    let tabData = { related: [], recommended: [] };
+    function showTab(tab) {
+      const grid = document.getElementById('grid');
+      const empty = document.getElementById('grid-empty');
+      document.querySelectorAll('.ph-tab').forEach((b) => {
+        const active = b.dataset.tab === tab;
+        b.classList.toggle('text-white', active);
+        b.classList.toggle('border-vs-pink', active);
+        b.classList.toggle('text-gray-400', !active);
+        b.classList.toggle('border-transparent', !active);
+      });
+      const list = tabData[tab] || [];
+      grid.innerHTML = list.map(renderCard).join('');
+      empty.classList.toggle('hidden', list.length > 0);
+      wireCards(grid);
+    }
+
+    // Click → navega a la misma página con el nuevo vkey. Hover (desktop) y
+    // long-press (mobile) → reproduce el preview animado sobre la miniatura; en
+    // mobile el long-press no debe disparar la navegación.
+    function wireCards(root) {
+      root.querySelectorAll('.card:not([data-wired])').forEach((card) => {
+        card.dataset.wired = '1';
+
+        let longPressed = false;
+        card.addEventListener('click', (e) => {
+          if (e.target.closest('[data-stop]')) return;
+          if (longPressed) { longPressed = false; return; }
+          location.href = `/ph/play?viewkey=${encodeURIComponent(card.dataset.vkey)}`;
+        });
+
+        const previewUrl = card.dataset.preview;
+        if (!previewUrl) return;
+        const prev = card.querySelector('.preview');
+        if (!prev) return;
+
+        const show = () => {
+          if (!prev.src) prev.src = proxied(previewUrl);
+          prev.currentTime = 0;
+          prev.play().then(() => prev.classList.replace('opacity-0', 'opacity-100')).catch(() => {});
+        };
+        const hide = () => {
+          prev.classList.replace('opacity-100', 'opacity-0');
+          prev.pause();
+        };
+
+        card.addEventListener('mouseenter', show);
+        card.addEventListener('mouseleave', hide);
+
+        let timer = null;
+        card.addEventListener('touchstart', () => {
+          longPressed = false;
+          timer = setTimeout(() => { longPressed = true; show(); }, 350);
+        }, { passive: true });
+        const endTouch = () => { clearTimeout(timer); if (longPressed) hide(); };
+        card.addEventListener('touchend', endTouch);
+        card.addEventListener('touchcancel', endTouch);
+        card.addEventListener('touchmove', () => {
+          clearTimeout(timer);
+          if (longPressed) { hide(); longPressed = false; }
+        }, { passive: true });
+      });
+    }
+    document.querySelectorAll('.ph-tab').forEach((b) =>
+      b.addEventListener('click', () => showTab(b.dataset.tab)));
+
+    async function loadMeta(vk) {
+      try {
+        const res = await fetch(`/api/ph/video.json?vkey=${encodeURIComponent(vk)}`);
+        const data = await res.json();
+        renderMeta(data.meta);
+        tabData.related = data.related || [];
+        tabData.recommended = data.recommended || [];
+        showTab(tabData.related.length ? 'related' : 'recommended');
+      } catch {
+        /* la ficha es opcional; el reproductor ya funciona sin ella */
       }
     }
   </script>

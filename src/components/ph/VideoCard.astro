@@ -1,0 +1,70 @@
+---
+// Tarjeta de un video del catálogo. Usada por la grilla SSR de /ph/scraper y por
+// la ruta parcial /ph/scraper-cards (scroll infinito), para no duplicar markup.
+// El comportamiento (click → modal, botón flotante, preview) lo cablea el script
+// de la página al detectar `.card`.
+const { video } = Astro.props;
+
+// El uploader trae la URL de Pornhub (/model/<slug>, /pornstar/<slug> o
+// /users/<id>); la mapeamos a la ruta interna de la app. Canales u otros quedan
+// como texto plano.
+const uploaderName = video.uploader?.name;
+const upMatch = video.uploader?.url?.match(/\/(model|pornstar|users)\/([^/?#]+)/);
+const upSegment = upMatch?.[1] === "users" ? "user" : upMatch?.[1];
+const uploaderHref = upMatch ? `/ph/${upSegment}/${upMatch[2]}` : null;
+---
+
+<div
+  class="card bg-vs-surface rounded-xl overflow-hidden cursor-pointer transition-transform duration-200 active:scale-[0.98] md:hover:-translate-y-2"
+  data-preview={video.preview || ""}
+  data-vkey={video.vkey}
+  data-title={video.title}
+  data-page-url={video.pageUrl}
+  data-uploader={video.uploader?.name || ""}
+  data-views={video.views || ""}
+  data-duration={video.duration || ""}
+  data-streams={video.streams ? JSON.stringify(video.streams) : ""}
+>
+  <div class="relative aspect-video bg-black">
+    <img class="w-full h-full object-cover" src={video.thumbnail} loading="lazy" alt={video.title} />
+    <video
+      class="preview absolute inset-0 w-full h-full object-cover opacity-0 transition-opacity duration-300 pointer-events-none"
+      muted
+      loop
+      playsinline
+      preload="none"></video>
+    <a
+      href={`/ph/play?viewkey=${video.vkey}`}
+      target="_blank"
+      rel="noopener"
+      data-stop
+      title="Reproducir en nueva pestaña"
+      aria-label="Reproducir en nueva pestaña"
+      class="absolute top-2 right-2 z-10 bg-black/85 hover:bg-vs-pink text-white rounded p-2 flex items-center justify-center transition-colors no-underline"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+    </a>
+    {video.duration && (
+      <div class="absolute bottom-2 right-2 bg-black/85 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded text-xs sm:text-sm font-bold text-white">
+        {video.duration}
+      </div>
+    )}
+  </div>
+  <div class="p-2.5 sm:p-3.5">
+    <h3 class="m-0 leading-snug text-sm sm:text-[1.05rem] line-clamp-2 text-white">
+      {video.title}
+    </h3>
+    <div class="mt-1.5 flex items-center justify-between text-xs text-gray-500">
+      {uploaderHref ? (
+        <a
+          href={uploaderHref}
+          data-stop
+          class="truncate text-gray-400 hover:text-vs-pink no-underline"
+        >{uploaderName}</a>
+      ) : (
+        <span class="truncate">{uploaderName}</span>
+      )}
+      <span class="whitespace-nowrap">{video.views ? `${video.views} vistas` : ""}</span>
+    </div>
+  </div>
+</div>

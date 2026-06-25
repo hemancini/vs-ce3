@@ -1,0 +1,441 @@
+---
+interface Props {
+  cookieFromKV: boolean;
+  cookieCount: number;
+}
+const { cookieFromKV, cookieCount } = Astro.props;
+---
+
+<button
+  id="open-cookie-editor"
+  class="text-sm text-gray-400 hover:text-white border border-vs-border hover:border-vs-pink rounded-lg px-3 py-1.5 cursor-pointer transition-colors"
+  title="Gestionar cookies de sesión de Pornhub"
+>
+  🍪 Cookies
+  {cookieFromKV
+    ? <span class="ml-1 text-green-400 text-xs">KV ({cookieCount})</span>
+    : <span class="ml-1 text-yellow-500 text-xs">bundled</span>}
+</button>
+
+<div
+  id="cookie-modal"
+  class="hidden fixed inset-0 bg-black/90 items-center justify-center z-[2000] p-4"
+>
+  <div class="relative w-full max-w-3xl bg-[#111] border border-vs-border rounded-xl flex flex-col max-h-[90vh]">
+
+    <!-- Header -->
+    <div class="flex items-center justify-between px-5 pt-5 pb-3 border-b border-vs-border shrink-0">
+      <h2 class="text-white text-lg font-semibold">🍪 Cookies de Pornhub</h2>
+      <button id="close-cookie-modal" class="text-3xl text-white cursor-pointer leading-none hover:text-gray-300">×</button>
+    </div>
+
+    <!-- Tabs -->
+    <div class="flex border-b border-vs-border shrink-0 px-1">
+      <button data-tab="list"   class="ck-tab px-4 py-2.5 text-sm font-medium border-b-2 border-vs-pink text-white -mb-px">Lista</button>
+      <button data-tab="login"  class="ck-tab px-4 py-2.5 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-white -mb-px">Iniciar sesión</button>
+      <button data-tab="import" class="ck-tab px-4 py-2.5 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-white -mb-px">Importar JSON</button>
+    </div>
+
+    <!-- Tab: Lista -->
+    <div id="ck-pane-list" class="flex-1 overflow-y-auto px-5 py-4">
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs text-left">
+          <thead>
+            <tr class="text-gray-500">
+              <th class="pb-2 pr-3 font-medium w-36">Nombre</th>
+              <th class="pb-2 pr-3 font-medium w-40">Dominio</th>
+              <th class="pb-2 pr-3 font-medium">Valor</th>
+              <th class="pb-2 w-14"></th>
+            </tr>
+          </thead>
+          <tbody id="ck-tbody" class="divide-y divide-[#1e1e1e]"></tbody>
+        </table>
+      </div>
+      <button
+        id="ck-add"
+        class="mt-3 w-full text-xs text-gray-400 hover:text-white border border-dashed border-vs-border hover:border-vs-pink rounded-lg px-4 py-2 cursor-pointer transition-colors"
+      >+ Añadir cookie</button>
+    </div>
+
+    <!-- Tab: Iniciar sesión -->
+    <div id="ck-pane-login" class="hidden flex-1 overflow-y-auto px-5 py-4">
+      <p class="text-gray-400 text-sm mb-4">
+        Inicia sesión con tu usuario y contraseña de Pornhub. Las cookies de sesión
+        obtenidas reemplazarán la lista actual y se guardarán en KV automáticamente.
+      </p>
+      <div class="max-w-sm space-y-3">
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Email o usuario</label>
+          <input
+            id="ck-login-email"
+            type="text"
+            autocomplete="username"
+            placeholder="tu@email.com"
+            class="w-full bg-vs-surface text-white text-sm border border-vs-border rounded-lg px-3 py-2 outline-none focus:border-vs-pink"
+          />
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Contraseña</label>
+          <input
+            id="ck-login-pass"
+            type="password"
+            autocomplete="current-password"
+            placeholder="••••••••"
+            class="w-full bg-vs-surface text-white text-sm border border-vs-border rounded-lg px-3 py-2 outline-none focus:border-vs-pink"
+          />
+        </div>
+        <button
+          id="ck-login-btn"
+          class="w-full px-4 py-2 bg-vs-pink text-white rounded-lg cursor-pointer hover:opacity-90 font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+        >Iniciar sesión y obtener cookies</button>
+        <p class="text-gray-600 text-xs">
+          Nota: si la cuenta requiere captcha o 2FA, el login automático fallará;
+          usa la pestaña <span class="text-gray-400">Importar JSON</span> en ese caso.
+        </p>
+      </div>
+    </div>
+
+    <!-- Tab: Importar JSON -->
+    <div id="ck-pane-import" class="hidden flex-1 overflow-y-auto px-5 py-4">
+      <p class="text-gray-400 text-sm mb-3">
+        Pegá el JSON de cookies exportado por tu extensión de navegador (formato array).
+        Reemplazará la lista actual al aplicar.
+      </p>
+      <textarea
+        id="ck-json"
+        rows="12"
+        placeholder='[{"name":"...","value":"...","domain":".es.pornhub.com"}, ...]'
+        class="w-full bg-vs-surface text-white text-xs font-mono border border-vs-border rounded-lg p-3 outline-none focus:border-vs-pink resize-y"
+      ></textarea>
+      <button
+        id="ck-import-btn"
+        class="mt-3 px-4 py-2 bg-vs-surface border border-vs-border text-gray-300 rounded-lg cursor-pointer hover:text-white hover:border-vs-pink text-sm"
+      >Aplicar a la lista</button>
+    </div>
+
+    <!-- Footer -->
+    <div class="flex items-center gap-2 px-5 py-3 border-t border-vs-border shrink-0 flex-wrap">
+      <button id="ck-save"     class="px-4 py-1.5 bg-vs-pink text-white rounded-lg cursor-pointer hover:opacity-90 font-medium text-sm shrink-0">Guardar en KV</button>
+      <button id="ck-validate" class="px-4 py-1.5 bg-vs-surface border border-vs-border text-gray-300 rounded-lg cursor-pointer hover:text-white hover:border-vs-pink text-sm shrink-0">Validar</button>
+      <button id="ck-reload"   class="px-4 py-1.5 bg-vs-surface border border-vs-border text-gray-300 rounded-lg cursor-pointer hover:text-white hover:border-vs-pink text-sm shrink-0">Recargar KV</button>
+      <span   id="ck-status"  class="text-sm text-gray-400 flex-1 text-right min-w-0 truncate"></span>
+    </div>
+
+  </div>
+</div>
+
+<script is:inline>
+(function () {
+  let cookies = [];
+
+  const modal       = document.getElementById("cookie-modal");
+  const openBtn     = document.getElementById("open-cookie-editor");
+  const closeBtn    = document.getElementById("close-cookie-modal");
+  const tbody       = document.getElementById("ck-tbody");
+  const addBtn      = document.getElementById("ck-add");
+  const saveBtn     = document.getElementById("ck-save");
+  const validateBtn = document.getElementById("ck-validate");
+  const reloadBtn   = document.getElementById("ck-reload");
+  const statusEl    = document.getElementById("ck-status");
+  const jsonEl      = document.getElementById("ck-json");
+  const importBtn   = document.getElementById("ck-import-btn");
+  const paneList    = document.getElementById("ck-pane-list");
+  const paneImport  = document.getElementById("ck-pane-import");
+  const paneLogin   = document.getElementById("ck-pane-login");
+  const loginEmail  = document.getElementById("ck-login-email");
+  const loginPass   = document.getElementById("ck-login-pass");
+  const loginBtn    = document.getElementById("ck-login-btn");
+
+  const PANES = { list: paneList, login: paneLogin, import: paneImport };
+
+  // ── Tabs ──────────────────────────────────────────────────────────────────
+  document.querySelectorAll(".ck-tab").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".ck-tab").forEach((t) => {
+        const active = t === btn;
+        t.classList.toggle("border-vs-pink",     active);
+        t.classList.toggle("text-white",         active);
+        t.classList.toggle("border-transparent", !active);
+        t.classList.toggle("text-gray-400",      !active);
+      });
+      const tab = btn.dataset.tab;
+      Object.entries(PANES).forEach(([k, pane]) => pane.classList.toggle("hidden", k !== tab));
+    });
+  });
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  const esc = (s) =>
+    String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+
+  const trunc = (s, n = 36) => {
+    s = String(s ?? "");
+    return s.length > n ? s.slice(0, n) + "…" : s;
+  };
+
+  function setStatus(msg, ok = null) {
+    statusEl.textContent = msg;
+    statusEl.className =
+      "text-sm flex-1 text-right min-w-0 truncate " +
+      (ok === true ? "text-green-400" : ok === false ? "text-red-400" : "text-gray-400");
+  }
+
+  const INPUT_CLS =
+    "w-full bg-[#1a1a1a] text-white text-xs font-mono border border-vs-border rounded px-2 py-1 outline-none focus:border-vs-pink";
+
+  // ── Table rendering ───────────────────────────────────────────────────────
+  function renderTable() {
+    tbody.innerHTML = "";
+    if (!cookies.length) {
+      const empty = document.createElement("tr");
+      empty.innerHTML =
+        '<td colspan="4" class="py-8 text-center text-gray-500 text-xs">Sin cookies cargadas.</td>';
+      tbody.appendChild(empty);
+      return;
+    }
+    cookies.forEach((ck, i) => tbody.appendChild(buildDisplayRow(i, ck)));
+  }
+
+  function buildDisplayRow(i, ck) {
+    const tr = document.createElement("tr");
+    tr.className = "group";
+    tr.innerHTML =
+      `<td class="py-1.5 pr-3 text-white font-mono text-xs">${esc(ck.name ?? "")}</td>` +
+      `<td class="py-1.5 pr-3 text-gray-400 font-mono text-xs">${esc(ck.domain ?? "")}</td>` +
+      `<td class="py-1.5 pr-3 text-gray-500 font-mono text-xs" title="${esc(ck.value ?? "")}">${esc(trunc(ck.value))}</td>` +
+      `<td class="py-1.5 text-right whitespace-nowrap">` +
+        `<button data-a="edit" class="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-white px-1 cursor-pointer transition-opacity" title="Editar">✏️</button>` +
+        `<button data-a="del"  class="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-400 px-1 cursor-pointer transition-opacity" title="Eliminar">🗑️</button>` +
+      `</td>`;
+
+    tr.querySelector('[data-a="edit"]').addEventListener("click", () => {
+      const editTr = buildEditRow(i, ck);
+      tbody.replaceChild(editTr, tr);
+      editTr.querySelector('[data-f="name"]')?.focus();
+    });
+
+    tr.querySelector('[data-a="del"]').addEventListener("click", () => {
+      cookies.splice(i, 1);
+      renderTable();
+      setStatus(`Cookie eliminada. ${cookies.length} restantes (sin guardar).`);
+    });
+
+    return tr;
+  }
+
+  function buildEditRow(i, ck) {
+    const tr = document.createElement("tr");
+    tr.className = "bg-[#181818]";
+    tr.innerHTML =
+      `<td class="py-1 pr-1"><input data-f="name"   class="${INPUT_CLS}" value="${esc(ck.name   ?? "")}" placeholder="nombre"/></td>` +
+      `<td class="py-1 pr-1"><input data-f="domain" class="${INPUT_CLS}" value="${esc(ck.domain ?? "")}" placeholder=".pornhub.com"/></td>` +
+      `<td class="py-1 pr-1"><input data-f="value"  class="${INPUT_CLS}" value="${esc(ck.value  ?? "")}" placeholder="valor"/></td>` +
+      `<td class="py-1 text-right whitespace-nowrap">` +
+        `<button data-a="ok"     class="text-green-400 hover:text-green-300 px-1.5 cursor-pointer text-sm" title="Confirmar">✓</button>` +
+        `<button data-a="cancel" class="text-gray-500  hover:text-white    px-1.5 cursor-pointer text-sm" title="Cancelar">✗</button>` +
+      `</td>`;
+
+    tr.querySelector('[data-a="ok"]').addEventListener("click", () => {
+      cookies[i] = {
+        ...ck,
+        name:   tr.querySelector('[data-f="name"]').value.trim(),
+        domain: tr.querySelector('[data-f="domain"]').value.trim(),
+        value:  tr.querySelector('[data-f="value"]').value,
+      };
+      renderTable();
+      setStatus("Cookie actualizada (sin guardar aún).");
+    });
+
+    tr.querySelector('[data-a="cancel"]').addEventListener("click", () => {
+      tbody.replaceChild(buildDisplayRow(i, ck), tr);
+    });
+
+    return tr;
+  }
+
+  function buildNewRow() {
+    const tr = document.createElement("tr");
+    tr.className = "bg-[#181818]";
+    tr.innerHTML =
+      `<td class="py-1 pr-1"><input data-f="name"   class="${INPUT_CLS}" placeholder="nombre"/></td>` +
+      `<td class="py-1 pr-1"><input data-f="domain" class="${INPUT_CLS}" value=".pornhub.com"/></td>` +
+      `<td class="py-1 pr-1"><input data-f="value"  class="${INPUT_CLS}" placeholder="valor"/></td>` +
+      `<td class="py-1 text-right whitespace-nowrap">` +
+        `<button data-a="ok"     class="text-green-400 hover:text-green-300 px-1.5 cursor-pointer text-sm" title="Añadir">✓</button>` +
+        `<button data-a="cancel" class="text-gray-500  hover:text-white    px-1.5 cursor-pointer text-sm" title="Cancelar">✗</button>` +
+      `</td>`;
+
+    tr.querySelector('[data-a="ok"]').addEventListener("click", () => {
+      const name   = tr.querySelector('[data-f="name"]').value.trim();
+      const domain = tr.querySelector('[data-f="domain"]').value.trim();
+      const value  = tr.querySelector('[data-f="value"]').value;
+      if (!name) { setStatus("El nombre es requerido.", false); return; }
+      cookies.push({ name, domain, value });
+      renderTable();
+      setStatus(`"${name}" añadida. ${cookies.length} total (sin guardar).`);
+    });
+
+    tr.querySelector('[data-a="cancel"]').addEventListener("click", () => tr.remove());
+
+    return tr;
+  }
+
+  // ── Actions ───────────────────────────────────────────────────────────────
+  addBtn.addEventListener("click", () => {
+    // Remove any pending unsaved new row first
+    tbody.querySelector("[data-new-row]")?.remove();
+    const tr = buildNewRow();
+    tr.dataset.newRow = "1";
+    tbody.appendChild(tr);
+    tr.querySelector('[data-f="name"]')?.focus();
+    setStatus("");
+  });
+
+  importBtn.addEventListener("click", () => {
+    let parsed;
+    try {
+      parsed = JSON.parse(jsonEl.value);
+      if (!Array.isArray(parsed)) throw new Error("debe ser un array");
+    } catch (e) {
+      setStatus("JSON inválido: " + e.message, false);
+      return;
+    }
+    cookies = parsed;
+    renderTable();
+    document.querySelector('[data-tab="list"]').click();
+    setStatus(`${cookies.length} cookies importadas (sin guardar aún).`);
+  });
+
+  // ── Login con usuario / contraseña ─────────────────────────────────────────
+  async function doLogin() {
+    const email = loginEmail.value.trim();
+    const password = loginPass.value;
+    if (!email || !password) { setStatus("Email y contraseña requeridos.", false); return; }
+
+    loginBtn.disabled = true;
+    const prevLabel = loginBtn.textContent;
+    loginBtn.textContent = "Iniciando sesión…";
+    setStatus("Iniciando sesión en Pornhub…");
+    try {
+      const res = await fetch("/api/ph/login.json", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        setStatus(data.error || ("Error " + res.status), false);
+        return;
+      }
+
+      // Reemplaza la lista con las cookies de sesión obtenidas.
+      cookies = data.cookies || [];
+      renderTable();
+      loginPass.value = "";
+
+      // Guarda automáticamente en KV (reemplaza la cookie existente, si había).
+      let savedMsg = "";
+      try {
+        const saveRes = await fetch("/api/ph/cookies", {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ cookies }),
+        });
+        const saveData = await saveRes.json();
+        savedMsg = saveRes.ok
+          ? ` y guardadas en KV (${saveData.count})`
+          : " (no se pudo guardar en KV: " + (saveData.error || saveRes.status) + ")";
+      } catch (e) {
+        savedMsg = " (no se pudo guardar en KV: " + e.message + ")";
+      }
+
+      document.querySelector('[data-tab="list"]').click();
+      const who = data.username ? " · " + data.username : "";
+      setStatus(`✓ Sesión iniciada${who} — ${cookies.length} cookies${savedMsg}`, true);
+    } catch (e) {
+      setStatus("Error de red: " + e.message, false);
+    } finally {
+      loginBtn.disabled = false;
+      loginBtn.textContent = prevLabel;
+    }
+  }
+
+  loginBtn.addEventListener("click", doLogin);
+  loginPass.addEventListener("keydown", (e) => { if (e.key === "Enter") doLogin(); });
+
+  async function loadFromKV() {
+    setStatus("Cargando desde KV…");
+    try {
+      const res = await fetch("/api/ph/cookies");
+      const data = await res.json();
+      cookies = data.cookies || [];
+      renderTable();
+      if (data.fromStorage === "kv") {
+        setStatus(`KV ✓ (${data.count} cookies)`, true);
+      } else {
+        setStatus("Sin cookies en KV — usando bundled.", null);
+      }
+    } catch (e) {
+      setStatus("Error al cargar: " + e.message, false);
+    }
+  }
+
+  saveBtn.addEventListener("click", async () => {
+    setStatus("Guardando…");
+    try {
+      const res = await fetch("/api/ph/cookies", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ cookies }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setStatus(data.error || "Error " + res.status, false); return; }
+      setStatus(`Guardadas ${data.count} cookies en KV ✓`, true);
+    } catch (e) {
+      setStatus("Error de red: " + e.message, false);
+    }
+  });
+
+  validateBtn.addEventListener("click", async () => {
+    if (!cookies.length) { setStatus("No hay cookies para validar.", false); return; }
+    setStatus("Validando contra es.pornhub.com…");
+    try {
+      const res = await fetch("/api/ph/cookies", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ cookies }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setStatus(data.error || "Error " + res.status, false); return; }
+      if (data.valid) {
+        setStatus(`✓ Sesión válida${data.username ? " · " + data.username : ""}`, true);
+      } else {
+        setStatus(`✗ Sesión inválida o expirada${data.reason ? " — " + data.reason : ""}`, false);
+      }
+    } catch (e) {
+      setStatus("Error: " + e.message, false);
+    }
+  });
+
+  reloadBtn.addEventListener("click", loadFromKV);
+
+  // ── Modal open / close ────────────────────────────────────────────────────
+  function openModal() {
+    modal.classList.remove("hidden");
+    modal.classList.add("flex");
+    setStatus("");
+    loadFromKV();
+  }
+
+  function closeModal() {
+    modal.classList.add("hidden");
+    modal.classList.remove("flex");
+  }
+
+  openBtn.addEventListener("click", openModal);
+  closeBtn.addEventListener("click", closeModal);
+  modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !modal.classList.contains("hidden")) closeModal();
+  });
+})();
+</script>

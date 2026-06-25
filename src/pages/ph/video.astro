@@ -1,0 +1,76 @@
+---
+// Videos de una categoría por id: /ph/video?c=<id> → https://es.pornhub.com/video?c=<id>
+// (Pornhub usa /video?c=<id> para categorías sin slug; /ph/categories/<slug> para las que sí lo tienen.)
+import Layout from "../../layouts/Ph.astro";
+import PhHeader from "../../components/ph/PhHeader.astro";
+import PhScraperControls from "../../components/ph/PhScraperControls.astro";
+import PhCategoryChips from "../../components/ph/PhCategoryChips.astro";
+import VideoGrid from "../../components/ph/VideoGrid.astro";
+import { scrapeSource } from "../../lib/ph/scraper.js";
+
+export const prerender = false;
+
+const env = (Astro.locals as any)?.runtime?.env;
+
+const params = Astro.url.searchParams;
+const c = (params.get("c") || "").trim();
+const pages = Math.min(Math.max(parseInt(params.get("paginas") || "1", 10) || 1, 1), 20);
+const q = (params.get("q") || "").trim();
+const withStreams = params.get("streams") === "1";
+
+const listUrl = `https://es.pornhub.com/video?c=${encodeURIComponent(c)}`;
+
+let videos = [];
+let totalPages = 0;
+let total = 0;
+let chips = [];
+let error = null;
+const startedAt = Date.now();
+
+if (!c) {
+  error = "Falta el parámetro ?c=<id>";
+} else {
+  try {
+    const result = await scrapeSource({ listUrl, label: `c=${c}`, maxPages: pages, withStreams, env });
+    videos = result.videos;
+    totalPages = result.totalPages;
+    total = result.total;
+    chips = result.chips;
+  } catch (e) {
+    error = e.message;
+  }
+}
+
+let cookieFromKV = false;
+let cookieCount = 0;
+try {
+  const raw = await env?.VS_C3_KV?.get("ph:cookies");
+  if (raw) { cookieFromKV = true; cookieCount = JSON.parse(raw).length; }
+} catch {}
+
+const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
+---
+
+<Layout title={`LustHub - Categoría ${c}`}>
+  <PhHeader
+    title={`📂 Categoría ${c ? `#${c}` : ""}`}
+    stats={error ? "Error al scrapear" : `${videos.length} videos · ${elapsed}s · ${totalPages} págs.`}
+    cookieFromKV={cookieFromKV}
+    cookieCount={cookieCount}
+    sourceUrl={listUrl}
+  >
+    <PhScraperControls pages={pages} withStreams={withStreams} q={q} hidden={[{ name: "c", value: c }]} />
+  </PhHeader>
+
+  <PhCategoryChips chips={chips} activeId={c} total={total} />
+
+  <VideoGrid
+    videos={videos}
+    totalPages={totalPages}
+    nextPage={pages + 1}
+    listUrl={listUrl}
+    withStreams={withStreams}
+    q={q}
+    error={error}
+  />
+</Layout>

@@ -1,0 +1,48 @@
+---
+// Tarjeta de una pornstar/modelo del listado /ph/pornstars. Enlaza a la página
+// de videos de la persona dentro de la app: /ph/pornstar/<slug>, /ph/model/<slug>
+// o /ph/user/<id> (modelos de comunidad encontrados por el buscador).
+const { star } = Astro.props;
+const segment = star.type === "model" ? "model" : star.type === "user" ? "user" : "pornstar";
+const href = `/ph/${segment}/${star.slug}`;
+
+// Convierte "694M" / "5.7M" / "12K" → número, para ordenar client-side.
+const toNum = (s) => {
+  const m = String(s ?? "").match(/([\d.,]+)\s*([KMB])?/i);
+  if (!m) return 0;
+  const n = parseFloat(m[1].replace(/,/g, "")) || 0;
+  const mult = { k: 1e3, m: 1e6, b: 1e9 }[(m[2] || "").toLowerCase()] || 1;
+  return n * mult;
+};
+const videosN = toNum(star.videosNum);
+const viewsN = toNum(star.views);
+---
+
+<a
+  href={href}
+  data-type={star.type}
+  data-name={star.name}
+  data-videos={videosN}
+  data-views={viewsN}
+  class="card group block bg-vs-surface rounded-xl overflow-hidden no-underline transition-transform duration-200 active:scale-[0.98] md:hover:-translate-y-2"
+>
+  <div class="relative aspect-[3/4] bg-black">
+    <img
+      class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+      src={star.thumbnail}
+      loading="lazy"
+      alt={star.name}
+    />
+    {star.videosNum && (
+      <div class="absolute bottom-2 right-2 bg-black/85 px-2 py-0.5 rounded text-xs font-bold text-white">
+        {star.videosNum} videos
+      </div>
+    )}
+  </div>
+  <div class="p-2.5 sm:p-3.5">
+    <h3 class="m-0 leading-snug text-sm sm:text-base line-clamp-1 text-white">{star.name}</h3>
+    {star.views && (
+      <p class="mt-1 text-xs text-gray-500 m-0">{star.views} vistas</p>
+    )}
+  </div>
+</a>

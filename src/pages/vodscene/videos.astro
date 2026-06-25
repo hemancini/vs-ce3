@@ -345,52 +345,54 @@ const hashtagsJson = JSON.stringify(sortedHashtags);
       {
         videos.length > 0 && (
           <div class="flex gap-2 flex-wrap items-center">
-            <div class="relative flex-1 min-w-[180px] sm:w-72">
-              <svg
-                class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none"
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2.2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                aria-hidden="true"
+            <div class="flex-1 flex gap-2 flex-col md:flex-row">
+              <div class="relative flex-1 min-w-[180px] sm:w-72">
+                <svg
+                  class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <>
+                    <circle cx="11" cy="11" r="8" />
+                    <path d="m21 21-4.35-4.35" />
+                  </>
+                </svg>
+                <input
+                  id="video-search"
+                  type="search"
+                  placeholder="Buscar por título, descripción o ID…"
+                  autocomplete="off"
+                  class="focusable w-full bg-vs-surface border border-vs-border rounded-[6px] pl-8 pr-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-400 transition-colors"
+                  aria-label="Buscar videos"
+                />
+              </div>
+              <select
+                id="video-sort"
+                aria-label="Ordenar videos"
+                class="focusable bg-vs-surface border border-vs-border rounded-[6px] px-2 py-1.5 text-sm text-gray-300 focus:outline-none focus:border-blue-400 transition-colors cursor-pointer"
               >
-                <>
-                  <circle cx="11" cy="11" r="8" />
-                  <path d="m21 21-4.35-4.35" />
-                </>
-              </svg>
-              <input
-                id="video-search"
-                type="search"
-                placeholder="Buscar por título, descripción o ID…"
-                autocomplete="off"
-                class="focusable w-full bg-vs-surface border border-vs-border rounded-[6px] pl-8 pr-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-400 transition-colors"
-                aria-label="Buscar videos"
-              />
+                <option value="date-desc">Más reciente</option>
+                <option value="date-asc">Más antiguo</option>
+                <option value="title-asc">Título A → Z</option>
+                <option value="title-desc">Título Z → A</option>
+                <option value="views-desc">Más vistas</option>
+                <option value="views-asc">Menos vistas</option>
+                <option value="likes-desc">Más me gustas</option>
+                <option value="likes-asc">Menos me gustas</option>
+                <option value="cost-desc">Mayor precio</option>
+                <option value="cost-asc">Menor precio</option>
+              </select>
             </div>
-            <select
-              id="video-sort"
-              aria-label="Ordenar videos"
-              class="focusable bg-vs-surface border border-vs-border rounded-[6px] px-2 py-1.5 text-sm text-gray-300 focus:outline-none focus:border-blue-400 transition-colors cursor-pointer"
-            >
-              <option value="date-desc">Más reciente</option>
-              <option value="date-asc">Más antiguo</option>
-              <option value="title-asc">Título A → Z</option>
-              <option value="title-desc">Título Z → A</option>
-              <option value="views-desc">Más vistas</option>
-              <option value="views-asc">Menos vistas</option>
-              <option value="likes-desc">Más me gustas</option>
-              <option value="likes-asc">Menos me gustas</option>
-              <option value="cost-desc">Mayor precio</option>
-              <option value="cost-asc">Menor precio</option>
-            </select>
             {/* Toggle vista */}
             <div
-              class="flex rounded-[6px] border border-vs-border overflow-hidden flex-shrink-0"
+              class="flex rounded-[6px] border border-vs-border overflow-hidden"
               role="group"
               aria-label="Modo de vista"
             >
@@ -2379,9 +2381,10 @@ const hashtagsJson = JSON.stringify(sortedHashtags);
     const durationInflight = new Set();
 
     function parseISODuration(iso) {
-      const m = /PT(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?/.exec(
-        iso,
-      );
+      const m =
+        /PT(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?/.exec(
+          iso,
+        );
       if (!m || (!m[1] && !m[2] && !m[3])) return null;
       return (
         parseFloat(m[1] || 0) * 3600 +
