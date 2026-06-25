@@ -173,6 +173,12 @@ import '../../styles/global.css';
       </div>
     </div>
 
+    <!-- Estrellas porno: performers etiquetadas en el video -->
+    <div id="stars-block" class="hidden">
+      <p class="text-xs uppercase tracking-wide text-gray-500 m-0 mb-2">Estrellas porno</p>
+      <div id="stars" class="flex flex-wrap gap-x-5 gap-y-3"></div>
+    </div>
+
     <!-- Categorías -->
     <div id="cats-block" class="hidden">
       <p class="text-xs uppercase tracking-wide text-gray-500 m-0 mb-2">Categorías</p>
@@ -820,20 +826,10 @@ import '../../styles/global.css';
       showBar();
     }
 
-    // Busca el título en los catálogos ya generados (modelo + favoritos) para un
-    // primer pintado rápido; loadMeta() lo reemplaza con datos frescos al llegar.
-    async function loadTitle(vk) {
-      try {
-        const lists = await Promise.all([
-          fetch('/api/ph/videos.json').then(r => r.json()).catch(() => []),
-          fetch('/api/ph/favorites.json').then(r => r.json()).catch(() => []),
-        ]);
-        const v = lists.flat().find(x => x.vkey === vk);
-        if (titleEl.textContent === 'Cargando…') titleEl.textContent = v ? v.title : vk;
-        if (v) document.title = 'LustHub - ' + v.title;
-      } catch {
-        if (titleEl.textContent === 'Cargando…') titleEl.textContent = vk;
-      }
+    // Primer pintado rápido del título con el vkey como provisional; loadMeta()
+    // lo reemplaza con datos frescos al llegar.
+    function loadTitle(vk) {
+      if (titleEl.textContent === 'Cargando…') titleEl.textContent = vk;
     }
 
     // ── Ficha + relacionados/recomendados ──────────────────────────────────────
@@ -912,6 +908,24 @@ import '../../styles/global.css';
           });
         }
       }
+    }
+
+    // Estrellas porno: avatares + nombre, enlazados al perfil interno del performer.
+    function renderStars(stars) {
+      if (!Array.isArray(stars) || !stars.length) return;
+      const block = document.getElementById('stars-block');
+      const wrap = document.getElementById('stars');
+      block.classList.remove('hidden');
+      wrap.innerHTML = stars.map((s) => {
+        const href = internalHref(s.url) || s.url || '#';
+        const avatar = s.thumbnail
+          ? `<img src="${escapeHtml(s.thumbnail)}" loading="lazy" alt="" class="w-10 h-10 rounded-full object-cover bg-vs-surface shrink-0" />`
+          : `<span class="w-10 h-10 rounded-full bg-vs-surface shrink-0"></span>`;
+        return `<a href="${escapeHtml(href)}" class="flex items-center gap-2 no-underline group">
+            ${avatar}
+            <span class="text-sm font-semibold text-gray-200 group-hover:text-vs-pink">${escapeHtml(s.name)}</span>
+          </a>`;
+      }).join('');
     }
 
     // Tarjeta de video relacionado/recomendado: enlaza a esta misma página.
@@ -1012,6 +1026,7 @@ import '../../styles/global.css';
         const res = await fetch(`/api/ph/video.json?vkey=${encodeURIComponent(vk)}`);
         const data = await res.json();
         renderMeta(data.meta);
+        renderStars(data.pornstars);
         tabData.related = data.related || [];
         tabData.recommended = data.recommended || [];
         showTab(tabData.related.length ? 'related' : 'recommended');

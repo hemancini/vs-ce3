@@ -9,11 +9,8 @@
 // igual en `astro dev` (Node) y en Cloudflare Workers, así que funciona en ambos
 // sin Playwright ni Browser Rendering.
 //
-// Si la extracción falla, caemos a los streams guardados en videos.json (pueden
-// estar caducados, pero evita el 500).
-
-import storedVideos from './model/nico-grey/videos.json';
-import rawCookiesFallback from '../../../../scripts/ph/cookies.json';
+// Si la extracción falla, devolvemos `streams: []` con el motivo del error para
+// que el frontend muestre el mensaje de "stream caducó / abrir en Pornhub".
 
 export const prerender = false;
 
@@ -32,7 +29,7 @@ const AGE_COOKIES = {
 };
 
 async function cookieHeader(env) {
-  let cookies = rawCookiesFallback;
+  let cookies = [];
   try {
     const raw = await env?.VS_C3_KV?.get('ph:cookies');
     if (raw) cookies = JSON.parse(raw);
@@ -55,13 +52,6 @@ const BROWSER_HEADERS = {
   'upgrade-insecure-requests': '1',
   'user-agent': UA,
 };
-
-function storedStreamsFor(vkey, pageUrl) {
-  const v = storedVideos.find(
-    (x) => (vkey && x.vkey === vkey) || (pageUrl && x.pageUrl === pageUrl),
-  );
-  return v?.streams ?? [];
-}
 
 const json = (data, status = 200) =>
   new Response(JSON.stringify(data), {
@@ -154,8 +144,6 @@ export const GET = async ({ url, locals }) => {
   if (!pageUrl && vkey) pageUrl = `${BASE_URL}/view_video.php?viewkey=${vkey}`;
   if (!pageUrl) return json({ error: 'Falta el parámetro ?vkey= o ?url=' }, 400);
 
-  const stored = () => storedStreamsFor(vkey, pageUrl);
-
   try {
     const res = await fetch(pageUrl, {
       headers: { ...BROWSER_HEADERS, cookie: await cookieHeader(env) },
@@ -167,8 +155,7 @@ export const GET = async ({ url, locals }) => {
     if (!m) {
       const title = (html.match(/<title>([^<]*)<\/title>/i) || [])[1] || '';
       return json({
-        streams: stored(),
-        source: 'stored',
+        streams: [],
         error: 'No se encontraron flashvars',
         diag: { status: res.status, htmlLen: html.length, title },
       });
@@ -178,12 +165,12 @@ export const GET = async ({ url, locals }) => {
     try {
       fv = JSON.parse(m[1]);
     } catch (e) {
-      return json({ streams: stored(), source: 'stored', error: 'flashvars no parseable: ' + e.message });
+      return json({ streams: [], error: 'flashvars no parseable: ' + e.message });
     }
 
     const streams = parseStreams(fv.mediaDefinitions ?? []);
     if (!streams.length) {
-      return json({ streams: stored(), source: 'stored', error: 'mediaDefinitions sin videoUrl' });
+      return json({ streams: [], error: 'mediaDefinitions sin videoUrl' });
     }
     return json({
       streams,
@@ -193,6 +180,6 @@ export const GET = async ({ url, locals }) => {
       subscribe: parseSubscribe(html),
     });
   } catch (err) {
-    return json({ streams: stored(), source: 'stored', error: err.message });
+    return json({ streams: [], error: err.message });
   }
 };

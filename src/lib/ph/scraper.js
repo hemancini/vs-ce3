@@ -1,8 +1,8 @@
 // src/lib/ph/scraper.js
 //
-// Librería de scraping de Pornhub compartida por la app SSR (y reutilizable por
-// el script scripts/ph/scrape.mjs). Solo usa fetch() + node-html-parser, sin
-// node:fs ni navegador, así que corre igual en `astro dev` (Node) y en
+// Librería de scraping de Pornhub usada por la app SSR. Solo usa fetch() +
+// node-html-parser, sin node:fs ni navegador, así que corre igual en
+// `astro dev` (Node) y en
 // Cloudflare Workers. El HTML server-side de Pornhub ya trae el listado y los
 // flashvars con mediaDefinitions; solo hay que enviar las cookies (incluidas las
 // de age-gate) y cabeceras tipo navegador.
@@ -894,10 +894,40 @@ function extractVideoMeta(root) {
   };
 }
 
+// ── Estrellas porno del video ──────────────────────────────────────────────────
+// Bajo el reproductor, Pornhub lista las performers etiquetadas en el video dentro
+// de `.pornstarsWrapper` como anclas `a.pstar-list-btn` con su avatar, el nombre
+// (texto del ancla) y un href a /pornstar/<slug>, /model/<slug> o /users/<id>.
+function extractVideoPornstars(root) {
+  const wrap = root.querySelector('.pornstarsWrapper');
+  if (!wrap) return [];
+  const out = [];
+  const seen = new Set();
+  for (const a of wrap.querySelectorAll('a.pstar-list-btn')) {
+    const href = a.getAttribute('href') || '';
+    const m = href.match(/\/(pornstar|model|users)\/([^/?#]+)/);
+    if (!m) continue;
+    const type = m[1] === 'users' ? 'user' : m[1];
+    const slug = m[2];
+    const key = `${type}/${slug}`;
+    if (seen.has(key)) continue;
+
+    const img = a.querySelector('img');
+    const name = decodeEntities(a.textContent.replace(/\s+/g, ' ').trim());
+    if (!name) continue;
+    const thumbnail = decodeEntities(
+      img?.getAttribute('data-thumb_url') || img?.getAttribute('data-image') || img?.getAttribute('src') || ''
+    );
+    seen.add(key);
+    out.push({ name, type, slug, thumbnail, url: `${BASE_URL}${href.startsWith('/') ? '' : '/'}${href}` });
+  }
+  return out;
+}
+
 /**
  * Scrapea la página de un video: metadatos + relacionados + recomendados.
  * @param {{ vkey?: string, pageUrl?: string, env?: any }} [opts]
- * @returns {Promise<{ meta: object, related: any[], recommended: any[] }>}
+ * @returns {Promise<{ meta: object, pornstars: any[], related: any[], recommended: any[] }>}
  */
 export async function scrapeVideoPage({ vkey, pageUrl, env } = {}) {
   if (!pageUrl && vkey) pageUrl = `${BASE_URL}/view_video.php?viewkey=${vkey}`;
@@ -909,8 +939,9 @@ export async function scrapeVideoPage({ vkey, pageUrl, env } = {}) {
   const root = parse(html);
 
   const meta = extractVideoMeta(root);
+  const pornstars = extractVideoPornstars(root);
   const related = extractVideoCards(root.querySelector('.relatedVideos'));
   const recommended = extractVideoCards(root.querySelector('.recommendedVideos'));
 
-  return { meta, related, recommended };
+  return { meta, pornstars, related, recommended };
 }

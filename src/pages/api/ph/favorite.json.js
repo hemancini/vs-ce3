@@ -10,8 +10,6 @@
 // logueado, `liuIdOrNull`). Por eso descargamos la página fresca en cada toggle
 // para extraer un token válido y luego hacemos el POST con las cookies de sesión.
 
-import rawCookiesFallback from '../../../../scripts/ph/cookies.json';
-
 export const prerender = false;
 
 const BASE_URL = 'https://es.pornhub.com';
@@ -28,7 +26,7 @@ const AGE_COOKIES = {
 };
 
 async function cookieHeader(env) {
-  let cookies = rawCookiesFallback;
+  let cookies = [];
   try {
     const raw = await env?.VS_C3_KV?.get('ph:cookies');
     if (raw) cookies = JSON.parse(raw);
