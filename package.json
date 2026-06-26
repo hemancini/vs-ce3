@@ -6,23 +6,24 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "wrangler pages dev dist",
-    "deploy": "astro build && wrangler pages deploy dist --project-name vs --branch main"
+    "deploy": "astro build && wrangler pages deploy dist --project-name vs --branch main",
+    "secrets:push": "wrangler pages secret bulk .dev.vars --project-name vs"
   },
   "dependencies": {
-    "@astrojs/cloudflare": "^11.0.0",
-    "@tailwindcss/vite": "^4.3.1",
-    "astro": "^4.16.0",
-    "dotenv": "^16.4.5",
-    "node-html-parser": "^8.0.3",
-    "playwright": "^1.44.0",
-    "tailwindcss": "^4.3.1"
+    "@astrojs/cloudflare": "11.0.0",
+    "@tailwindcss/vite": "4.3.1",
+    "astro": "4.16.0",
+    "dotenv": "16.4.5",
+    "node-html-parser": "8.0.3",
+    "tailwindcss": "4.3.1"
   },
   "devDependencies": {
-    "@astrojs/check": "^0.9.6",
-    "@cloudflare/workers-types": "^4.20260301.1",
-    "puppeteer-core": "^24.37.5",
-    "typescript": "^5.0.0",
-    "wrangler": "^4.104.0"
+    "@astrojs/check": "0.9.6",
+    "@cloudflare/workers-types": "4.20260301.1",
+    "playwright": "1.44.0",
+    "puppeteer-core": "24.37.5",
+    "typescript": "5.0.0",
+    "wrangler": "4.104.0"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

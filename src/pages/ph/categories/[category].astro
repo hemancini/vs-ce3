@@ -1,6 +1,7 @@
 ---
 // Videos de una categoría: /ph/categories/<slug> → https://es.pornhub.com/categories/<slug>
 import Layout from "../../../layouts/Ph.astro";
+import { phCookieMeta } from "@/lib/ph/cookies.js";
 import PhHeader from "../../../components/ph/PhHeader.astro";
 import PhScraperControls from "../../../components/ph/PhScraperControls.astro";
 import PhCategoryChips from "../../../components/ph/PhCategoryChips.astro";
@@ -36,12 +37,7 @@ try {
   error = e.message;
 }
 
-let cookieFromKV = false;
-let cookieCount = 0;
-try {
-  const raw = await env?.VS_C3_KV?.get("ph:cookies");
-  if (raw) { cookieFromKV = true; cookieCount = JSON.parse(raw).length; }
-} catch {}
+const { cookieFromKV, cookieCount } = await phCookieMeta(env);
 
 const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
 const prettyName = decodeURIComponent(category).replace(/-/g, " ");

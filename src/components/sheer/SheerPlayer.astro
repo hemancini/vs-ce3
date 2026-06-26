@@ -176,7 +176,7 @@
     </div>
   </div>
 
-  <div class="p-8">
+  <div class="p-4 md:p-8">
     <h1 id="video-title" class="mb-4 md:text-xl font-bold leading-tight">
       Video sin título
     </h1>
@@ -732,7 +732,12 @@
           const i = document.createElement("i");
           i.className = `fa-solid ${m.icon}`;
           span.appendChild(i);
-          span.appendChild(document.createTextNode(` ${m.label}: ${m.value}`));
+          // Label oculto en mobile: solo icono + valor.
+          const label = document.createElement("span");
+          label.className = "hidden md:inline";
+          label.textContent = `${m.label}:`;
+          span.appendChild(label);
+          span.appendChild(document.createTextNode(` ${m.value}`));
           metaEl.appendChild(span);
         });
       }

@@ -7,9 +7,9 @@
 //   → guarda las cookies en KV (protegido por el middleware de autenticación)
 //   Respuesta: { ok: true, count }
 
-export const prerender = false;
+import { readPhKV, writePhKV, PH_KV_COOKIES } from '../../../lib/ph/cookies.js';
 
-const KV_KEY = 'ph:cookies';
+export const prerender = false;
 
 const json = (data, status = 200) =>
   new Response(JSON.stringify(data), {
@@ -17,18 +17,17 @@ const json = (data, status = 200) =>
     headers: { 'content-type': 'application/json;charset=UTF-8', 'cache-control': 'no-store' },
   });
 
-function getKV(context) {
-  return context.locals?.runtime?.env?.VS_C3_KV ?? null;
+function getEnv(context) {
+  return context.locals?.runtime?.env ?? null;
 }
 
 export const GET = async (context) => {
-  const kv = getKV(context);
-  if (!kv) return json({ error: 'KV no configurado' }, 503);
+  const env = getEnv(context);
+  if (!env?.VS_C3_KV) return json({ error: 'KV no configurado' }, 503);
 
   try {
-    const raw = await kv.get(KV_KEY);
-    if (!raw) return json({ cookies: null, fromStorage: 'none', count: 0 });
-    const cookies = JSON.parse(raw);
+    const cookies = await readPhKV(env.VS_C3_KV, PH_KV_COOKIES, env);
+    if (!Array.isArray(cookies)) return json({ cookies: null, fromStorage: 'none', count: 0 });
     return json({ cookies, fromStorage: 'kv', count: cookies.length });
   } catch (e) {
     return json({ error: 'Error al leer KV: ' + e.message }, 500);
@@ -95,8 +94,8 @@ export const POST = async (context) => {
 };
 
 export const PUT = async (context) => {
-  const kv = getKV(context);
-  if (!kv) return json({ error: 'KV no configurado — crea el namespace y actualiza wrangler.toml' }, 503);
+  const env = getEnv(context);
+  if (!env?.VS_C3_KV) return json({ error: 'KV no configurado — crea el namespace y actualiza wrangler.toml' }, 503);
 
   let body;
   try {
@@ -108,6 +107,6 @@ export const PUT = async (context) => {
   const { cookies } = body ?? {};
   if (!Array.isArray(cookies)) return json({ error: 'cookies debe ser un array JSON' }, 400);
 
-  await kv.put(KV_KEY, JSON.stringify(cookies));
+  await writePhKV(env.VS_C3_KV, PH_KV_COOKIES, cookies, env);
   return json({ ok: true, count: cookies.length });
 };

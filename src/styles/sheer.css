@@ -176,6 +176,12 @@
     @apply -translate-y-0.5;
     box-shadow: 0 6px 20px rgba(255, 74, 74, 0.4);
   }
+  .btn--ghost {
+    @apply border border-line bg-transparent text-ink;
+  }
+  .btn--ghost:hover:not(:disabled) {
+    @apply border-line-hover text-accent;
+  }
 
   .status-badge {
     @apply inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[0.85rem] font-extrabold uppercase tracking-[1px];

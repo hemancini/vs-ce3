@@ -3,34 +3,60 @@
 // Sheer (?page=N vía fetch + cookie) — el feed agregado de todos los creadores a
 // los que estás suscrito — y renderiza la grilla con los mismos filtros/orden y
 // scroll infinito que el catálogo. El catálogo por creador vive en /sheer/[alias].
-import Layout from '../../layouts/Sheer.astro';
-import SheerVideoCard from '../../components/sheer/SheerVideoCard.astro';
-import SheerHeader from '../../components/sheer/SheerHeader.astro';
-import SheerScrapeControls from '../../components/sheer/SheerScrapeControls.astro';
-import SheerVideoModal from '../../components/sheer/SheerVideoModal.astro';
-import { scrapeSheerMemberships } from '../../lib/sheer/scraper.js';
+import Layout from "../../layouts/Sheer.astro";
+import SheerVideoCard from "../../components/sheer/SheerVideoCard.astro";
+import SheerHeader from "../../components/sheer/SheerHeader.astro";
+import SheerScrapeControls from "../../components/sheer/SheerScrapeControls.astro";
+import SheerVideoModal from "../../components/sheer/SheerVideoModal.astro";
+import {
+  scrapeSheerMemberships,
+  loadMode,
+  readLibraryFeed,
+} from "../../lib/sheer/scraper.js";
 
 export const prerender = false;
 
 const env = (Astro.locals as any)?.runtime?.env;
 
 const params = Astro.url.searchParams;
-const pages = Math.min(Math.max(parseInt(params.get('paginas') || '1', 10) || 1, 1), 40);
+const pages = Math.min(
+  Math.max(parseInt(params.get("paginas") || "1", 10) || 1, 1),
+  40,
+);
+
+const mode = await loadMode(env);
+const savedMode = mode === "saved";
 
 let videos: any[] = [];
 let totalPages = 0;
+let generatedAt: number | null = null;
 let error: string | null = null;
 const startedAt = Date.now();
 
 try {
-  const result = await scrapeSheerMemberships({ maxPages: pages, env });
-  videos = result.videos;
-  totalPages = result.totalPages;
+  if (savedMode) {
+    // Modo guardado: lee la biblioteca cifrada de KV; sin cookie ni scrape.
+    const result = await readLibraryFeed({ env });
+    videos = result.videos;
+    totalPages = 1; // todo en una sola página (no hay scroll incremental)
+    generatedAt = result.generatedAt;
+  } else {
+    const result = await scrapeSheerMemberships({ maxPages: pages, env });
+    videos = result.videos;
+    totalPages = result.totalPages;
+  }
 } catch (e: any) {
   error = e.message;
 }
 
 const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
+const fmtDate = (ts: number | null) =>
+  ts
+    ? new Date(ts).toLocaleString("es-ES", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      })
+    : "";
 
 // Build filter lists (actrices, creadores y categorías) from the scraped data
 const actressMap = new Map<string, number>();
@@ -42,7 +68,7 @@ videos.forEach((v) => {
     if (m && m.name) actressMap.set(m.name, (actressMap.get(m.name) || 0) + 1);
   });
   (v.tags || []).forEach((t: any) => {
-    const key = (t && (t.alias || t.name)) || '';
+    const key = (t && (t.alias || t.name)) || "";
     if (!key) return;
     const cur = categoryMap.get(key) || { name: t.name || key, count: 0 };
     cur.count += 1;
@@ -64,208 +90,314 @@ const creators = [...creatorMap.entries()]
   .sort((a, b) => b.count - a.count || a.alias.localeCompare(b.alias));
 
 const resolutionSet = new Set<number>();
-videos.forEach((v) => (v.sources || []).forEach((s: any) => s.size && resolutionSet.add(Number(s.size))));
+videos.forEach((v) =>
+  (v.sources || []).forEach(
+    (s: any) => s.size && resolutionSet.add(Number(s.size)),
+  ),
+);
 const resolutions = [...resolutionSet].sort((a, b) => b - a);
 
-const hasFilters = actresses.length > 0 || categories.length > 0 || creators.length > 0;
+const hasFilters =
+  actresses.length > 0 || categories.length > 0 || creators.length > 0;
 ---
 
-<Layout title="Membresías - Sheer">
+<Layout title="Sheer">
   <div class="mx-auto max-w-[1300px] px-4 py-6 sm:px-6 sm:py-8">
-    <SheerHeader title="Membresías" icon="fa-id-card">
-      <a slot="nav" href="/sheer/subscriptions" class="inline-flex items-center gap-2 text-[0.95rem] text-muted transition-all duration-300 hover:text-accent">
+    <SheerHeader title="Sheer" icon="fa-id-card">
+      <a
+        slot="nav"
+        href="/sheer/subscriptions"
+        class="inline-flex items-center gap-2 text-[0.95rem] text-muted transition-all duration-300 hover:text-accent"
+      >
         <i class="fa-solid fa-heart"></i> Suscripciones
       </a>
-      {error ? (
-        <span slot="stats" class="text-danger"><i class="fa-solid fa-triangle-exclamation"></i> Error</span>
-      ) : (
-        <span slot="stats"><i class="fa-solid fa-id-card"></i> {videos.length} videos · {elapsed}s · {totalPages} págs.</span>
-      )}
+      {
+        error ? (
+          <span slot="stats" class="text-danger">
+            <i class="fa-solid fa-triangle-exclamation" /> Error
+          </span>
+        ) : savedMode ? (
+          <span slot="stats">
+            <i class="fa-solid fa-hard-drive" /> {videos.length} videos
+            guardados{generatedAt ? ` · ${fmtDate(generatedAt)}` : ""}
+          </span>
+        ) : (
+          <span slot="stats">
+            <i class="fa-solid fa-id-card" /> {videos.length} videos · {elapsed}
+            s · {totalPages} págs.
+          </span>
+        )
+      }
     </SheerHeader>
 
-    {/* Controles de scraping: recargan la página (SSR vuelve a scrapear). */}
-    <SheerScrapeControls pages={pages} membershipMode />
-
-    {error ? (
-      <div class="px-8 py-16 text-center text-[1.2rem] text-danger">
-        <i class="fa-solid fa-triangle-exclamation mb-4 block text-5xl"></i>
-        <p>{error}</p>
-      </div>
-    ) : (
-      <>
-        {/* Search bar */}
-        <div class="mb-6 flex gap-4 rounded-2xl border border-line bg-card px-4 py-3 shadow-[inset_0_2px_4px_rgba(0,0,0,0.2)] transition-all duration-300 focus-within:border-line-hover focus-within:shadow-glow sm:mb-10 sm:px-5">
-          <span class="flex items-center text-[1.2rem] text-muted"><i class="fa-solid fa-magnifying-glass"></i></span>
-          <input
-            type="text"
-            id="search"
-            placeholder="Buscar videos por título, ID..."
-            class="w-full border-none bg-transparent text-[1rem] text-ink outline-none placeholder:text-muted sm:text-[1.1rem]"
-            autocomplete="off"
-          />
+    {/* En modo guardado se lee de KV: no hay scraping en vivo. */}
+    {
+      savedMode ? (
+        <div class="mb-8 flex items-center gap-3 rounded-2xl border border-line bg-card px-4 py-3 text-[0.85rem] text-muted sm:px-5">
+          <i class="fa-solid fa-hard-drive text-accent" />
+          <span>
+            Modo guardado: leyendo la biblioteca de KV
+            {generatedAt ? ` (actualizada ${fmtDate(generatedAt)})` : ""}.
+            Cambia a «Live» en el menú de cuenta para scrapear en vivo.
+          </span>
         </div>
+      ) : (
+        <SheerScrapeControls pages={pages} membershipMode />
+      )
+    }
 
-        {hasFilters && (
-          <div class="mb-8 grid grid-cols-2 items-end gap-3 sm:-mt-4 sm:mb-10 sm:flex sm:flex-wrap sm:gap-4">
-            {creators.length > 0 && (
-              <div class="flex flex-col gap-1.5">
-                <label class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.5px] text-muted"><i class="fa-solid fa-user-pen"></i> Creador</label>
-                <select id="filter-creator" class="w-full cursor-pointer rounded-[10px] border border-line bg-card px-3.5 py-2.5 text-[0.9rem] text-ink outline-none transition-all duration-300 hover:border-line-hover focus:border-line-hover sm:min-w-[180px]">
-                  <option value="">Todos ({creators.length})</option>
-                  {creators.map((c) => (
-                    <option value={c.alias.toLowerCase()}>{c.alias} ({c.count})</option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            {actresses.length > 0 && (
-              <div class="flex flex-col gap-1.5">
-                <label class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.5px] text-muted"><i class="fa-solid fa-user-tag"></i> Actriz</label>
-                <select id="filter-actress" class="w-full cursor-pointer rounded-[10px] border border-line bg-card px-3.5 py-2.5 text-[0.9rem] text-ink outline-none transition-all duration-300 hover:border-line-hover focus:border-line-hover sm:min-w-[180px]">
-                  <option value="">Todas ({actresses.length})</option>
-                  {actresses.map((a) => (
-                    <option value={a.name.toLowerCase()}>{a.name} ({a.count})</option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            {categories.length > 0 && (
-              <div class="flex flex-col gap-1.5">
-                <label class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.5px] text-muted"><i class="fa-solid fa-tags"></i> Categoría</label>
-                <select id="filter-category" class="w-full cursor-pointer rounded-[10px] border border-line bg-card px-3.5 py-2.5 text-[0.9rem] text-ink outline-none transition-all duration-300 hover:border-line-hover focus:border-line-hover sm:min-w-[180px]">
-                  <option value="">Todas ({categories.length})</option>
-                  {categories.map((c) => (
-                    <option value={c.alias}>{c.name} ({c.count})</option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            {resolutions.length > 0 && (
-              <div class="flex flex-col gap-1.5">
-                <label class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.5px] text-muted"><i class="fa-solid fa-clapperboard"></i> Calidad mín.</label>
-                <select id="filter-resolution" class="w-full cursor-pointer rounded-[10px] border border-line bg-card px-3.5 py-2.5 text-[0.9rem] text-ink outline-none transition-all duration-300 hover:border-line-hover focus:border-line-hover sm:min-w-[180px]">
-                  <option value="">Cualquiera</option>
-                  {resolutions.map((r) => (
-                    <option value={r}>{r}p+</option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            <div class="flex flex-col gap-1.5">
-              <label class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.5px] text-muted"><i class="fa-solid fa-arrow-down-wide-short"></i> Ordenar</label>
-              <select id="filter-sort" class="w-full cursor-pointer rounded-[10px] border border-line bg-card px-3.5 py-2.5 text-[0.9rem] text-ink outline-none transition-all duration-300 hover:border-line-hover focus:border-line-hover sm:min-w-[180px]">
-                <option value="default">Por defecto</option>
-                <option value="date-desc">Fecha (recientes)</option>
-                <option value="date-asc">Fecha (antiguos)</option>
-                <option value="views-desc">Más vistos</option>
-                <option value="views-asc">Menos vistos</option>
-                <option value="title-asc">Título (A-Z)</option>
-                <option value="title-desc">Título (Z-A)</option>
-                <option value="res-desc">Calidad (mayor)</option>
-                <option value="res-asc">Calidad (menor)</option>
-              </select>
-            </div>
-
-            <button id="filter-clear" class="flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-[10px] border border-line bg-[rgba(255,255,255,0.05)] px-4 py-2.5 text-[0.85rem] text-ink transition-all duration-300 hover:border-line-hover hover:bg-card-hover sm:w-auto sm:justify-start" type="button">
-              <i class="fa-solid fa-xmark"></i> Limpiar
-            </button>
-
-            <div class="col-span-2 self-center text-right text-[0.85rem] font-semibold text-muted sm:col-span-1 sm:ml-auto" id="filter-count"></div>
+    {
+      error ? (
+        <div class="px-8 py-16 text-center text-[1.2rem] text-danger">
+          <i class="fa-solid fa-triangle-exclamation mb-4 block text-5xl" />
+          <p>{error}</p>
+        </div>
+      ) : (
+        <>
+          {/* Search bar */}
+          <div class="mb-6 flex gap-4 rounded-2xl border border-line bg-card px-4 py-3 shadow-[inset_0_2px_4px_rgba(0,0,0,0.2)] transition-all duration-300 focus-within:border-line-hover focus-within:shadow-glow sm:mb-10 sm:px-5">
+            <span class="flex items-center text-[1.2rem] text-muted">
+              <i class="fa-solid fa-magnifying-glass" />
+            </span>
+            <input
+              type="text"
+              id="search"
+              placeholder="Buscar videos por título, ID..."
+              class="w-full border-none bg-transparent text-[1rem] text-ink outline-none placeholder:text-muted sm:text-[1.1rem]"
+              autocomplete="off"
+            />
           </div>
-        )}
 
-        {videos.length === 0 ? (
-          <div class="px-8 py-16 text-center text-[1.2rem] text-muted">
-            <i class="fa-solid fa-film mb-4 block text-5xl text-muted"></i>
-            <p>No se obtuvieron videos de tus membresías.</p>
-          </div>
-        ) : (
-          <>
-            <div
-              class="grid grid-cols-1 gap-5 sm:grid-cols-[repeat(auto-fill,minmax(310px,1fr))] sm:gap-8"
-              id="video-grid"
-              data-next-page={pages + 1}
-              data-total-pages={totalPages}
-            >
-              {videos.map((video) => <SheerVideoCard video={video} />)}
-            </div>
+          {hasFilters && (
+            <div class="mb-8 grid grid-cols-2 items-end gap-3 sm:-mt-4 sm:mb-10 sm:flex sm:flex-wrap sm:gap-4">
+              {creators.length > 0 && (
+                <div class="flex flex-col gap-1.5">
+                  <label class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.5px] text-muted">
+                    <i class="fa-solid fa-user-pen" /> Creador
+                  </label>
+                  <select
+                    id="filter-creator"
+                    class="w-full cursor-pointer rounded-[10px] border border-line bg-card px-3.5 py-2.5 text-[0.9rem] text-ink outline-none transition-all duration-300 hover:border-line-hover focus:border-line-hover sm:min-w-[180px]"
+                  >
+                    <option value="">Todos ({creators.length})</option>
+                    {creators.map((c) => (
+                      <option value={c.alias.toLowerCase()}>
+                        {c.alias} ({c.count})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
-            <div id="no-results" class="hidden px-8 py-16 text-center text-[1.2rem] text-muted">
-              <i class="fa-solid fa-ban mb-4 block text-5xl text-muted"></i>
-              <p>No se encontraron videos que coincidan con la búsqueda.</p>
-            </div>
+              {actresses.length > 0 && (
+                <div class="flex flex-col gap-1.5">
+                  <label class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.5px] text-muted">
+                    <i class="fa-solid fa-user-tag" /> Actriz
+                  </label>
+                  <select
+                    id="filter-actress"
+                    class="w-full cursor-pointer rounded-[10px] border border-line bg-card px-3.5 py-2.5 text-[0.9rem] text-ink outline-none transition-all duration-300 hover:border-line-hover focus:border-line-hover sm:min-w-[180px]"
+                  >
+                    <option value="">Todas ({actresses.length})</option>
+                    {actresses.map((a) => (
+                      <option value={a.name.toLowerCase()}>
+                        {a.name} ({a.count})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
-            {/* Scroll infinito: sentinel + indicadores de carga / fin. */}
-            <div id="scroll-sentinel" class="h-px w-full"></div>
-            <div id="loading-more" class="hidden px-8 py-10 text-center text-[1rem] text-muted">
-              <i class="fa-solid fa-spinner fa-spin mb-2 block text-3xl text-accent"></i>
-              <p>Cargando más videos...</p>
+              {categories.length > 0 && (
+                <div class="flex flex-col gap-1.5">
+                  <label class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.5px] text-muted">
+                    <i class="fa-solid fa-tags" /> Categoría
+                  </label>
+                  <select
+                    id="filter-category"
+                    class="w-full cursor-pointer rounded-[10px] border border-line bg-card px-3.5 py-2.5 text-[0.9rem] text-ink outline-none transition-all duration-300 hover:border-line-hover focus:border-line-hover sm:min-w-[180px]"
+                  >
+                    <option value="">Todas ({categories.length})</option>
+                    {categories.map((c) => (
+                      <option value={c.alias}>
+                        {c.name} ({c.count})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {resolutions.length > 0 && (
+                <div class="flex flex-col gap-1.5">
+                  <label class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.5px] text-muted">
+                    <i class="fa-solid fa-clapperboard" /> Calidad mín.
+                  </label>
+                  <select
+                    id="filter-resolution"
+                    class="w-full cursor-pointer rounded-[10px] border border-line bg-card px-3.5 py-2.5 text-[0.9rem] text-ink outline-none transition-all duration-300 hover:border-line-hover focus:border-line-hover sm:min-w-[180px]"
+                  >
+                    <option value="">Cualquiera</option>
+                    {resolutions.map((r) => (
+                      <option value={r}>{r}p+</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div class="flex flex-col gap-1.5">
+                <label class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.5px] text-muted">
+                  <i class="fa-solid fa-arrow-down-wide-short" /> Ordenar
+                </label>
+                <select
+                  id="filter-sort"
+                  class="w-full cursor-pointer rounded-[10px] border border-line bg-card px-3.5 py-2.5 text-[0.9rem] text-ink outline-none transition-all duration-300 hover:border-line-hover focus:border-line-hover sm:min-w-[180px]"
+                >
+                  <option value="default">Por defecto</option>
+                  <option value="date-desc">Fecha (recientes)</option>
+                  <option value="date-asc">Fecha (antiguos)</option>
+                  <option value="views-desc">Más vistos</option>
+                  <option value="views-asc">Menos vistos</option>
+                  <option value="title-asc">Título (A-Z)</option>
+                  <option value="title-desc">Título (Z-A)</option>
+                  <option value="res-desc">Calidad (mayor)</option>
+                  <option value="res-asc">Calidad (menor)</option>
+                </select>
+              </div>
+
+              <button
+                id="filter-clear"
+                class="flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-[10px] border border-line bg-[rgba(255,255,255,0.05)] px-4 py-2.5 text-[0.85rem] text-ink transition-all duration-300 hover:border-line-hover hover:bg-card-hover sm:w-auto sm:justify-start"
+                type="button"
+              >
+                <i class="fa-solid fa-xmark" /> Limpiar
+              </button>
+
+              <div
+                class="col-span-2 self-center text-right text-[0.85rem] font-semibold text-muted sm:col-span-1 sm:ml-auto"
+                id="filter-count"
+              />
             </div>
-            <div id="end-of-list" class="hidden px-8 py-10 text-center text-[0.95rem] text-muted"></div>
-          </>
-        )}
-      </>
-    )}
+          )}
+
+          {videos.length === 0 ? (
+            <div class="px-8 py-16 text-center text-[1.2rem] text-muted">
+              <i class="fa-solid fa-film mb-4 block text-5xl text-muted" />
+              {savedMode ? (
+                <p>
+                  No hay biblioteca guardada en KV. Genérala en{" "}
+                  <a href="/sheer/scraper" class="text-accent underline">
+                    /sheer/scraper
+                  </a>
+                  .
+                </p>
+              ) : (
+                <p>No se obtuvieron videos de tus membresías.</p>
+              )}
+            </div>
+          ) : (
+            <>
+              <div
+                class="grid grid-cols-1 gap-5 sm:grid-cols-[repeat(auto-fill,minmax(310px,1fr))] sm:gap-8"
+                id="video-grid"
+                data-next-page={pages + 1}
+                data-total-pages={totalPages}
+              >
+                {videos.map((video) => (
+                  <SheerVideoCard video={video} />
+                ))}
+              </div>
+
+              <div
+                id="no-results"
+                class="hidden px-8 py-16 text-center text-[1.2rem] text-muted"
+              >
+                <i class="fa-solid fa-ban mb-4 block text-5xl text-muted" />
+                <p>No se encontraron videos que coincidan con la búsqueda.</p>
+              </div>
+
+              {/* Scroll infinito: sentinel + indicadores de carga / fin. */}
+              <div id="scroll-sentinel" class="h-px w-full" />
+              <div
+                id="loading-more"
+                class="hidden px-8 py-10 text-center text-[1rem] text-muted"
+              >
+                <i class="fa-solid fa-spinner fa-spin mb-2 block text-3xl text-accent" />
+                <p>Cargando más videos...</p>
+              </div>
+              <div
+                id="end-of-list"
+                class="hidden px-8 py-10 text-center text-[0.95rem] text-muted"
+              />
+            </>
+          )}
+        </>
+      )
+    }
   </div>
 
   <SheerVideoModal />
 </Layout>
 
 <script is:inline>
-  const searchInput = document.getElementById('search');
-  const grid = document.getElementById('video-grid');
-  const noResults = document.getElementById('no-results');
+  const searchInput = document.getElementById("search");
+  const grid = document.getElementById("video-grid");
+  const noResults = document.getElementById("no-results");
 
-  const creatorSelect = document.getElementById('filter-creator');
-  const actressSelect = document.getElementById('filter-actress');
-  const categorySelect = document.getElementById('filter-category');
-  const resolutionSelect = document.getElementById('filter-resolution');
-  const sortSelect = document.getElementById('filter-sort');
-  const clearBtn = document.getElementById('filter-clear');
-  const filterCount = document.getElementById('filter-count');
+  const creatorSelect = document.getElementById("filter-creator");
+  const actressSelect = document.getElementById("filter-actress");
+  const categorySelect = document.getElementById("filter-category");
+  const resolutionSelect = document.getElementById("filter-resolution");
+  const sortSelect = document.getElementById("filter-sort");
+  const clearBtn = document.getElementById("filter-clear");
+  const filterCount = document.getElementById("filter-count");
 
   // `cards` crece con el scroll infinito, así que es mutable. `seen` deduplica
   // por postId; `orderCounter` mantiene el orden de llegada para "Por defecto".
-  let cards = Array.from(document.querySelectorAll('.video-card'));
+  let cards = Array.from(document.querySelectorAll(".video-card"));
   const seen = new Set();
   let orderCounter = 0;
   cards.forEach((card) => {
-    card.setAttribute('data-order', String(orderCounter++));
-    const id = card.getAttribute('data-id');
+    card.setAttribute("data-order", String(orderCounter++));
+    const id = card.getAttribute("data-id");
     if (id) seen.add(id);
   });
 
   const applySort = () => {
     if (!grid) return;
-    const mode = sortSelect?.value || 'default';
-    const num = (el, attr) => parseInt(el.getAttribute(attr) || '0', 10) || 0;
+    const mode = sortSelect?.value || "default";
+    const num = (el, attr) => parseInt(el.getAttribute(attr) || "0", 10) || 0;
 
     const sorted = [...cards].sort((a, b) => {
-      const titleA = (a.getAttribute('data-title') || '').toLowerCase();
-      const titleB = (b.getAttribute('data-title') || '').toLowerCase();
-      const resA = num(a, 'data-res');
-      const resB = num(b, 'data-res');
-      const viewsA = num(a, 'data-views');
-      const viewsB = num(b, 'data-views');
-      const dateA = num(a, 'data-date');
-      const dateB = num(b, 'data-date');
-      const orderA = num(a, 'data-order');
-      const orderB = num(b, 'data-order');
+      const titleA = (a.getAttribute("data-title") || "").toLowerCase();
+      const titleB = (b.getAttribute("data-title") || "").toLowerCase();
+      const resA = num(a, "data-res");
+      const resB = num(b, "data-res");
+      const viewsA = num(a, "data-views");
+      const viewsB = num(b, "data-views");
+      const dateA = num(a, "data-date");
+      const dateB = num(b, "data-date");
+      const orderA = num(a, "data-order");
+      const orderB = num(b, "data-order");
 
       switch (mode) {
-        case 'title-asc': return titleA.localeCompare(titleB);
-        case 'title-desc': return titleB.localeCompare(titleA);
-        case 'res-desc': return resB - resA || titleA.localeCompare(titleB);
-        case 'res-asc': return resA - resB || titleA.localeCompare(titleB);
-        case 'views-desc': return viewsB - viewsA || titleA.localeCompare(titleB);
-        case 'views-asc': return viewsA - viewsB || titleA.localeCompare(titleB);
-        case 'date-desc': return dateB - dateA || titleA.localeCompare(titleB);
-        case 'date-asc': return dateA - dateB || titleA.localeCompare(titleB);
-        default: return orderA - orderB;
+        case "title-asc":
+          return titleA.localeCompare(titleB);
+        case "title-desc":
+          return titleB.localeCompare(titleA);
+        case "res-desc":
+          return resB - resA || titleA.localeCompare(titleB);
+        case "res-asc":
+          return resA - resB || titleA.localeCompare(titleB);
+        case "views-desc":
+          return viewsB - viewsA || titleA.localeCompare(titleB);
+        case "views-asc":
+          return viewsA - viewsB || titleA.localeCompare(titleB);
+        case "date-desc":
+          return dateB - dateA || titleA.localeCompare(titleB);
+        case "date-asc":
+          return dateA - dateB || titleA.localeCompare(titleB);
+        default:
+          return orderA - orderB;
       }
     });
 
@@ -273,88 +405,119 @@ const hasFilters = actresses.length > 0 || categories.length > 0 || creators.len
   };
 
   const applyFilters = () => {
-    const query = (searchInput?.value || '').toLowerCase().trim();
-    const creator = (creatorSelect?.value || '').toLowerCase();
-    const actress = (actressSelect?.value || '').toLowerCase();
-    const category = (categorySelect?.value || '').toLowerCase();
-    const minRes = parseInt(resolutionSelect?.value || '0', 10) || 0;
+    const query = (searchInput?.value || "").toLowerCase().trim();
+    const creator = (creatorSelect?.value || "").toLowerCase();
+    const actress = (actressSelect?.value || "").toLowerCase();
+    const category = (categorySelect?.value || "").toLowerCase();
+    const minRes = parseInt(resolutionSelect?.value || "0", 10) || 0;
 
     let visibleCount = 0;
 
     cards.forEach((card) => {
-      const blob = card.getAttribute('data-search') || card.getAttribute('data-title') || '';
-      const id = (card.getAttribute('data-id') || '').toLowerCase();
-      const alias = (card.getAttribute('data-alias') || '').toLowerCase();
-      const models = (card.getAttribute('data-models') || '').split('|').filter(Boolean);
-      const tags = (card.getAttribute('data-tags') || '').split('|').filter(Boolean);
-      const res = parseInt(card.getAttribute('data-res') || '0', 10) || 0;
+      const blob =
+        card.getAttribute("data-search") ||
+        card.getAttribute("data-title") ||
+        "";
+      const id = (card.getAttribute("data-id") || "").toLowerCase();
+      const alias = (card.getAttribute("data-alias") || "").toLowerCase();
+      const models = (card.getAttribute("data-models") || "")
+        .split("|")
+        .filter(Boolean);
+      const tags = (card.getAttribute("data-tags") || "")
+        .split("|")
+        .filter(Boolean);
+      const res = parseInt(card.getAttribute("data-res") || "0", 10) || 0;
 
-      const matchesSearch = !query || blob.includes(query) || id.includes(query);
+      const matchesSearch =
+        !query || blob.includes(query) || id.includes(query);
       const matchesCreator = !creator || alias === creator;
       const matchesActress = !actress || models.includes(actress);
       const matchesCategory = !category || tags.includes(category);
       const matchesRes = !minRes || res >= minRes;
 
-      if (matchesSearch && matchesCreator && matchesActress && matchesCategory && matchesRes) {
-        card.style.display = 'flex';
+      if (
+        matchesSearch &&
+        matchesCreator &&
+        matchesActress &&
+        matchesCategory &&
+        matchesRes
+      ) {
+        card.style.display = "flex";
         visibleCount++;
       } else {
-        card.style.display = 'none';
+        card.style.display = "none";
       }
     });
 
-    if (filterCount) filterCount.textContent = `${visibleCount} de ${cards.length}`;
+    if (filterCount)
+      filterCount.textContent = `${visibleCount} de ${cards.length}`;
 
     if (visibleCount === 0) {
-      if (noResults) noResults.classList.remove('hidden');
-      if (grid) grid.style.display = 'none';
+      if (noResults) noResults.classList.remove("hidden");
+      if (grid) grid.style.display = "none";
     } else {
-      if (noResults) noResults.classList.add('hidden');
-      if (grid) grid.style.display = 'grid';
+      if (noResults) noResults.classList.add("hidden");
+      if (grid) grid.style.display = "grid";
     }
   };
 
-  searchInput?.addEventListener('input', applyFilters);
-  creatorSelect?.addEventListener('change', applyFilters);
-  actressSelect?.addEventListener('change', applyFilters);
-  categorySelect?.addEventListener('change', applyFilters);
-  resolutionSelect?.addEventListener('change', applyFilters);
-  sortSelect?.addEventListener('change', applySort);
+  searchInput?.addEventListener("input", applyFilters);
+  creatorSelect?.addEventListener("change", applyFilters);
+  actressSelect?.addEventListener("change", applyFilters);
+  categorySelect?.addEventListener("change", applyFilters);
+  resolutionSelect?.addEventListener("change", applyFilters);
+  sortSelect?.addEventListener("change", applySort);
 
-  clearBtn?.addEventListener('click', () => {
-    if (searchInput) searchInput.value = '';
-    if (creatorSelect) creatorSelect.value = '';
-    if (actressSelect) actressSelect.value = '';
-    if (categorySelect) categorySelect.value = '';
-    if (resolutionSelect) resolutionSelect.value = '';
-    if (sortSelect) sortSelect.value = 'default';
+  clearBtn?.addEventListener("click", () => {
+    if (searchInput) searchInput.value = "";
+    if (creatorSelect) creatorSelect.value = "";
+    if (actressSelect) actressSelect.value = "";
+    if (categorySelect) categorySelect.value = "";
+    if (resolutionSelect) resolutionSelect.value = "";
+    if (sortSelect) sortSelect.value = "default";
     applySort();
     applyFilters();
   });
 
   // Detección de hover real (desktop) vs. táctil (mobile).
-  const canHover = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+  const canHover = window.matchMedia(
+    "(hover: hover) and (pointer: fine)",
+  ).matches;
 
   // Detener todas las previews en curso (mobile).
   const stopAllPreviews = () => {
-    document.querySelectorAll('.video-card[data-previewing="1"]').forEach((c) => {
-      c.dataset.previewing = '';
-      const v = c.querySelector('video[data-preview]');
-      if (v) { v.pause(); v.currentTime = 0; v.style.opacity = '0'; }
-    });
+    document
+      .querySelectorAll('.video-card[data-previewing="1"]')
+      .forEach((c) => {
+        c.dataset.previewing = "";
+        const v = c.querySelector("video[data-preview]");
+        if (v) {
+          v.pause();
+          v.currentTime = 0;
+          v.style.opacity = "0";
+        }
+      });
   };
 
   const openCardModal = (card) => {
     stopAllPreviews();
-    try { localStorage.setItem('sheer:player:' + card.dataset.id, card.dataset.player); } catch (e) {}
+    try {
+      localStorage.setItem(
+        "sheer:player:" + card.dataset.id,
+        card.dataset.player,
+      );
+    } catch (e) {}
     if (window.openSheerModal) window.openSheerModal(card.dataset.id);
-    else window.location.href = '/sheer/play?postId=' + card.dataset.id;
+    else window.location.href = "/sheer/play?postId=" + card.dataset.id;
   };
 
   // Activación al click/tap. Un toque normal abre el modal; si venía de un hold
   // (que ya reprodujo la preview en mobile), se ignora para no abrir el modal.
   window.sheerActivateCard = (card) => {
-    if (card.dataset.previewHold) { card.dataset.previewHold = ''; return; }
+    if (card.dataset.previewHold) {
+      card.dataset.previewHold = "";
+      return;
+    }
     openCardModal(card);
   };
 
@@ -366,108 +529,138 @@ const hasFilters = actresses.length > 0 || categories.length > 0 || creators.len
     let startY = 0;
 
     const startPreview = () => {
-      card.dataset.holding = '1';
+      card.dataset.holding = "1";
       stopAllPreviews(); // sólo una a la vez
-      card.dataset.previewing = '1';
-      preview.style.opacity = '1';
+      card.dataset.previewing = "1";
+      preview.style.opacity = "1";
       preview.play().catch(() => {});
     };
 
-    card.addEventListener('touchstart', (e) => {
-      const t = e.touches[0];
-      startX = t.clientX;
-      startY = t.clientY;
-      card.dataset.holding = '';
-      holdTimer = setTimeout(startPreview, 200);
-    }, { passive: true });
+    card.addEventListener(
+      "touchstart",
+      (e) => {
+        const t = e.touches[0];
+        startX = t.clientX;
+        startY = t.clientY;
+        card.dataset.holding = "";
+        holdTimer = setTimeout(startPreview, 200);
+      },
+      { passive: true },
+    );
 
-    card.addEventListener('touchmove', (e) => {
-      const t = e.touches[0];
-      if (Math.abs(t.clientX - startX) > 10 || Math.abs(t.clientY - startY) > 10) {
-        clearTimeout(holdTimer); // fue scroll, no hold
-      }
-    }, { passive: true });
+    card.addEventListener(
+      "touchmove",
+      (e) => {
+        const t = e.touches[0];
+        if (
+          Math.abs(t.clientX - startX) > 10 ||
+          Math.abs(t.clientY - startY) > 10
+        ) {
+          clearTimeout(holdTimer); // fue scroll, no hold
+        }
+      },
+      { passive: true },
+    );
 
     const endHold = () => {
       clearTimeout(holdTimer);
-      if (card.dataset.holding === '1') {
-        card.dataset.holding = '';
+      if (card.dataset.holding === "1") {
+        card.dataset.holding = "";
         // Fue un hold: la preview sigue reproduciéndose; evita que el click
         // que llega tras el touchend abra el modal.
-        card.dataset.previewHold = '1';
-        setTimeout(() => { if (card.dataset.previewHold) card.dataset.previewHold = ''; }, 600);
+        card.dataset.previewHold = "1";
+        setTimeout(() => {
+          if (card.dataset.previewHold) card.dataset.previewHold = "";
+        }, 600);
       }
     };
-    card.addEventListener('touchend', endHold);
-    card.addEventListener('touchcancel', endHold);
+    card.addEventListener("touchend", endHold);
+    card.addEventListener("touchcancel", endHold);
   };
 
   // Cablea los clics de categoría/actriz dentro de `container` (toda la página al
   // inicio, o solo las tarjetas nuevas tras un scroll). Marca los nodos ya
   // cableados con data-wired para no duplicar listeners.
   const wireCards = (container) => {
-    container.querySelectorAll('.cat-tag[data-cat]:not([data-wired])').forEach((tag) => {
-      tag.setAttribute('data-wired', '1');
-      tag.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (!categorySelect) return;
-        const cat = tag.getAttribute('data-cat') || '';
-        categorySelect.value = cat;
-        if (categorySelect.value !== cat) {
-          const opt = Array.from(categorySelect.options).find((o) => o.value.toLowerCase() === cat.toLowerCase());
-          if (opt) categorySelect.value = opt.value;
-        }
-        applyFilters();
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+    container
+      .querySelectorAll(".cat-tag[data-cat]:not([data-wired])")
+      .forEach((tag) => {
+        tag.setAttribute("data-wired", "1");
+        tag.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (!categorySelect) return;
+          const cat = tag.getAttribute("data-cat") || "";
+          categorySelect.value = cat;
+          if (categorySelect.value !== cat) {
+            const opt = Array.from(categorySelect.options).find(
+              (o) => o.value.toLowerCase() === cat.toLowerCase(),
+            );
+            if (opt) categorySelect.value = opt.value;
+          }
+          applyFilters();
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        });
       });
-    });
 
-    container.querySelectorAll('.actress-link[data-actress]:not([data-wired])').forEach((link) => {
-      link.setAttribute('data-wired', '1');
-      link.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (!actressSelect) return;
-        const actress = link.getAttribute('data-actress') || '';
-        actressSelect.value = actress;
-        if (actressSelect.value !== actress) {
-          const opt = Array.from(actressSelect.options).find((o) => o.value.toLowerCase() === actress.toLowerCase());
-          if (opt) actressSelect.value = opt.value;
-        }
-        applyFilters();
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+    container
+      .querySelectorAll(".actress-link[data-actress]:not([data-wired])")
+      .forEach((link) => {
+        link.setAttribute("data-wired", "1");
+        link.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (!actressSelect) return;
+          const actress = link.getAttribute("data-actress") || "";
+          actressSelect.value = actress;
+          if (actressSelect.value !== actress) {
+            const opt = Array.from(actressSelect.options).find(
+              (o) => o.value.toLowerCase() === actress.toLowerCase(),
+            );
+            if (opt) actressSelect.value = opt.value;
+          }
+          applyFilters();
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        });
       });
-    });
 
     // Vista previa: en desktop al hover; en mobile manteniendo pulsado.
-    container.querySelectorAll('.video-card:not([data-preview-wired])').forEach((card) => {
-      const preview = card.querySelector('video[data-preview]');
-      if (!preview) return;
-      card.setAttribute('data-preview-wired', '1');
-      if (canHover) {
-        card.addEventListener('mouseenter', () => { preview.play().catch(() => {}); });
-        card.addEventListener('mouseleave', () => { preview.pause(); preview.currentTime = 0; });
-      } else {
-        wireMobilePreview(card, preview);
-      }
-    });
+    container
+      .querySelectorAll(".video-card:not([data-preview-wired])")
+      .forEach((card) => {
+        const preview = card.querySelector("video[data-preview]");
+        if (!preview) return;
+        card.setAttribute("data-preview-wired", "1");
+        if (canHover) {
+          card.addEventListener("mouseenter", () => {
+            preview.play().catch(() => {});
+          });
+          card.addEventListener("mouseleave", () => {
+            preview.pause();
+            preview.currentTime = 0;
+          });
+        } else {
+          wireMobilePreview(card, preview);
+        }
+      });
   };
 
   // ── Scroll infinito ─────────────────────────────────────────────────────────
-  const sentinel = document.getElementById('scroll-sentinel');
-  const loadingEl = document.getElementById('loading-more');
-  const endEl = document.getElementById('end-of-list');
+  const sentinel = document.getElementById("scroll-sentinel");
+  const loadingEl = document.getElementById("loading-more");
+  const endEl = document.getElementById("end-of-list");
 
-  const totalPages = parseInt(grid?.dataset.totalPages || '1', 10) || 1;
-  let nextPage = parseInt(grid?.dataset.nextPage || '2', 10) || 2;
+  const totalPages = parseInt(grid?.dataset.totalPages || "1", 10) || 1;
+  let nextPage = parseInt(grid?.dataset.nextPage || "2", 10) || 2;
   let hasMore = !!grid && nextPage <= totalPages;
   let loading = false;
 
   const finishList = () => {
     hasMore = false;
-    loadingEl?.classList.add('hidden');
+    loadingEl?.classList.add("hidden");
     if (endEl) {
-      endEl.textContent = cards.length ? '— Fin de tus membresías —' : 'Sin resultados.';
-      endEl.classList.remove('hidden');
+      endEl.textContent = cards.length
+        ? "— Fin de tus membresías —"
+        : "Sin resultados.";
+      endEl.classList.remove("hidden");
     }
     observer?.disconnect();
   };
@@ -475,21 +668,24 @@ const hasFilters = actresses.length > 0 || categories.length > 0 || creators.len
   const loadMore = async () => {
     if (loading || !hasMore || !grid) return;
     loading = true;
-    loadingEl?.classList.remove('hidden');
+    loadingEl?.classList.remove("hidden");
 
     try {
-      const u = new URLSearchParams({ source: 'membership', page: String(nextPage) });
+      const u = new URLSearchParams({
+        source: "membership",
+        page: String(nextPage),
+      });
       const res = await fetch(`/sheer/live-cards?${u}`);
       const html = await res.text();
-      const tmp = document.createElement('div');
+      const tmp = document.createElement("div");
       tmp.innerHTML = html;
 
       const newCards = [];
-      tmp.querySelectorAll('.video-card').forEach((card) => {
-        const id = card.getAttribute('data-id');
+      tmp.querySelectorAll(".video-card").forEach((card) => {
+        const id = card.getAttribute("data-id");
         if (id && seen.has(id)) return;
         if (id) seen.add(id);
-        card.setAttribute('data-order', String(orderCounter++));
+        card.setAttribute("data-order", String(orderCounter++));
         grid.appendChild(card);
         cards.push(card);
         newCards.push(card);
@@ -503,13 +699,16 @@ const hasFilters = actresses.length > 0 || categories.length > 0 || creators.len
       hasMore = nextPage <= totalPages;
       loading = false;
 
-      if (!hasMore) { finishList(); return; }
-      loadingEl?.classList.add('hidden');
+      if (!hasMore) {
+        finishList();
+        return;
+      }
+      loadingEl?.classList.add("hidden");
       // Si el sentinel sigue visible (pantallas altas), encadena otra carga.
       if (isSentinelVisible()) loadMore();
     } catch {
       loading = false;
-      loadingEl?.classList.add('hidden');
+      loadingEl?.classList.add("hidden");
     }
   };
 
@@ -520,8 +719,10 @@ const hasFilters = actresses.length > 0 || categories.length > 0 || creators.len
   };
 
   const observer = new IntersectionObserver(
-    (entries) => { if (entries.some((e) => e.isIntersecting)) loadMore(); },
-    { rootMargin: '400px' },
+    (entries) => {
+      if (entries.some((e) => e.isIntersecting)) loadMore();
+    },
+    { rootMargin: "400px" },
   );
 
   // Init

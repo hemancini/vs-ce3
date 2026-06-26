@@ -5,6 +5,7 @@
 // página es el feed de VIDEOS de las cuentas a las que el usuario está suscrito.
 // Requiere cookies de sesión (las de KV en runtime).
 import Layout from "../../layouts/Ph.astro";
+import { phCookieMeta } from "@/lib/ph/cookies.js";
 import PhHeader from "../../components/ph/PhHeader.astro";
 import PhScraperControls from "../../components/ph/PhScraperControls.astro";
 import VideoGrid from "../../components/ph/VideoGrid.astro";
@@ -41,12 +42,7 @@ try {
 // de mostrar un silencioso "Sin resultados".
 const sessionExpired = !error && !authenticated;
 
-let cookieFromKV = false;
-let cookieCount = 0;
-try {
-  const raw = await env?.VS_C3_KV?.get("ph:cookies");
-  if (raw) { cookieFromKV = true; cookieCount = JSON.parse(raw).length; }
-} catch {}
+const { cookieFromKV, cookieCount } = await phCookieMeta(env);
 
 const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
 ---

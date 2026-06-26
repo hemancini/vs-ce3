@@ -8,7 +8,7 @@ import SheerVideoCard from '../../components/sheer/SheerVideoCard.astro';
 import SheerHeader from '../../components/sheer/SheerHeader.astro';
 import SheerScrapeControls from '../../components/sheer/SheerScrapeControls.astro';
 import SheerVideoModal from '../../components/sheer/SheerVideoModal.astro';
-import { scrapeSheer, DEFAULT_ALIAS } from '../../lib/sheer/scraper.js';
+import { scrapeSheer, loadMode, readLibraryCreator, DEFAULT_ALIAS } from '../../lib/sheer/scraper.js';
 
 export const prerender = false;
 
@@ -18,20 +18,34 @@ const params = Astro.url.searchParams;
 const alias = (Astro.params.alias || DEFAULT_ALIAS).trim() || DEFAULT_ALIAS;
 const pages = Math.min(Math.max(parseInt(params.get('paginas') || '1', 10) || 1, 1), 40);
 
+const mode = await loadMode(env);
+const savedMode = mode === 'saved';
+
 let videos: any[] = [];
 let totalPages = 0;
+let generatedAt: number | null = null;
 let error: string | null = null;
 const startedAt = Date.now();
 
 try {
-  const result = await scrapeSheer({ alias, maxPages: pages, env });
-  videos = result.videos;
-  totalPages = result.totalPages;
+  if (savedMode) {
+    // Modo guardado: lee los videos del creador desde la biblioteca de KV.
+    const result = await readLibraryCreator({ alias, env });
+    videos = result.videos;
+    totalPages = 1;
+    generatedAt = result.generatedAt;
+  } else {
+    const result = await scrapeSheer({ alias, maxPages: pages, env });
+    videos = result.videos;
+    totalPages = result.totalPages;
+  }
 } catch (e: any) {
   error = e.message;
 }
 
 const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
+const fmtDate = (ts: number | null) =>
+  ts ? new Date(ts).toLocaleString('es-ES', { dateStyle: 'medium', timeStyle: 'short' }) : '';
 
 // Build filter lists (actrices y categorías) from the scraped data
 const actressMap = new Map<string, number>();
@@ -73,13 +87,22 @@ const hasFilters = actresses.length > 0 || categories.length > 0;
       </a>
       {error ? (
         <span slot="stats" class="text-danger"><i class="fa-solid fa-triangle-exclamation"></i> Error</span>
+      ) : savedMode ? (
+        <span slot="stats"><i class="fa-solid fa-hard-drive"></i> {videos.length} videos guardados{generatedAt ? ` · ${fmtDate(generatedAt)}` : ''}</span>
       ) : (
         <span slot="stats"><i class="fa-solid fa-bolt"></i> {videos.length} videos · {elapsed}s · {totalPages} págs.</span>
       )}
     </SheerHeader>
 
-    {/* Controles de scraping: navegan a /sheer/[alias]?paginas=N (SSR re-scrapea). */}
-    <SheerScrapeControls alias={alias} pages={pages} pathMode />
+    {/* En modo guardado se lee de KV: no hay scraping en vivo. */}
+    {savedMode ? (
+      <div class="mb-8 flex items-center gap-3 rounded-2xl border border-line bg-card px-4 py-3 text-[0.85rem] text-muted sm:px-5">
+        <i class="fa-solid fa-hard-drive text-accent"></i>
+        <span>Modo guardado: leyendo de la biblioteca de KV{generatedAt ? ` (actualizada ${fmtDate(generatedAt)})` : ''}. Cambia a «Live» en el menú de cuenta para scrapear en vivo.</span>
+      </div>
+    ) : (
+      <SheerScrapeControls alias={alias} pages={pages} pathMode />
+    )}
 
     {error ? (
       <div class="px-8 py-16 text-center text-[1.2rem] text-danger">
@@ -164,7 +187,11 @@ const hasFilters = actresses.length > 0 || categories.length > 0;
         {videos.length === 0 ? (
           <div class="px-8 py-16 text-center text-[1.2rem] text-muted">
             <i class="fa-solid fa-film mb-4 block text-5xl text-muted"></i>
-            <p>No se obtuvieron videos del scrape en vivo.</p>
+            {savedMode ? (
+              <p>Este creador no está en la biblioteca guardada. Genérala en <a href="/sheer/scraper" class="text-accent underline">/sheer/scraper</a>.</p>
+            ) : (
+              <p>No se obtuvieron videos del scrape en vivo.</p>
+            )}
           </div>
         ) : (
           <>

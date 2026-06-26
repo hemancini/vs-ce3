@@ -3,15 +3,15 @@
 //
 //  ┌── Avatar circular con indicador flotante de estado (verde/rojo/cargando).
 //  │   Al hacer clic se despliega un menú con las opciones de sesión.
-//  └── Cada opción abre un modal:
-//        · Cookies          → pegar cookies a mano.
-//        · Email y contraseña → login con credenciales.
-//        · Validar sesión   → comprueba la sesión guardada.
+//  └── El menú tiene dos entradas:
+//        · Cuentas          → elegir/eliminar la cuenta activa (multicuenta) y,
+//                             desde ahí, añadir una nueva por cookies o por login.
+//        · Validar sesión   → comprueba la cuenta activa.
 //
-// Dos métodos para conseguir la cookie de sesión: (1) pegar cookies a mano,
-// (2) iniciar sesión con email/contraseña. En ambos casos se guardan en KV
-// (sheer:cookies) + config/cookies.json (dev). Todo el trabajo pesado vive en
-// /api/sheer/auth; aquí solo está la UI + el fetch del cliente.
+// Multicuenta: cada cuenta guarda su propio juego de cookies en KV
+// (sheer:accounts) y la cuenta ACTIVA se refleja en KV sheer:cookies — que es lo
+// que lee el scraper. Todo el trabajo pesado vive en /api/sheer/auth; aquí solo
+// está la UI + el fetch del cliente.
 ---
 
 <div id="auth-root" class="relative inline-block">
@@ -31,37 +31,91 @@
       class="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full border-2 border-card bg-muted"
       title="Comprobando…"
     >
-      <span id="auth-status-ping" class="absolute inline-flex h-full w-full rounded-full bg-muted opacity-60"></span>
+      <span
+        id="auth-status-ping"
+        class="absolute inline-flex h-full w-full rounded-full bg-muted opacity-60"
+      ></span>
     </span>
   </button>
 
-  {/* ── Menú desplegable ─────────────────────────────────────────────────── */}
+  {
+    /* ── Menú desplegable ─────────────────────────────────────────────────── */
+  }
   <div
     id="auth-menu"
     class="absolute right-0 top-[calc(100%+0.5rem)] z-50 hidden w-60 max-w-[calc(100vw-2rem)] origin-top-right overflow-hidden rounded-xl border border-line bg-[#15101f] shadow-[0_12px_40px_rgba(0,0,0,0.5)] backdrop-blur-xl"
     role="menu"
   >
     <div class="border-b border-line px-4 py-3">
-      <p class="text-[0.7rem] font-semibold uppercase tracking-[0.5px] text-muted">Sesión Sheer</p>
-      <p id="auth-menu-status" class="mt-0.5 flex items-center gap-1.5 text-[0.85rem] font-semibold text-muted">
+      <p
+        id="auth-menu-account"
+        class="truncate text-[0.8rem] font-semibold text-ink"
+      >
+        Sesión Sheer
+      </p>
+      <p
+        id="auth-menu-status"
+        class="mt-0.5 flex items-center gap-1.5 text-[0.85rem] font-semibold text-muted"
+      >
         <i class="fa-solid fa-circle-notch fa-spin"></i> Comprobando…
       </p>
     </div>
     <div class="p-1.5">
-      <button type="button" data-open="cookies" class="auth-menu-item flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-[0.88rem] text-ink transition-colors hover:bg-card-hover" role="menuitem">
-        <i class="fa-solid fa-cookie-bite w-4 text-accent"></i> Pegar cookies
+      <button
+        type="button"
+        data-open="accounts"
+        class="auth-menu-item flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-[0.88rem] text-ink transition-colors hover:bg-card-hover"
+        role="menuitem"
+      >
+        <i class="fa-solid fa-users w-4 text-accent"></i> Cuentas
       </button>
-      <button type="button" data-open="login" class="auth-menu-item flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-[0.88rem] text-ink transition-colors hover:bg-card-hover" role="menuitem">
-        <i class="fa-solid fa-right-to-bracket w-4 text-accent"></i> Email y contraseña
-      </button>
-      <button type="button" data-open="validate" class="auth-menu-item flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-[0.88rem] text-ink transition-colors hover:bg-card-hover" role="menuitem">
+      <button
+        type="button"
+        data-open="validate"
+        class="auth-menu-item flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-[0.88rem] text-ink transition-colors hover:bg-card-hover"
+        role="menuitem"
+      >
         <i class="fa-solid fa-shield-halved w-4 text-accent"></i> Validar sesión
       </button>
+    </div>
+
+    {/* Modo de lectura: live (scrape con cookie) ↔ guardado (lee KV) */}
+    <div class="border-t border-line px-3 py-3">
+      <p
+        class="mb-2 flex items-center gap-1.5 text-[0.72rem] font-semibold uppercase tracking-[0.5px] text-muted"
+      >
+        <i class="fa-solid fa-database w-4"></i> Modo de lectura
+      </p>
+      <div
+        class="flex rounded-lg border border-line bg-[rgba(8,5,15,0.6)] p-0.5"
+      >
+        <button
+          type="button"
+          data-mode="live"
+          class="auth-mode-btn flex-1 rounded-md px-2 py-1.5 text-[0.78rem] font-semibold text-muted transition-colors"
+        >
+          <i class="fa-solid fa-bolt"></i> Live
+        </button>
+        <button
+          type="button"
+          data-mode="saved"
+          class="auth-mode-btn flex-1 rounded-md px-2 py-1.5 text-[0.78rem] font-semibold text-muted transition-colors"
+        >
+          <i class="fa-solid fa-hard-drive"></i> Guardado
+        </button>
+      </div>
+      <p
+        id="auth-mode-hint"
+        class="mt-1.5 text-[0.72rem] leading-snug text-muted"
+      >
+      </p>
     </div>
   </div>
 </div>
 
-{/* ── Modal ──────────────────────────────────────────────────────────────── */}
+{
+  /* ── Modal ──────────────────────────────────────────────────────────────── */
+}
 <div
   id="auth-modal"
   class="fixed inset-0 z-[200] hidden items-center justify-center p-3 sm:p-6"
@@ -69,10 +123,17 @@
 >
   <div class="absolute inset-0 bg-black/80 backdrop-blur-sm" data-close></div>
 
-  <div class="relative z-10 w-full max-w-[520px] overflow-hidden rounded-2xl border border-line bg-[#15101f] shadow-[0_20px_60px_rgba(0,0,0,0.6)]">
+  <div
+    class="relative z-10 flex max-h-[calc(100dvh-1.5rem)] w-full max-w-[520px] flex-col overflow-hidden rounded-2xl border border-line bg-[#15101f] shadow-[0_20px_60px_rgba(0,0,0,0.6)] sm:max-h-[calc(100dvh-3rem)]"
+  >
     {/* Cabecera */}
-    <div class="flex items-center justify-between gap-3 border-b border-line px-5 py-4">
-      <h2 id="auth-modal-title" class="flex items-center gap-2.5 text-[1rem] font-semibold text-ink">
+    <div
+      class="flex shrink-0 items-center justify-between gap-3 border-b border-line px-5 py-4"
+    >
+      <h2
+        id="auth-modal-title"
+        class="flex items-center gap-2.5 text-[1rem] font-semibold text-ink"
+      >
         <i class="fa-solid fa-key text-accent"></i> Autenticación
       </h2>
       <button
@@ -85,10 +146,58 @@
       </button>
     </div>
 
-    <div class="px-5 py-5">
+    <div class="overflow-y-auto px-5 py-5">
+      {/* Gestión de cuentas (multicuenta) */}
+      <div data-view="accounts" class="auth-view hidden flex-col gap-3">
+        <p class="text-[0.9rem] text-muted">
+          Elige la cuenta activa o elimina las que no uses. La activa es la que
+          usa el scraper.
+        </p>
+        <div id="auth-accounts-list" class="flex flex-col gap-2">
+          <p class="flex items-center gap-1.5 text-[0.85rem] text-muted">
+            <i class="fa-solid fa-circle-notch fa-spin"></i> Cargando cuentas…
+          </p>
+        </div>
+        <div class="flex flex-col gap-2 sm:flex-row">
+          <button
+            type="button"
+            data-goto="cookies"
+            class="auth-goto btn btn--ghost !mt-0 flex-1 whitespace-nowrap !border !border-solid !border-line-hover !px-4 !py-2.5 !text-sm"
+          >
+            <i class="fa-solid fa-cookie-bite"></i> Añadir por cookies
+          </button>
+          <button
+            type="button"
+            data-goto="login"
+            class="auth-goto btn btn--ghost !mt-0 flex-1 whitespace-nowrap !border !border-solid !border-line-hover !px-4 !py-2.5 !text-sm"
+          >
+            <i class="fa-solid fa-right-to-bracket"></i> Añadir por login
+          </button>
+        </div>
+      </div>
+
       {/* Método 1: pegar cookies */}
-      <div data-view="cookies" class="auth-view flex flex-col gap-3">
-        <label for="auth-cookies" class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.5px] text-muted">
+      <div data-view="cookies" class="auth-view hidden flex-col gap-3">
+        <div class="flex flex-col gap-1.5">
+          <label
+            for="auth-cookies-label"
+            class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.5px] text-muted"
+          >
+            <i class="fa-solid fa-tag"></i> Nombre de la cuenta <span
+              class="normal-case text-muted/70">(opcional)</span
+            >
+          </label>
+          <input
+            type="text"
+            id="auth-cookies-label"
+            placeholder="p. ej. Cuenta principal"
+            class="w-full rounded-[10px] border border-line bg-[rgba(8,5,15,0.6)] px-3.5 py-2.5 text-[0.9rem] text-ink outline-none transition-all duration-300 hover:border-line-hover focus:border-line-hover"
+          />
+        </div>
+        <label
+          for="auth-cookies"
+          class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.5px] text-muted"
+        >
           <i class="fa-solid fa-cookie-bite"></i> Cookies de sesión
         </label>
         <textarea
@@ -97,7 +206,11 @@
           placeholder='Pega aquí las cookies: JSON [{"name":"...","value":"..."}], objeto {"name":"value"} o cabecera "k=v; k2=v2".'
           class="w-full resize-y rounded-[10px] border border-line bg-[rgba(8,5,15,0.6)] px-3.5 py-2.5 font-mono text-[0.82rem] text-ink outline-none transition-all duration-300 hover:border-line-hover focus:border-line-hover"
         ></textarea>
-        <button type="button" id="auth-save-cookies" class="btn btn--primary !mt-0">
+        <button
+          type="button"
+          id="auth-save-cookies"
+          class="btn btn--primary !mt-0"
+        >
           <i class="fa-solid fa-floppy-disk"></i> Guardar y validar
         </button>
       </div>
@@ -105,7 +218,10 @@
       {/* Método 2: email + contraseña */}
       <div data-view="login" class="auth-view hidden flex-col gap-3">
         <div class="flex flex-col gap-1.5">
-          <label for="auth-email" class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.5px] text-muted">
+          <label
+            for="auth-email"
+            class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.5px] text-muted"
+          >
             <i class="fa-solid fa-envelope"></i> Email
           </label>
           <input
@@ -117,7 +233,10 @@
           />
         </div>
         <div class="flex flex-col gap-1.5">
-          <label for="auth-password" class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.5px] text-muted">
+          <label
+            for="auth-password"
+            class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.5px] text-muted"
+          >
             <i class="fa-solid fa-lock"></i> Contraseña
           </label>
           <input
@@ -132,7 +251,8 @@
           <i class="fa-solid fa-right-to-bracket"></i> Iniciar sesión
         </button>
         <p class="text-[0.78rem] italic text-muted">
-          Las credenciales se envían al servidor solo para obtener la cookie; no se guardan.
+          Las credenciales se envían al servidor solo para obtener la cookie; no
+          se guardan.
         </p>
       </div>
 
@@ -146,103 +266,149 @@
         </button>
       </div>
 
-      {/* Resultado común */}
-      <p id="auth-result" class="mt-4 min-h-[1.2em] text-[0.85rem] text-muted"></p>
+      {/* Resultado común (oculto mientras no tenga texto) */}
+      <p id="auth-result" class="mt-4 text-[0.85rem] text-muted empty:hidden">
+      </p>
     </div>
   </div>
 </div>
 
 <script is:inline>
   (() => {
-    const root = document.getElementById('auth-root');
+    const root = document.getElementById("auth-root");
     if (!root) return;
 
-    const avatar = document.getElementById('auth-avatar');
-    const menu = document.getElementById('auth-menu');
-    const menuStatus = document.getElementById('auth-menu-status');
-    const dot = document.getElementById('auth-status-dot');
-    const ping = document.getElementById('auth-status-ping');
-    const modal = document.getElementById('auth-modal');
-    const modalTitle = document.getElementById('auth-modal-title');
-    const result = document.getElementById('auth-result');
-    const views = modal.querySelectorAll('.auth-view');
+    const avatar = document.getElementById("auth-avatar");
+    const menu = document.getElementById("auth-menu");
+    const menuStatus = document.getElementById("auth-menu-status");
+    const menuAccount = document.getElementById("auth-menu-account");
+    const dot = document.getElementById("auth-status-dot");
+    const ping = document.getElementById("auth-status-ping");
+    const modal = document.getElementById("auth-modal");
+    const modalTitle = document.getElementById("auth-modal-title");
+    const result = document.getElementById("auth-result");
+    const views = modal.querySelectorAll(".auth-view");
+
+    // Portal: el header tiene `backdrop-blur`, que crea un containing block para
+    // los hijos position:fixed → el modal se recortaría dentro del header. Lo
+    // movemos a <body> para que `fixed inset-0` cubra el viewport completo.
+    if (modal.parentElement !== document.body) document.body.appendChild(modal);
 
     let lastFocus = null;
 
     // ── Menú desplegable ─────────────────────────────────────────────────────
     const openMenu = () => {
-      menu.classList.remove('hidden');
-      avatar.setAttribute('aria-expanded', 'true');
+      menu.classList.remove("hidden");
+      avatar.setAttribute("aria-expanded", "true");
     };
     const closeMenu = () => {
-      menu.classList.add('hidden');
-      avatar.setAttribute('aria-expanded', 'false');
+      menu.classList.add("hidden");
+      avatar.setAttribute("aria-expanded", "false");
     };
-    avatar?.addEventListener('click', (e) => {
+    avatar?.addEventListener("click", (e) => {
       e.stopPropagation();
-      menu.classList.contains('hidden') ? openMenu() : closeMenu();
+      menu.classList.contains("hidden") ? openMenu() : closeMenu();
     });
-    document.addEventListener('click', (e) => {
+    document.addEventListener("click", (e) => {
       if (!root.contains(e.target)) closeMenu();
     });
 
     // ── Modal ────────────────────────────────────────────────────────────────
     const VIEW_TITLES = {
-      cookies: '<i class="fa-solid fa-cookie-bite text-accent"></i> Pegar cookies',
-      login: '<i class="fa-solid fa-right-to-bracket text-accent"></i> Email y contraseña',
-      validate: '<i class="fa-solid fa-shield-halved text-accent"></i> Validar sesión',
+      accounts: '<i class="fa-solid fa-users text-accent"></i> Cuentas',
+      cookies:
+        '<i class="fa-solid fa-cookie-bite text-accent"></i> Pegar cookies',
+      login:
+        '<i class="fa-solid fa-right-to-bracket text-accent"></i> Email y contraseña',
+      validate:
+        '<i class="fa-solid fa-shield-halved text-accent"></i> Validar sesión',
+    };
+
+    const showView = (view) => {
+      views.forEach((v) => {
+        const active = v.getAttribute("data-view") === view;
+        v.classList.toggle("hidden", !active);
+        v.classList.toggle("flex", active);
+      });
+      if (modalTitle)
+        modalTitle.innerHTML = VIEW_TITLES[view] || VIEW_TITLES.cookies;
+      setResult("loading", "");
+      // Acciones de apertura por vista.
+      if (view === "validate")
+        document.getElementById("auth-validate")?.click();
+      if (view === "accounts") renderAccounts();
     };
 
     const openModal = (view) => {
-      views.forEach((v) => {
-        const active = v.getAttribute('data-view') === view;
-        v.classList.toggle('hidden', !active);
-        v.classList.toggle('flex', active);
-      });
-      if (modalTitle) modalTitle.innerHTML = VIEW_TITLES[view] || VIEW_TITLES.cookies;
-      setResult('loading', '');
+      showView(view);
       lastFocus = document.activeElement;
-      modal.classList.remove('hidden');
-      modal.classList.add('flex');
-      modal.setAttribute('aria-hidden', 'false');
-      document.body.style.overflow = 'hidden';
-      // Auto-validar al abrir la vista de validación.
-      if (view === 'validate') document.getElementById('auth-validate')?.click();
+      modal.classList.remove("hidden");
+      modal.classList.add("flex");
+      modal.setAttribute("aria-hidden", "false");
+      document.body.style.overflow = "hidden";
     };
 
     const closeModal = () => {
-      modal.classList.add('hidden');
-      modal.classList.remove('flex');
-      modal.setAttribute('aria-hidden', 'true');
-      document.body.style.overflow = '';
+      modal.classList.add("hidden");
+      modal.classList.remove("flex");
+      modal.setAttribute("aria-hidden", "true");
+      document.body.style.overflow = "";
       if (lastFocus && lastFocus.focus) lastFocus.focus();
     };
 
-    root.querySelectorAll('.auth-menu-item').forEach((item) => {
-      item.addEventListener('click', () => {
+    root.querySelectorAll(".auth-menu-item").forEach((item) => {
+      item.addEventListener("click", () => {
         closeMenu();
-        openModal(item.getAttribute('data-open'));
+        openModal(item.getAttribute("data-open"));
       });
     });
 
-    modal.querySelectorAll('[data-close]').forEach((el) => el.addEventListener('click', closeModal));
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && !modal.classList.contains('hidden')) closeModal();
+    // Navegación entre vistas dentro del modal (sin cerrarlo).
+    modal
+      .querySelectorAll("[data-goto]")
+      .forEach((el) =>
+        el.addEventListener("click", () =>
+          showView(el.getAttribute("data-goto")),
+        ),
+      );
+
+    modal
+      .querySelectorAll("[data-close]")
+      .forEach((el) => el.addEventListener("click", closeModal));
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !modal.classList.contains("hidden"))
+        closeModal();
     });
 
     // ── Indicador de estado (punto flotante + texto del menú) ──────────────────
     const setStatus = (state, text) => {
       const map = {
-        loading: { dot: 'bg-muted', txt: 'text-muted', icon: 'fa-circle-notch fa-spin', ping: 'bg-muted opacity-60' },
-        ok: { dot: 'bg-[#4ade80]', txt: 'text-[#4ade80]', icon: 'fa-circle-check', ping: 'bg-[#4ade80] opacity-50 animate-ping' },
-        bad: { dot: 'bg-danger', txt: 'text-danger', icon: 'fa-circle-xmark', ping: 'bg-danger opacity-40' },
+        loading: {
+          dot: "bg-muted",
+          txt: "text-muted",
+          icon: "fa-circle-notch fa-spin",
+          ping: "bg-muted opacity-60",
+        },
+        ok: {
+          dot: "bg-[#4ade80]",
+          txt: "text-[#4ade80]",
+          icon: "fa-circle-check",
+          ping: "bg-[#4ade80] opacity-50 animate-ping",
+        },
+        bad: {
+          dot: "bg-danger",
+          txt: "text-danger",
+          icon: "fa-circle-xmark",
+          ping: "bg-danger opacity-40",
+        },
       };
       const s = map[state] || map.loading;
       if (dot) {
         dot.className = `absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full border-2 border-card ${s.dot}`;
         dot.title = text;
       }
-      if (ping) ping.className = `absolute inline-flex h-full w-full rounded-full ${s.ping}`;
+      if (ping)
+        ping.className = `absolute inline-flex h-full w-full rounded-full ${s.ping}`;
       if (menuStatus) {
         menuStatus.className = `mt-0.5 flex items-center gap-1.5 text-[0.85rem] font-semibold ${s.txt}`;
         menuStatus.innerHTML = `<i class="fa-solid ${s.icon}"></i> ${text}`;
@@ -251,8 +417,15 @@
 
     const setResult = (state, text) => {
       if (!result) return;
-      const cls = state === 'ok' ? 'text-[#4ade80]' : state === 'bad' ? 'text-danger' : 'text-muted';
-      result.className = `mt-4 min-h-[1.2em] text-[0.85rem] ${cls}`;
+      // Limpiar cualquier atajo previo (p. ej. el de «Pegar cookies»).
+      document.getElementById("auth-cookie-shortcut")?.remove();
+      const cls =
+        state === "ok"
+          ? "text-[#4ade80]"
+          : state === "bad"
+            ? "text-danger"
+            : "text-muted";
+      result.className = `mt-4 text-[0.85rem] empty:hidden ${cls}`;
       result.textContent = text;
     };
 
@@ -261,11 +434,11 @@
       if (on) {
         btn.dataset._html = btn.innerHTML;
         btn.disabled = true;
-        btn.style.opacity = '0.6';
+        btn.style.opacity = "0.6";
         btn.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> ${busyLabel}`;
       } else {
         btn.disabled = false;
-        btn.style.opacity = '';
+        btn.style.opacity = "";
         if (btn.dataset._html) btn.innerHTML = btn.dataset._html;
       }
     };
@@ -273,82 +446,320 @@
     const api = async (method, payload) => {
       const opts = { method };
       if (payload) {
-        opts.headers = { 'content-type': 'application/json' };
+        opts.headers = { "content-type": "application/json" };
         opts.body = JSON.stringify(payload);
       }
-      const res = await fetch('/api/sheer/auth', opts);
+      const res = await fetch("/api/sheer/auth", opts);
       return res.json();
+    };
+
+    // ── Modo de lectura (live ↔ guardado en KV) ───────────────────────────────
+    const modeBtns = root.querySelectorAll(".auth-mode-btn");
+    const modeHint = document.getElementById("auth-mode-hint");
+    let currentMode = "live";
+    let libraryInfo = { hasLibrary: false, totalCreators: 0, totalVideos: 0 };
+
+    const renderMode = () => {
+      modeBtns.forEach((b) => {
+        const active = b.getAttribute("data-mode") === currentMode;
+        b.classList.toggle("bg-accent", active);
+        b.classList.toggle("text-white", active);
+        b.classList.toggle("text-muted", !active);
+      });
+      if (!modeHint) return;
+      if (currentMode === "saved") {
+        modeHint.textContent = libraryInfo.hasLibrary
+          ? `Lee ${libraryInfo.totalVideos} videos guardados (sin cookie).`
+          : "Sin biblioteca guardada. Genérala en /sheer/scraper.";
+        modeHint.className = `mt-1.5 text-[0.72rem] leading-snug ${libraryInfo.hasLibrary ? "text-muted" : "text-danger"}`;
+      } else {
+        modeHint.textContent =
+          "Scrapea sheer.com en vivo (usa la cookie activa).";
+        modeHint.className = "mt-1.5 text-[0.72rem] leading-snug text-muted";
+      }
+    };
+
+    const setMode = async (mode) => {
+      if (!mode || mode === currentMode) return;
+      const prev = currentMode;
+      currentMode = mode;
+      renderMode();
+      try {
+        const data = await api("POST", { action: "mode", mode });
+        currentMode = data.mode || mode;
+        if (data.library) libraryInfo = data.library;
+        renderMode();
+        // El modo afecta el render SSR de las páginas de videos: recargar para
+        // que la página actual lea de la nueva fuente.
+        if (
+          /^\/sheer(\/|$)/.test(location.pathname) &&
+          !/\/sheer\/(play|scraper)\b/.test(location.pathname)
+        ) {
+          location.reload();
+        }
+      } catch {
+        currentMode = prev; // revertir si falla la petición
+        renderMode();
+      }
+    };
+
+    modeBtns.forEach((b) =>
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        setMode(b.getAttribute("data-mode"));
+      }),
+    );
+
+    // ── Cuentas (multicuenta) ─────────────────────────────────────────────────
+    const accountsList = document.getElementById("auth-accounts-list");
+    const esc = (s) =>
+      String(s).replace(
+        /[&<>"']/g,
+        (c) =>
+          ({
+            "&": "&amp;",
+            "<": "&lt;",
+            ">": "&gt;",
+            '"': "&quot;",
+            "'": "&#39;",
+          })[c],
+      );
+
+    let accountsCache = [];
+
+    // Muestra el nombre de la cuenta activa en la cabecera del menú (si la hay).
+    const renderActiveLabel = () => {
+      const active = accountsCache.find((a) => a.active);
+      if (menuAccount)
+        menuAccount.textContent = active ? active.label : "Sesión Sheer";
+      if (menuStatus)
+        menuStatus.title = active ? `Cuenta: ${active.label}` : "";
+    };
+
+    const drawAccounts = () => {
+      if (!accountsList) return;
+      if (!accountsCache.length) {
+        accountsList.innerHTML =
+          '<p class="text-[0.85rem] text-muted">No hay cuentas guardadas todavía. Añade una con cookies o login.</p>';
+        return;
+      }
+      accountsList.innerHTML = accountsCache
+        .map((a) => {
+          const dot = a.active ? "text-[#4ade80]" : "text-muted";
+          const meta = `${a.count} cookies${a.active ? " · activa" : ""}`;
+          const useBtn = a.active
+            ? `<span class="rounded-full border border-[#4ade80]/40 px-2.5 py-1 text-[0.72rem] font-semibold text-[#4ade80]">Activa</span>`
+            : `<button type="button" data-select="${esc(a.id)}" class="rounded-lg border border-line px-2.5 py-1.5 text-[0.78rem] text-ink transition-colors hover:border-line-hover hover:text-accent">Usar</button>`;
+          return `
+            <div class="flex items-center gap-2.5 rounded-lg border border-line bg-[rgba(8,5,15,0.6)] px-3 py-2.5">
+              <i class="fa-solid fa-circle text-[0.5rem] ${dot}"></i>
+              <div class="min-w-0 flex-1">
+                <p class="truncate text-[0.88rem] font-semibold text-ink">${esc(a.label)}</p>
+                <p class="text-[0.72rem] text-muted">${meta}</p>
+              </div>
+              ${useBtn}
+              <button type="button" data-remove="${esc(a.id)}" aria-label="Eliminar" class="flex h-8 w-8 items-center justify-center rounded-lg border border-line text-muted transition-colors hover:border-danger hover:text-danger">
+                <i class="fa-solid fa-trash-can text-[0.8rem]"></i>
+              </button>
+            </div>`;
+        })
+        .join("");
+
+      accountsList
+        .querySelectorAll("[data-select]")
+        .forEach((b) =>
+          b.addEventListener("click", () =>
+            selectAccount(b.getAttribute("data-select")),
+          ),
+        );
+      accountsList
+        .querySelectorAll("[data-remove]")
+        .forEach((b) =>
+          b.addEventListener("click", () =>
+            deleteAccount(b.getAttribute("data-remove")),
+          ),
+        );
+    };
+
+    const setAccounts = (accounts) => {
+      if (Array.isArray(accounts)) {
+        accountsCache = accounts;
+        drawAccounts();
+        renderActiveLabel();
+      }
+    };
+
+    const renderAccounts = async () => {
+      if (accountsList) {
+        accountsList.innerHTML =
+          '<p class="flex items-center gap-1.5 text-[0.85rem] text-muted"><i class="fa-solid fa-circle-notch fa-spin"></i> Cargando cuentas…</p>';
+      }
+      try {
+        const data = await api("POST", { action: "list" });
+        setAccounts(data.accounts);
+      } catch {
+        if (accountsList)
+          accountsList.innerHTML =
+            '<p class="text-[0.85rem] text-danger">Error al cargar las cuentas.</p>';
+      }
+    };
+
+    const selectAccount = async (id) => {
+      setResult("loading", "Cambiando de cuenta…");
+      try {
+        const data = await api("POST", { action: "select", id });
+        setAccounts(data.accounts);
+        setStatus(
+          data.valid ? "ok" : "bad",
+          data.valid ? "Sesión activa" : "Sesión inactiva",
+        );
+        setResult(
+          data.valid ? "ok" : "bad",
+          data.valid
+            ? "Cuenta activa ✓"
+            : `Cambiada — ${data.reason || "sesión inactiva"}`,
+        );
+      } catch {
+        setResult("bad", "Error al cambiar de cuenta.");
+      }
+    };
+
+    const deleteAccount = async (id) => {
+      const acc = accountsCache.find((a) => a.id === id);
+      if (acc && !confirm(`¿Eliminar la cuenta «${acc.label}»?`)) return;
+      setResult("loading", "Eliminando…");
+      try {
+        const data = await api("POST", { action: "remove", id });
+        setAccounts(data.accounts);
+        setResult("ok", "Cuenta eliminada.");
+        // El estado global puede haber cambiado si era la activa.
+        refreshStatus();
+      } catch {
+        setResult("bad", "Error al eliminar la cuenta.");
+      }
     };
 
     // ── Validación inicial + botón ───────────────────────────────────────────
     const refreshStatus = async () => {
-      setStatus('loading', 'Comprobando…');
+      setStatus("loading", "Comprobando…");
       try {
-        const data = await api('GET');
-        if (data.valid) setStatus('ok', 'Sesión activa');
-        else setStatus('bad', data.count ? 'Sesión inactiva' : 'Sin cookies');
+        const data = await api("GET");
+        setAccounts(data.accounts);
+        if (typeof data.mode === "string") currentMode = data.mode;
+        if (data.library) libraryInfo = data.library;
+        renderMode();
+        if (data.valid) setStatus("ok", "Sesión activa");
+        else setStatus("bad", data.count ? "Sesión inactiva" : "Sin cookies");
         return data;
       } catch {
-        setStatus('bad', 'Error');
+        setStatus("bad", "Error");
         return { valid: false };
       }
     };
 
-    document.getElementById('auth-validate')?.addEventListener('click', async (e) => {
-      const btn = e.currentTarget;
-      busy(btn, true, 'Validando…');
-      setResult('loading', '');
-      const data = await refreshStatus();
-      setResult(data.valid ? 'ok' : 'bad', data.valid ? 'Sesión activa ✓' : `Sesión inactiva — ${data.reason || 'sin sesión'}`);
-      busy(btn, false);
-    });
+    document
+      .getElementById("auth-validate")
+      ?.addEventListener("click", async (e) => {
+        const btn = e.currentTarget;
+        busy(btn, true, "Validando…");
+        setResult("loading", "");
+        const data = await refreshStatus();
+        setResult(
+          data.valid ? "ok" : "bad",
+          data.valid
+            ? "Sesión activa ✓"
+            : `Sesión inactiva — ${data.reason || "sin sesión"}`,
+        );
+        busy(btn, false);
+      });
 
     // ── Guardar cookies pegadas ──────────────────────────────────────────────
-    document.getElementById('auth-save-cookies')?.addEventListener('click', async (e) => {
-      const btn = e.currentTarget;
-      const cookies = document.getElementById('auth-cookies')?.value.trim();
-      if (!cookies) return setResult('bad', 'Pega las cookies primero.');
-      busy(btn, true, 'Guardando…');
-      setResult('loading', '');
-      try {
-        const data = await api('POST', { action: 'save', cookies });
-        if (data.ok) {
-          setStatus(data.valid ? 'ok' : 'bad', data.valid ? 'Sesión activa' : 'Sesión inactiva');
-          setResult(data.valid ? 'ok' : 'bad',
-            `${data.count} cookies guardadas` + (data.valid ? ' — sesión activa ✓' : ` — pero ${data.reason || 'sesión inactiva'}`));
-        } else {
-          setResult('bad', data.error || 'No se pudieron guardar las cookies.');
+    document
+      .getElementById("auth-save-cookies")
+      ?.addEventListener("click", async (e) => {
+        const btn = e.currentTarget;
+        const cookies = document.getElementById("auth-cookies")?.value.trim();
+        const label = document
+          .getElementById("auth-cookies-label")
+          ?.value.trim();
+        if (!cookies) return setResult("bad", "Pega las cookies primero.");
+        busy(btn, true, "Guardando…");
+        setResult("loading", "");
+        try {
+          const data = await api("POST", { action: "save", cookies, label });
+          if (data.ok) {
+            setAccounts(data.accounts);
+            setStatus(
+              data.valid ? "ok" : "bad",
+              data.valid ? "Sesión activa" : "Sesión inactiva",
+            );
+            setResult(
+              data.valid ? "ok" : "bad",
+              `${data.count} cookies guardadas` +
+                (data.valid
+                  ? " — sesión activa ✓"
+                  : ` — pero ${data.reason || "sesión inactiva"}`),
+            );
+          } else {
+            setResult(
+              "bad",
+              data.error || "No se pudieron guardar las cookies.",
+            );
+          }
+        } catch {
+          setResult("bad", "Error de red al guardar.");
         }
-      } catch {
-        setResult('bad', 'Error de red al guardar.');
-      }
-      busy(btn, false);
-    });
+        busy(btn, false);
+      });
 
     // ── Login email/contraseña ───────────────────────────────────────────────
-    document.getElementById('auth-login')?.addEventListener('click', async (e) => {
-      const btn = e.currentTarget;
-      const email = document.getElementById('auth-email')?.value.trim();
-      const password = document.getElementById('auth-password')?.value;
-      if (!email || !password) return setResult('bad', 'Email y contraseña son requeridos.');
-      busy(btn, true, 'Iniciando sesión…');
-      setResult('loading', '');
-      try {
-        const data = await api('POST', { action: 'login', email, password });
-        if (data.ok) {
-          setStatus('ok', 'Sesión activa');
-          setResult('ok', `Sesión iniciada — ${data.count} cookies guardadas ✓`);
-          const pw = document.getElementById('auth-password');
-          if (pw) pw.value = '';
-        } else {
-          setStatus('bad', 'Sesión inactiva');
-          setResult('bad', data.error || 'Login fallido.');
+    document
+      .getElementById("auth-login")
+      ?.addEventListener("click", async (e) => {
+        const btn = e.currentTarget;
+        const email = document.getElementById("auth-email")?.value.trim();
+        const password = document.getElementById("auth-password")?.value;
+        if (!email || !password)
+          return setResult("bad", "Email y contraseña son requeridos.");
+        busy(btn, true, "Iniciando sesión…");
+        setResult("loading", "");
+        try {
+          const data = await api("POST", { action: "login", email, password });
+          if (data.ok) {
+            setAccounts(data.accounts);
+            setStatus("ok", "Sesión activa");
+            setResult(
+              "ok",
+              `Sesión iniciada — ${data.count} cookies guardadas ✓`,
+            );
+            const pw = document.getElementById("auth-password");
+            if (pw) pw.value = "";
+          } else {
+            setStatus("bad", "Sesión inactiva");
+            const msg = data.error || "Login fallido.";
+            setResult("bad", msg);
+            // Si el servidor pide Google/CAPTCHA, ofrecer el atajo a «Pegar cookies».
+            if (/cookies|captcha|google/i.test(msg)) appendCookieShortcut();
+          }
+        } catch {
+          setResult("bad", "Error de red en el login.");
         }
-      } catch {
-        setResult('bad', 'Error de red en el login.');
-      }
-      busy(btn, false);
-    });
+        busy(btn, false);
+      });
+
+    // Botón bajo el resultado que salta a la vista de pegar cookies.
+    const appendCookieShortcut = () => {
+      if (!result) return;
+      document.getElementById("auth-cookie-shortcut")?.remove();
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.id = "auth-cookie-shortcut";
+      btn.className = "btn btn--ghost !mt-3";
+      btn.innerHTML =
+        '<i class="fa-solid fa-cookie-bite"></i> Pegar cookies en su lugar';
+      btn.addEventListener("click", () => showView("cookies"));
+      result.insertAdjacentElement("afterend", btn);
+    };
 
     // Comprobación de estado al cargar.
     refreshStatus();

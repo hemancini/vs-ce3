@@ -10,6 +10,8 @@
 // endpoint correcto (subscribe_add_json / subscribe_remove_json) según el estado
 // actual, así que descargamos la página fresca y reutilizamos esa URL.
 
+import { loadPhCookies } from '../../../lib/ph/cookies.js';
+
 export const prerender = false;
 
 const BASE_URL = 'https://es.pornhub.com';
@@ -26,10 +28,7 @@ const AGE_COOKIES = {
 
 async function cookieHeader(env) {
   let cookies = [];
-  try {
-    const raw = await env?.VS_C3_KV?.get('ph:cookies');
-    if (raw) cookies = JSON.parse(raw);
-  } catch {}
+  try { cookies = await loadPhCookies(env); } catch {}
   const pairs = cookies.map((c) => `${c.name}=${c.value}`);
   for (const [k, v] of Object.entries(AGE_COOKIES)) pairs.push(`${k}=${v}`);
   return pairs.join('; ');

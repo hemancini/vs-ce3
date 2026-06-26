@@ -5,25 +5,38 @@
 // preview se reproducen al hover; cada post enlaza al reproductor /sheer/play.
 import Layout from '../../layouts/Sheer.astro';
 import SheerHeader from '../../components/sheer/SheerHeader.astro';
-import { scrapeSheerSubscriptions } from '../../lib/sheer/scraper.js';
+import { scrapeSheerSubscriptions, loadMode, readLibrarySubscriptions } from '../../lib/sheer/scraper.js';
 
 export const prerender = false;
 
 const env = (Astro.locals as any)?.runtime?.env;
 
+const mode = await loadMode(env);
+const savedMode = mode === 'saved';
+
 let accounts: any[] = [];
+let generatedAt: number | null = null;
 let error: string | null = null;
 const startedAt = Date.now();
 
 try {
-  const result = await scrapeSheerSubscriptions({ env });
-  accounts = result.accounts;
+  if (savedMode) {
+    // Modo guardado: arma las suscripciones desde la biblioteca de KV; sin cookie.
+    const result = await readLibrarySubscriptions({ env });
+    accounts = result.accounts;
+    generatedAt = result.generatedAt;
+  } else {
+    const result = await scrapeSheerSubscriptions({ env });
+    accounts = result.accounts;
+  }
 } catch (e: any) {
   error = e.message;
 }
 
 const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
 const totalPosts = accounts.reduce((n, a) => n + (a.posts?.length || 0), 0);
+const fmtDate = (ts: number | null) =>
+  ts ? new Date(ts).toLocaleString('es-ES', { dateStyle: 'medium', timeStyle: 'short' }) : '';
 ---
 
 <Layout title="Suscripciones - Sheer">
@@ -34,10 +47,19 @@ const totalPosts = accounts.reduce((n, a) => n + (a.posts?.length || 0), 0);
       </a>
       {error ? (
         <span slot="stats" class="text-danger"><i class="fa-solid fa-triangle-exclamation"></i> Error</span>
+      ) : savedMode ? (
+        <span slot="stats"><i class="fa-solid fa-hard-drive"></i> {accounts.length} creadores guardados{generatedAt ? ` · ${fmtDate(generatedAt)}` : ''}</span>
       ) : (
         <span slot="stats"><i class="fa-solid fa-heart"></i> {accounts.length} creadores · {totalPosts} posts · {elapsed}s</span>
       )}
     </SheerHeader>
+
+    {savedMode && !error && (
+      <div class="mb-8 flex items-center gap-3 rounded-2xl border border-line bg-card px-4 py-3 text-[0.85rem] text-muted sm:px-5">
+        <i class="fa-solid fa-hard-drive text-accent"></i>
+        <span>Modo guardado: creadores de la biblioteca de KV{generatedAt ? ` (actualizada ${fmtDate(generatedAt)})` : ''}. Cambia a «Live» en el menú de cuenta para ver tus suscripciones reales.</span>
+      </div>
+    )}
 
     {error ? (
       <div class="px-8 py-16 text-center text-[1.2rem] text-danger">
@@ -47,7 +69,11 @@ const totalPosts = accounts.reduce((n, a) => n + (a.posts?.length || 0), 0);
     ) : accounts.length === 0 ? (
       <div class="px-8 py-16 text-center text-[1.2rem] text-muted">
         <i class="fa-solid fa-heart-crack mb-4 block text-5xl text-muted"></i>
-        <p>No tienes suscripciones activas.</p>
+        {savedMode ? (
+          <p>No hay biblioteca guardada en KV. Genérala en <a href="/sheer/scraper" class="text-accent underline">/sheer/scraper</a>.</p>
+        ) : (
+          <p>No tienes suscripciones activas.</p>
+        )}
       </div>
     ) : (
       <div class="flex flex-col gap-10 sm:gap-14">
@@ -91,7 +117,17 @@ const totalPosts = accounts.reduce((n, a) => n + (a.posts?.length || 0), 0);
                 {acc.posts.map((post: any) => (
                   <article
                     class="sub-post group flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-line bg-card transition-all duration-300 hover:-translate-y-1 hover:border-line-hover hover:shadow-glow"
-                    onclick={`window.location.href='/sheer/play?postId=${post.postId}'`}
+                    data-id={post.postId}
+                    data-player={JSON.stringify({
+                      postId: post.postId,
+                      alias: acc.alias,
+                      title: post.title,
+                      poster: post.poster,
+                      preview: post.preview,
+                      url: post.url,
+                      sources: [],
+                    })}
+                    onclick={`(function(c){try{localStorage.setItem('sheer:player:'+c.dataset.id,c.dataset.player)}catch(e){};window.location.href='/sheer/play?postId='+c.dataset.id})(this)`}
                   >
                     <div class="relative aspect-video w-full overflow-hidden bg-black">
                       {post.poster && (

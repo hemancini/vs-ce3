@@ -6,38 +6,106 @@ interface Props {
 const { cookieFromKV, cookieCount } = Astro.props;
 ---
 
-<button
-  id="open-cookie-editor"
-  class="text-sm text-gray-400 hover:text-white border border-vs-border hover:border-vs-pink rounded-lg px-3 py-1.5 cursor-pointer transition-colors"
-  title="Gestionar cookies de sesión de Pornhub"
->
-  🍪 Cookies
-  {cookieFromKV
-    ? <span class="ml-1 text-green-400 text-xs">KV ({cookieCount})</span>
-    : <span class="ml-1 text-yellow-500 text-xs">bundled</span>}
-</button>
+<!-- Avatar + dropdown -->
+<div id="ck-avatar-wrap" class="relative inline-block">
+  <button
+    id="open-cookie-editor"
+    class="relative flex items-center justify-center w-9 h-9 rounded-full bg-vs-surface border border-vs-border hover:border-vs-pink cursor-pointer transition-colors text-base"
+    title="Gestionar cookies de sesión de Pornhub"
+    aria-haspopup="true"
+    aria-expanded="false"
+  >
+    🍪
+    <!-- Indicador flotante de sesión -->
+    <span
+      id="ck-indicator"
+      class={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full ring-2 ring-[#0d0d0d] ${cookieFromKV ? "bg-yellow-500" : "bg-gray-500"}`}
+      title={cookieFromKV ? "Cookies en KV — sin validar" : "Sin cookies en KV"}
+    ></span>
+  </button>
+
+  <!-- Dropdown -->
+  <div
+    id="ck-dropdown"
+    class="hidden absolute right-0 mt-2 w-56 bg-[#111] border border-vs-border rounded-xl shadow-xl shadow-black/50 z-[2000] py-1.5 overflow-hidden"
+  >
+    <div class="px-3 py-2 border-b border-vs-border">
+      <p class="text-white text-sm font-medium">Cookies de Pornhub</p>
+      <p id="ck-dd-status" class="text-xs text-gray-500 truncate">
+        {cookieFromKV ? `KV (${cookieCount}) — sin validar` : "Sin cookies en KV"}
+      </p>
+    </div>
+
+    <!-- Switcher rápido de cuentas -->
+    <div id="ck-dd-accounts" class="hidden max-h-48 overflow-y-auto border-b border-vs-border py-1"></div>
+
+    <button data-open="accounts" class="ck-menu-item w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-300 hover:bg-vs-surface hover:text-white cursor-pointer text-left">
+      <span class="w-4 text-center">👥</span> Cuentas
+    </button>
+    <button data-open="list"  class="ck-menu-item w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-300 hover:bg-vs-surface hover:text-white cursor-pointer text-left">
+      <span class="w-4 text-center">📋</span> Lista de cookies
+    </button>
+    <button data-open="login" class="ck-menu-item w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-300 hover:bg-vs-surface hover:text-white cursor-pointer text-left">
+      <span class="w-4 text-center">🔑</span> Iniciar sesión
+    </button>
+    <button data-open="import" class="ck-menu-item w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-300 hover:bg-vs-surface hover:text-white cursor-pointer text-left">
+      <span class="w-4 text-center">📥</span> Importar JSON
+    </button>
+
+    <div class="my-1 border-t border-vs-border"></div>
+
+    <button id="ck-dd-validate" class="ck-menu-item w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-300 hover:bg-vs-surface hover:text-white cursor-pointer text-left">
+      <span class="w-4 text-center">✓</span> Validar sesión
+    </button>
+    <button id="ck-dd-reload" class="ck-menu-item w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-300 hover:bg-vs-surface hover:text-white cursor-pointer text-left">
+      <span class="w-4 text-center">↻</span> Recargar KV
+    </button>
+  </div>
+</div>
 
 <div
   id="cookie-modal"
-  class="hidden fixed inset-0 bg-black/90 items-center justify-center z-[2000] p-4"
+  class="hidden fixed inset-0 bg-black/90 items-center justify-center z-[2100] p-4"
 >
   <div class="relative w-full max-w-3xl bg-[#111] border border-vs-border rounded-xl flex flex-col max-h-[90vh]">
 
     <!-- Header -->
     <div class="flex items-center justify-between px-5 pt-5 pb-3 border-b border-vs-border shrink-0">
-      <h2 class="text-white text-lg font-semibold">🍪 Cookies de Pornhub</h2>
+      <h2 id="ck-modal-title" class="text-white text-lg font-semibold">🍪 Cookies de Pornhub</h2>
       <button id="close-cookie-modal" class="text-3xl text-white cursor-pointer leading-none hover:text-gray-300">×</button>
     </div>
 
-    <!-- Tabs -->
-    <div class="flex border-b border-vs-border shrink-0 px-1">
-      <button data-tab="list"   class="ck-tab px-4 py-2.5 text-sm font-medium border-b-2 border-vs-pink text-white -mb-px">Lista</button>
-      <button data-tab="login"  class="ck-tab px-4 py-2.5 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-white -mb-px">Iniciar sesión</button>
-      <button data-tab="import" class="ck-tab px-4 py-2.5 text-sm font-medium border-b-2 border-transparent text-gray-400 hover:text-white -mb-px">Importar JSON</button>
+    <!-- Tab: Cuentas -->
+    <div id="ck-pane-accounts" class="hidden flex-1 overflow-y-auto px-5 py-4">
+      <div class="flex items-center justify-between mb-3">
+        <p class="text-gray-400 text-sm">
+          Guarda varias sesiones y cambia entre ellas. La cuenta activa es la que usa
+          la app para scrapear y reproducir.
+        </p>
+      </div>
+      <div id="ck-acc-list" class="space-y-2"></div>
+
+      <div class="mt-4 pt-3 border-t border-vs-border">
+        <p class="text-xs text-gray-500 mb-2">Añadir cuenta</p>
+        <div class="grid grid-cols-2 gap-2">
+          <button
+            id="ck-acc-add-login"
+            class="flex items-center justify-center gap-1.5 text-xs text-gray-300 hover:text-white border border-vs-border hover:border-vs-pink rounded-lg px-3 py-2 cursor-pointer transition-colors"
+          ><span>🔑</span> Usuario y contraseña</button>
+          <button
+            id="ck-acc-add-cookies"
+            class="flex items-center justify-center gap-1.5 text-xs text-gray-300 hover:text-white border border-vs-border hover:border-vs-pink rounded-lg px-3 py-2 cursor-pointer transition-colors"
+          ><span>📥</span> Con cookies (JSON)</button>
+        </div>
+        <button
+          id="ck-acc-save-current"
+          class="mt-2 w-full text-xs text-gray-500 hover:text-white border border-dashed border-vs-border hover:border-vs-pink rounded-lg px-4 py-2 cursor-pointer transition-colors"
+        >+ Guardar las cookies de la lista actual como cuenta</button>
+      </div>
     </div>
 
     <!-- Tab: Lista -->
-    <div id="ck-pane-list" class="flex-1 overflow-y-auto px-5 py-4">
+    <div id="ck-pane-list" class="hidden flex-1 overflow-y-auto px-5 py-4">
       <div class="overflow-x-auto">
         <table class="w-full text-xs text-left">
           <thead>
@@ -99,18 +167,33 @@ const { cookieFromKV, cookieCount } = Astro.props;
     <div id="ck-pane-import" class="hidden flex-1 overflow-y-auto px-5 py-4">
       <p class="text-gray-400 text-sm mb-3">
         Pegá el JSON de cookies exportado por tu extensión de navegador (formato array).
-        Reemplazará la lista actual al aplicar.
+        Podés guardarlas como una cuenta nueva o solo aplicarlas a la lista en edición.
       </p>
+      <div class="mb-3 max-w-sm">
+        <label class="block text-xs text-gray-500 mb-1">Nombre de la cuenta (opcional)</label>
+        <input
+          id="ck-import-name"
+          type="text"
+          placeholder="p. ej. Cuenta principal"
+          class="w-full bg-vs-surface text-white text-sm border border-vs-border rounded-lg px-3 py-2 outline-none focus:border-vs-pink"
+        />
+      </div>
       <textarea
         id="ck-json"
-        rows="12"
+        rows="10"
         placeholder='[{"name":"...","value":"...","domain":".es.pornhub.com"}, ...]'
         class="w-full bg-vs-surface text-white text-xs font-mono border border-vs-border rounded-lg p-3 outline-none focus:border-vs-pink resize-y"
       ></textarea>
-      <button
-        id="ck-import-btn"
-        class="mt-3 px-4 py-2 bg-vs-surface border border-vs-border text-gray-300 rounded-lg cursor-pointer hover:text-white hover:border-vs-pink text-sm"
-      >Aplicar a la lista</button>
+      <div class="mt-3 flex gap-2 flex-wrap">
+        <button
+          id="ck-import-save-btn"
+          class="px-4 py-2 bg-vs-pink text-white rounded-lg cursor-pointer hover:opacity-90 font-medium text-sm"
+        >Guardar como cuenta</button>
+        <button
+          id="ck-import-btn"
+          class="px-4 py-2 bg-vs-surface border border-vs-border text-gray-300 rounded-lg cursor-pointer hover:text-white hover:border-vs-pink text-sm"
+        >Solo aplicar a la lista</button>
+      </div>
     </div>
 
     <!-- Footer -->
@@ -131,6 +214,12 @@ const { cookieFromKV, cookieCount } = Astro.props;
   const modal       = document.getElementById("cookie-modal");
   const openBtn     = document.getElementById("open-cookie-editor");
   const closeBtn    = document.getElementById("close-cookie-modal");
+  const dropdown    = document.getElementById("ck-dropdown");
+  const indicator   = document.getElementById("ck-indicator");
+  const ddStatus    = document.getElementById("ck-dd-status");
+  const ddValidate  = document.getElementById("ck-dd-validate");
+  const ddReload    = document.getElementById("ck-dd-reload");
+  const modalTitle  = document.getElementById("ck-modal-title");
   const tbody       = document.getElementById("ck-tbody");
   const addBtn      = document.getElementById("ck-add");
   const saveBtn     = document.getElementById("ck-save");
@@ -139,29 +228,38 @@ const { cookieFromKV, cookieCount } = Astro.props;
   const statusEl    = document.getElementById("ck-status");
   const jsonEl      = document.getElementById("ck-json");
   const importBtn   = document.getElementById("ck-import-btn");
+  const importName  = document.getElementById("ck-import-name");
+  const importSaveBtn = document.getElementById("ck-import-save-btn");
   const paneList    = document.getElementById("ck-pane-list");
   const paneImport  = document.getElementById("ck-pane-import");
   const paneLogin   = document.getElementById("ck-pane-login");
+  const paneAccounts = document.getElementById("ck-pane-accounts");
+  const accList     = document.getElementById("ck-acc-list");
+  const accSaveBtn  = document.getElementById("ck-acc-save-current");
+  const accAddLogin = document.getElementById("ck-acc-add-login");
+  const accAddCookies = document.getElementById("ck-acc-add-cookies");
+  const ddAccounts  = document.getElementById("ck-dd-accounts");
   const loginEmail  = document.getElementById("ck-login-email");
   const loginPass   = document.getElementById("ck-login-pass");
   const loginBtn    = document.getElementById("ck-login-btn");
 
-  const PANES = { list: paneList, login: paneLogin, import: paneImport };
+  const PANES = { accounts: paneAccounts, list: paneList, login: paneLogin, import: paneImport };
+  const TITLES = {
+    accounts: "👥 Cuentas",
+    list:   "📋 Lista de cookies",
+    login:  "🔑 Iniciar sesión",
+    import: "📥 Importar JSON",
+  };
 
-  // ── Tabs ──────────────────────────────────────────────────────────────────
-  document.querySelectorAll(".ck-tab").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      document.querySelectorAll(".ck-tab").forEach((t) => {
-        const active = t === btn;
-        t.classList.toggle("border-vs-pink",     active);
-        t.classList.toggle("text-white",         active);
-        t.classList.toggle("border-transparent", !active);
-        t.classList.toggle("text-gray-400",      !active);
-      });
-      const tab = btn.dataset.tab;
-      Object.entries(PANES).forEach(([k, pane]) => pane.classList.toggle("hidden", k !== tab));
-    });
-  });
+  // Estado multicuenta (metadatos; las cookies viven en KV).
+  let accounts = [];
+  let activeId = null;
+
+  // ── Panes ───────────────────────────────────────────────────────────────────
+  function showPane(tab) {
+    Object.entries(PANES).forEach(([k, pane]) => pane.classList.toggle("hidden", k !== tab));
+    if (modalTitle) modalTitle.textContent = TITLES[tab] || "🍪 Cookies de Pornhub";
+  }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   const esc = (s) =>
@@ -177,6 +275,21 @@ const { cookieFromKV, cookieCount } = Astro.props;
     statusEl.className =
       "text-sm flex-1 text-right min-w-0 truncate " +
       (ok === true ? "text-green-400" : ok === false ? "text-red-400" : "text-gray-400");
+  }
+
+  // ── Indicador flotante de sesión ────────────────────────────────────────────
+  const INDICATOR_COLORS = {
+    valid:   "bg-green-400",
+    invalid: "bg-red-500",
+    unknown: "bg-yellow-500",
+    none:    "bg-gray-500",
+  };
+  function setIndicator(state, title) {
+    if (!indicator) return;
+    indicator.classList.remove(...Object.values(INDICATOR_COLORS));
+    indicator.classList.add(INDICATOR_COLORS[state] || INDICATOR_COLORS.none);
+    if (title) indicator.title = title;
+    if (ddStatus && title) ddStatus.textContent = title;
   }
 
   const INPUT_CLS =
@@ -290,19 +403,44 @@ const { cookieFromKV, cookieCount } = Astro.props;
     setStatus("");
   });
 
-  importBtn.addEventListener("click", () => {
+  function parseImportJson() {
     let parsed;
     try {
       parsed = JSON.parse(jsonEl.value);
       if (!Array.isArray(parsed)) throw new Error("debe ser un array");
     } catch (e) {
       setStatus("JSON inválido: " + e.message, false);
-      return;
+      return null;
     }
+    return parsed;
+  }
+
+  importBtn.addEventListener("click", () => {
+    const parsed = parseImportJson();
+    if (!parsed) return;
     cookies = parsed;
     renderTable();
-    document.querySelector('[data-tab="list"]').click();
+    showPane("list");
     setStatus(`${cookies.length} cookies importadas (sin guardar aún).`);
+  });
+
+  // Importar JSON y guardarlo directamente como una cuenta nueva.
+  importSaveBtn.addEventListener("click", async () => {
+    const parsed = parseImportJson();
+    if (!parsed) return;
+    if (!parsed.length) { setStatus("El JSON no contiene cookies.", false); return; }
+    const label = importName.value.trim();
+    const data = await accountAction(
+      { action: "add", label, cookies: parsed },
+      "Guardando cuenta…",
+    );
+    if (!data) return;
+    cookies = parsed;
+    renderTable();
+    jsonEl.value = "";
+    importName.value = "";
+    showPane("accounts");
+    setStatus(`Cuenta "${label || "nueva"}" guardada y activada ✓`, true);
   });
 
   // ── Login con usuario / contraseña ─────────────────────────────────────────
@@ -332,23 +470,33 @@ const { cookieFromKV, cookieCount } = Astro.props;
       renderTable();
       loginPass.value = "";
 
-      // Guarda automáticamente en KV (reemplaza la cookie existente, si había).
+      // Guarda automáticamente como una cuenta (etiquetada con el usuario) y la
+      // activa; ph:accounts y ph:cookies quedan sincronizados.
       let savedMsg = "";
       try {
-        const saveRes = await fetch("/api/ph/cookies", {
-          method: "PUT",
+        const saveRes = await fetch("/api/ph/accounts", {
+          method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ cookies }),
+          body: JSON.stringify({
+            action: "add",
+            label: data.username || email,
+            username: data.username || "",
+            cookies,
+          }),
         });
         const saveData = await saveRes.json();
-        savedMsg = saveRes.ok
-          ? ` y guardadas en KV (${saveData.count})`
-          : " (no se pudo guardar en KV: " + (saveData.error || saveRes.status) + ")";
+        if (saveRes.ok && saveData.ok) {
+          applyAccountsData(saveData);
+          savedMsg = ` y guardada como cuenta (${cookies.length})`;
+        } else {
+          savedMsg = " (no se pudo guardar la cuenta: " + (saveData.error || saveRes.status) + ")";
+        }
       } catch (e) {
-        savedMsg = " (no se pudo guardar en KV: " + e.message + ")";
+        savedMsg = " (no se pudo guardar la cuenta: " + e.message + ")";
       }
 
-      document.querySelector('[data-tab="list"]').click();
+      showPane("accounts");
+      setIndicator("valid", data.username ? "Sesión válida · " + data.username : "Sesión válida");
       const who = data.username ? " · " + data.username : "";
       setStatus(`✓ Sesión iniciada${who} — ${cookies.length} cookies${savedMsg}`, true);
     } catch (e) {
@@ -371,32 +519,167 @@ const { cookieFromKV, cookieCount } = Astro.props;
       renderTable();
       if (data.fromStorage === "kv") {
         setStatus(`KV ✓ (${data.count} cookies)`, true);
+        setIndicator("unknown", `KV (${data.count}) — sin validar`);
       } else {
         setStatus("Sin cookies en KV — usando bundled.", null);
+        setIndicator(cookies.length ? "unknown" : "none",
+          cookies.length ? "Bundled — sin validar" : "Sin cookies");
       }
     } catch (e) {
       setStatus("Error al cargar: " + e.message, false);
     }
   }
 
-  saveBtn.addEventListener("click", async () => {
-    setStatus("Guardando…");
+  // ── Cuentas (multicuenta) ───────────────────────────────────────────────────
+  function applyAccountsData(data) {
+    accounts = Array.isArray(data?.accounts) ? data.accounts : [];
+    activeId = data?.activeId ?? null;
+    renderAccounts();
+  }
+
+  async function loadAccounts() {
     try {
-      const res = await fetch("/api/ph/cookies", {
-        method: "PUT",
+      const res = await fetch("/api/ph/accounts");
+      const data = await res.json();
+      if (res.ok) applyAccountsData(data);
+    } catch (e) { /* silencioso: el indicador de KV ya refleja el estado */ }
+  }
+
+  function renderAccounts() {
+    renderAccountsPane();
+    renderAccountsDropdown();
+  }
+
+  function accLabel(a) {
+    return a.username ? `${a.label} · @${a.username}` : a.label;
+  }
+
+  function renderAccountsDropdown() {
+    if (!ddAccounts) return;
+    ddAccounts.innerHTML = "";
+    if (!accounts.length) { ddAccounts.classList.add("hidden"); return; }
+    ddAccounts.classList.remove("hidden");
+    accounts.forEach((a) => {
+      const btn = document.createElement("button");
+      btn.className =
+        "w-full flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer text-left hover:bg-vs-surface " +
+        (a.active ? "text-white" : "text-gray-400 hover:text-white");
+      btn.innerHTML =
+        `<span class="w-3 text-center">${a.active ? "●" : "○"}</span>` +
+        `<span class="flex-1 truncate">${esc(accLabel(a))}</span>` +
+        `<span class="text-gray-600">${a.count}</span>`;
+      if (!a.active) btn.addEventListener("click", () => { closeDropdown(); activateAccount(a.id); });
+      ddAccounts.appendChild(btn);
+    });
+  }
+
+  function renderAccountsPane() {
+    accList.innerHTML = "";
+    if (!accounts.length) {
+      accList.innerHTML =
+        '<p class="text-gray-500 text-xs py-6 text-center">No hay cuentas guardadas. Inicia sesión o importa cookies y guárdalas como cuenta.</p>';
+      return;
+    }
+    accounts.forEach((a) => {
+      const row = document.createElement("div");
+      row.className =
+        "flex items-center gap-2 px-3 py-2 rounded-lg border " +
+        (a.active ? "border-vs-pink bg-vs-surface" : "border-vs-border");
+      row.innerHTML =
+        `<span class="text-sm ${a.active ? "text-vs-pink" : "text-gray-500"}">${a.active ? "●" : "○"}</span>` +
+        `<div class="flex-1 min-w-0">` +
+          `<p class="text-sm text-white truncate">${esc(a.label)}</p>` +
+          `<p class="text-xs text-gray-500 truncate">${a.username ? "@" + esc(a.username) + " · " : ""}${a.count} cookies</p>` +
+        `</div>` +
+        (a.active
+          ? `<span class="text-xs text-vs-pink shrink-0">Activa</span>`
+          : `<button data-a="activate" class="text-xs px-2 py-1 bg-vs-pink text-white rounded cursor-pointer hover:opacity-90 shrink-0">Activar</button>`) +
+        `<button data-a="rename" class="text-gray-400 hover:text-white px-1 cursor-pointer shrink-0" title="Renombrar">✏️</button>` +
+        `<button data-a="delete" class="text-gray-400 hover:text-red-400 px-1 cursor-pointer shrink-0" title="Eliminar">🗑️</button>`;
+
+      row.querySelector('[data-a="activate"]')?.addEventListener("click", () => activateAccount(a.id));
+      row.querySelector('[data-a="rename"]').addEventListener("click", () => {
+        const next = prompt("Nuevo nombre para la cuenta:", a.label);
+        if (next && next.trim()) renameAccount(a.id, next.trim());
+      });
+      row.querySelector('[data-a="delete"]').addEventListener("click", () => {
+        if (confirm(`¿Eliminar la cuenta "${a.label}"?`)) deleteAccount(a.id);
+      });
+      accList.appendChild(row);
+    });
+  }
+
+  async function accountAction(payload, pendingMsg) {
+    setStatus(pendingMsg || "Guardando…");
+    try {
+      const res = await fetch("/api/ph/accounts", {
+        method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ cookies }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
-      if (!res.ok) { setStatus(data.error || "Error " + res.status, false); return; }
-      setStatus(`Guardadas ${data.count} cookies en KV ✓`, true);
+      if (!res.ok || !data.ok) { setStatus(data.error || "Error " + res.status, false); return null; }
+      applyAccountsData(data);
+      return data;
     } catch (e) {
       setStatus("Error de red: " + e.message, false);
+      return null;
     }
+  }
+
+  async function activateAccount(id) {
+    const data = await accountAction({ action: "activate", id }, "Cambiando de cuenta…");
+    if (!data) return;
+    const acc = accounts.find((a) => a.id === id);
+    setStatus(`Cuenta activa: ${acc ? accLabel(acc) : id} ✓`, true);
+    setIndicator("unknown", `Cuenta: ${acc ? acc.label : id} — sin validar`);
+    // Reflejar las cookies de la nueva cuenta activa en la lista editable.
+    await loadFromKV();
+  }
+
+  async function renameAccount(id, label) {
+    await accountAction({ action: "rename", id, label }, "Renombrando…");
+    setStatus("Cuenta renombrada ✓", true);
+  }
+
+  async function deleteAccount(id) {
+    const data = await accountAction({ action: "delete", id }, "Eliminando…");
+    if (!data) return;
+    setStatus("Cuenta eliminada ✓", true);
+    await loadFromKV();
+  }
+
+  async function saveCurrentAsAccount() {
+    if (!cookies.length) { setStatus("No hay cookies en la lista para guardar.", false); return; }
+    const label = prompt("Nombre para la cuenta:", "");
+    if (label === null) return;
+    const data = await accountAction(
+      { action: "add", label: label.trim(), cookies },
+      "Guardando cuenta…",
+    );
+    if (data) setStatus(`Cuenta "${label.trim() || "nueva"}" guardada y activada ✓`, true);
+  }
+
+  accSaveBtn.addEventListener("click", saveCurrentAsAccount);
+  accAddLogin.addEventListener("click", () => { showPane("login"); loginEmail.focus(); });
+  accAddCookies.addEventListener("click", () => { showPane("import"); importName.focus(); });
+
+  saveBtn.addEventListener("click", async () => {
+    if (!cookies.length) { setStatus("No hay cookies para guardar.", false); return; }
+    // Guarda sobre la cuenta activa (o crea "Principal" si no hay ninguna),
+    // así ph:accounts y ph:cookies quedan siempre sincronizados.
+    const active = accounts.find((a) => a.id === activeId);
+    const label = active ? active.label : "Principal";
+    const data = await accountAction({ action: "add", label, cookies }, "Guardando en KV…");
+    if (data) setStatus(`Guardadas ${cookies.length} cookies en «${label}» ✓`, true);
   });
 
-  validateBtn.addEventListener("click", async () => {
-    if (!cookies.length) { setStatus("No hay cookies para validar.", false); return; }
+  async function doValidate() {
+    if (!cookies.length) {
+      setStatus("No hay cookies para validar.", false);
+      setIndicator("none", "Sin cookies");
+      return;
+    }
     setStatus("Validando contra es.pornhub.com…");
     try {
       const res = await fetch("/api/ph/cookies", {
@@ -407,23 +690,54 @@ const { cookieFromKV, cookieCount } = Astro.props;
       const data = await res.json();
       if (!res.ok) { setStatus(data.error || "Error " + res.status, false); return; }
       if (data.valid) {
-        setStatus(`✓ Sesión válida${data.username ? " · " + data.username : ""}`, true);
+        const who = data.username ? " · " + data.username : "";
+        setStatus(`✓ Sesión válida${who}`, true);
+        setIndicator("valid", "Sesión válida" + who);
       } else {
-        setStatus(`✗ Sesión inválida o expirada${data.reason ? " — " + data.reason : ""}`, false);
+        const why = data.reason ? " — " + data.reason : "";
+        setStatus(`✗ Sesión inválida o expirada${why}`, false);
+        setIndicator("invalid", "Sesión inválida o expirada");
       }
     } catch (e) {
       setStatus("Error: " + e.message, false);
     }
-  });
+  }
 
+  validateBtn.addEventListener("click", doValidate);
   reloadBtn.addEventListener("click", loadFromKV);
 
+  // ── Dropdown open / close ──────────────────────────────────────────────────
+  function openDropdown() {
+    dropdown.classList.remove("hidden");
+    openBtn.setAttribute("aria-expanded", "true");
+    loadAccounts();
+  }
+  function closeDropdown() {
+    dropdown.classList.add("hidden");
+    openBtn.setAttribute("aria-expanded", "false");
+  }
+  function toggleDropdown() {
+    dropdown.classList.contains("hidden") ? openDropdown() : closeDropdown();
+  }
+
+  openBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleDropdown(); });
+  document.addEventListener("click", (e) => {
+    if (!dropdown.classList.contains("hidden") &&
+        !dropdown.contains(e.target) && !openBtn.contains(e.target)) {
+      closeDropdown();
+    }
+  });
+
   // ── Modal open / close ────────────────────────────────────────────────────
-  function openModal() {
+  let kvLoaded = false;
+  function openModal(tab) {
+    closeDropdown();
+    showPane(tab || "list");
     modal.classList.remove("hidden");
     modal.classList.add("flex");
     setStatus("");
-    loadFromKV();
+    loadAccounts();
+    if (!kvLoaded) { kvLoaded = true; loadFromKV(); }
   }
 
   function closeModal() {
@@ -431,11 +745,33 @@ const { cookieFromKV, cookieCount } = Astro.props;
     modal.classList.remove("flex");
   }
 
-  openBtn.addEventListener("click", openModal);
+  // Menu items → abren el modal en el panel correspondiente
+  document.querySelectorAll(".ck-menu-item[data-open]").forEach((btn) => {
+    btn.addEventListener("click", () => openModal(btn.dataset.open));
+  });
+
+  // Acciones rápidas del dropdown
+  ddValidate.addEventListener("click", async () => {
+    closeDropdown();
+    if (!kvLoaded) { kvLoaded = true; await loadFromKV(); }
+    doValidate();
+  });
+  ddReload.addEventListener("click", () => {
+    closeDropdown();
+    kvLoaded = true;
+    loadFromKV();
+  });
+
   closeBtn.addEventListener("click", closeModal);
   modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); });
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !modal.classList.contains("hidden")) closeModal();
+    if (e.key !== "Escape") return;
+    if (!modal.classList.contains("hidden")) closeModal();
+    else if (!dropdown.classList.contains("hidden")) closeDropdown();
   });
+
+  // Carga inicial para reflejar el estado de la sesión en el indicador
+  loadFromKV().then(() => { kvLoaded = true; });
+  loadAccounts();
 })();
 </script>

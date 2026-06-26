@@ -2,6 +2,7 @@
 // Videos de un modelo de comunidad: /ph/user/<id> → https://es.pornhub.com/users/<id>/videos
 // (los modelos de comunidad viven bajo /users/<id>, no bajo /model/<slug>).
 import Layout from "../../../layouts/Ph.astro";
+import { phCookieMeta } from "@/lib/ph/cookies.js";
 import PhHeader from "../../../components/ph/PhHeader.astro";
 import PhScraperControls from "../../../components/ph/PhScraperControls.astro";
 import VideoGrid from "../../../components/ph/VideoGrid.astro";
@@ -32,12 +33,7 @@ try {
   error = e.message;
 }
 
-let cookieFromKV = false;
-let cookieCount = 0;
-try {
-  const raw = await env?.VS_C3_KV?.get("ph:cookies");
-  if (raw) { cookieFromKV = true; cookieCount = JSON.parse(raw).length; }
-} catch {}
+const { cookieFromKV, cookieCount } = await phCookieMeta(env);
 
 const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
 const prettyName = decodeURIComponent(id).replace(/-/g, " ");

@@ -21,3 +21,11 @@ VODSCENE_PASSWORD = "minasricas00"
 # Para producción usa secrets (nunca en vars):
 #   wrangler pages secret put API_KEY
 API_KEY = "changeme"
+# SHEER_KV_SECRET: clave AES-256 (base64 de 32 bytes) para cifrar la biblioteca
+# de Sheer guardada en KV (sheer:library) y las cookies/cuentas de Pornhub
+# (ph:cookies, ph:accounts). En dev local vive en .dev.vars.
+# En producción NO la pongas aquí; usa un secret:
+#   wrangler pages secret put SHEER_KV_SECRET
+# Generar una nueva: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+# Opcional: PH_KV_SECRET para usar una clave distinta solo para Pornhub; si no
+# existe, se usa SHEER_KV_SECRET.

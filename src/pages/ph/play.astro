@@ -220,6 +220,14 @@ import '../../styles/global.css';
     let refreshCount = 0;
     let refreshing = false;
 
+    // Manifiesto vacío del CDN: el proxy ya agota 3 intentos internos y devuelve
+    // 502, lo que hls.js reporta como error de red fatal al cargar el manifiesto.
+    // Tras eso esperamos 3 s y reintentamos 3 veces más (6 en total); si todas
+    // fallan, recargamos la página automáticamente.
+    const MANIFEST_RETRY_LIMIT = 3;    // reintentos del cliente tras los del proxy
+    const MANIFEST_RETRY_DELAY_MS = 3000;
+    let manifestRetryCount = 0;
+
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
     // Mismo proxy que el reproductor principal: evita CORS y añade el Referer.
@@ -286,11 +294,23 @@ import '../../styles/global.css';
         hls.loadSource(proxied(item.url));
         hls.attachMedia(videoEl);
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          manifestRetryCount = 0; // el manifiesto cargó: reseteamos el contador
           if (resumeAt > 0) videoEl.currentTime = resumeAt;
           if (wasPlaying) videoEl.play().catch(() => {});
         });
         hls.on(Hls.Events.ERROR, (_e, data) => {
           if (!data.fatal) return;
+          const D = Hls.ErrorDetails;
+          const manifestError =
+            data.details === D.MANIFEST_LOAD_ERROR ||
+            data.details === D.MANIFEST_LOAD_TIMEOUT ||
+            data.details === D.MANIFEST_PARSING_ERROR;
+          // Fallo al cargar el manifiesto (el proxy agotó sus 3 intentos): espera
+          // 3 s y reintenta hasta 3 veces más; al agotarlas, recarga la página.
+          if (manifestError) {
+            retryManifestOrReload();
+            return;
+          }
           // 1º intentamos la recuperación nativa de hls.js (errores de red o
           // media puntuales). Si no aplica, refrescamos streams frescos.
           if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
@@ -309,6 +329,23 @@ import '../../styles/global.css';
         if (wasPlaying) videoEl.addEventListener('canplay', () => videoEl.play().catch(() => {}), { once: true });
         videoEl.addEventListener('error', refreshStreams, { once: true });
       }
+    }
+
+    // Reintenta la carga del manifiesto tras un fallo del CDN: espera 3 s y vuelve
+    // a pedirlo (lo que dispara de nuevo los 3 intentos internos del proxy). Tras
+    // MANIFEST_RETRY_LIMIT reintentos sin éxito, recarga la página automáticamente.
+    function retryManifestOrReload() {
+      if (manifestRetryCount >= MANIFEST_RETRY_LIMIT) {
+        statusEl.textContent = 'No se pudo cargar el stream. Recargando la página…';
+        setTimeout(() => location.reload(), 1000);
+        return;
+      }
+      manifestRetryCount++;
+      statusEl.textContent = `El CDN no responde. Reintentando en 3 s… (${manifestRetryCount}/${MANIFEST_RETRY_LIMIT})`;
+      setTimeout(() => {
+        if (activeQuality != null) playQuality(activeQuality, { keepTime: true });
+        else refreshStreams();
+      }, MANIFEST_RETRY_DELAY_MS);
     }
 
     // Etiqueta de calidad ("720p HD"); con badge HD para 720 o más.

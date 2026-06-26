@@ -1,27 +1,52 @@
 ---
-import Layout from '../../layouts/Sheer.astro';
-import SheerPlayer from '../../components/sheer/SheerPlayer.astro';
+import Layout from "../../layouts/Sheer.astro";
+import SheerPlayer from "../../components/sheer/SheerPlayer.astro";
 // Los datos del video se reciben vía localStorage: la tarjeta (SheerVideoCard)
 // los guarda al hacer clic y aquí se leen en el cliente para poblar el player
 // (window.sheerPlayerLoad). Si no hay datos (link directo/refresh) mostramos error.
 ---
 
 <Layout title="Sheer Player">
-  <div class="mx-auto max-w-[1100px] px-6 py-8">
-    <a href="/sheer" class="mb-6 inline-flex items-center gap-2 text-[0.95rem] text-muted transition-all duration-300 hover:-translate-x-1 hover:text-accent">
+  <div class="mx-auto max-w-[1100px] p-4 md:px-6 md:py-8">
+    <a
+      href="/sheer"
+      class="mb-6 inline-flex items-center gap-2 text-[0.95rem] text-muted transition-all duration-300 hover:-translate-x-1 hover:text-accent"
+    >
       <i class="fa-solid fa-arrow-left"></i> Volver al catálogo
     </a>
 
-    {/* Vista de error (oculta por defecto; el script la muestra si no hay datos) */}
-    <div id="error-view" class="mt-16 hidden px-8 py-16 text-center text-[1.2rem] text-danger">
+    {
+      /* Vista de error (oculta por defecto; el script la muestra si no hay datos) */
+    }
+    <div
+      id="error-view"
+      class="mt-16 hidden px-8 py-16 text-center text-[1.2rem] text-danger"
+    >
       <i class="fa-solid fa-triangle-exclamation mb-4 block text-5xl"></i>
       <p id="error-msg">No se especificó un ID de video válido.</p>
-      <a href="/sheer" class="resolution-item mt-6 inline-flex w-auto justify-center">
+      <a
+        href="/sheer"
+        class="resolution-item mt-6 inline-flex w-auto justify-center"
+      >
         Volver a Inicio
       </a>
     </div>
 
-    {/* Vista del player (oculta por defecto; el bootstrap la muestra y la puebla) */}
+    {
+      /* Vista de carga (mientras pedimos las fuentes del post al servidor) */
+    }
+    <div
+      id="loading-view"
+      class="mt-16 hidden px-8 py-16 text-center text-[1.2rem] text-muted"
+    >
+      <i class="fa-solid fa-spinner fa-spin mb-4 block text-5xl text-accent"
+      ></i>
+      <p>Cargando video…</p>
+    </div>
+
+    {
+      /* Vista del player (oculta por defecto; el bootstrap la muestra y la puebla) */
+    }
     <div id="player-view" class="mt-6 hidden">
       <SheerPlayer />
     </div>
@@ -29,26 +54,28 @@ import SheerPlayer from '../../components/sheer/SheerPlayer.astro';
 </Layout>
 
 <script is:inline>
-  document.addEventListener('DOMContentLoaded', () => {
-    const errorView = document.getElementById('error-view');
-    const playerView = document.getElementById('player-view');
-    const errorMsgEl = document.getElementById('error-msg');
+  document.addEventListener("DOMContentLoaded", async () => {
+    const errorView = document.getElementById("error-view");
+    const playerView = document.getElementById("player-view");
+    const loadingView = document.getElementById("loading-view");
+    const errorMsgEl = document.getElementById("error-msg");
 
     const showError = (msg) => {
       if (errorMsgEl && msg) errorMsgEl.textContent = msg;
-      if (errorView) errorView.classList.remove('hidden');
-      if (playerView) playerView.classList.add('hidden');
+      if (errorView) errorView.classList.remove("hidden");
+      if (loadingView) loadingView.classList.add("hidden");
+      if (playerView) playerView.classList.add("hidden");
     };
 
     const params = new URLSearchParams(window.location.search);
-    const postId = params.get('postId');
+    const postId = params.get("postId");
 
     let videoData = null;
     try {
       // localStorage se comparte entre pestañas (necesario para "Nueva pestaña").
       const raw = postId
-        ? localStorage.getItem('sheer:player:' + postId) ||
-          sessionStorage.getItem('sheer:player:' + postId)
+        ? localStorage.getItem("sheer:player:" + postId) ||
+          sessionStorage.getItem("sheer:player:" + postId)
         : null;
       if (raw) videoData = JSON.parse(raw);
     } catch {}
@@ -57,13 +84,46 @@ import SheerPlayer from '../../components/sheer/SheerPlayer.astro';
       showError(
         postId
           ? `El video con ID ${postId} no está disponible. Vuelve al catálogo y ábrelo desde una tarjeta.`
-          : 'No se especificó un ID de video válido.',
+          : "No se especificó un ID de video válido.",
+      );
+      return;
+    }
+
+    // Las tarjetas de /subscriptions sólo guardan la vista previa (sin sources).
+    // Si faltan las fuentes pero tenemos la URL del post, las pedimos al server.
+    if ((!videoData.sources || videoData.sources.length === 0) && videoData.url) {
+      if (loadingView) loadingView.classList.remove("hidden");
+      try {
+        const qs = new URLSearchParams({ postId, url: videoData.url });
+        const res = await fetch(`/api/sheer/post?${qs}`);
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "No se pudo cargar el post.");
+        // Conservamos la metadata de la vista previa y añadimos las fuentes.
+        videoData = { ...videoData, ...data.video };
+        try {
+          localStorage.setItem(
+            "sheer:player:" + postId,
+            JSON.stringify(videoData),
+          );
+        } catch {}
+      } catch (e) {
+        showError(
+          `No se pudo cargar el video ${postId}: ${e.message || e}`,
+        );
+        return;
+      }
+    }
+
+    if (!videoData.sources || videoData.sources.length === 0) {
+      showError(
+        `El video con ID ${postId} no tiene fuentes reproducibles disponibles.`,
       );
       return;
     }
 
     document.title = `${videoData.title || `Video ${postId}`} - Sheer Player`;
-    if (playerView) playerView.classList.remove('hidden');
+    if (loadingView) loadingView.classList.add("hidden");
+    if (playerView) playerView.classList.remove("hidden");
 
     // Poblar el player (click-to-play: sin autoplay en la página).
     if (window.sheerPlayerLoad) window.sheerPlayerLoad(videoData);

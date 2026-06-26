@@ -13,13 +13,13 @@
 // /api/ph/stream.json, así que por defecto el catálogo se sirve sin streams.
 
 import { parse } from 'node-html-parser';
+import { loadPhCookies } from './cookies.js';
 
-// Lee las cookies exclusivamente desde KV. Si KV no tiene datos, no hay cookies
-// (devuelve []), no se usa ningún fallback bundleado.
+// Lee las cookies exclusivamente desde KV (cifradas). Si KV no tiene datos, no
+// hay cookies (devuelve []), no se usa ningún fallback bundleado.
 async function resolveCookies(source, env) {
   try {
-    const raw = await env?.VS_C3_KV?.get('ph:cookies');
-    if (raw) return JSON.parse(raw);
+    return await loadPhCookies(env);
   } catch {}
   return [];
 }

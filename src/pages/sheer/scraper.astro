@@ -1,0 +1,173 @@
+---
+// Scraper de biblioteca completa: lee las suscripciones activas (/subscriptions)
+// para obtener todos los creadores y, para cada uno, scrapea su catálogo entero
+// (/{alias}?page=N). El resultado agregado (todos los videos) se guarda en KV
+// bajo `sheer:library` para consumirlo después sin volver a scrapear.
+//
+// El scrape se dispara con ?run=1 (un GET pesado, SSR). Sin ese parámetro la
+// página solo muestra el estado de la biblioteca ya guardada en KV.
+import Layout from '../../layouts/Sheer.astro';
+import SheerHeader from '../../components/sheer/SheerHeader.astro';
+import { scrapeSheerLibrary, saveLibrary, loadLibrary } from '../../lib/sheer/scraper.js';
+
+export const prerender = false;
+
+const env = (Astro.locals as any)?.runtime?.env;
+
+const params = Astro.url.searchParams;
+const run = params.get('run') === '1';
+// Páginas por creador: 0 = todas las detectadas. Tope de seguridad en 40.
+const perCreator = Math.min(Math.max(parseInt(params.get('paginas') || '0', 10) || 0, 0), 40);
+
+let library: any = null;
+let error: string | null = null;
+let saved = false;
+let justRan = false;
+const startedAt = Date.now();
+
+let scrapedVideos = 0;
+if (run) {
+  justRan = true;
+  try {
+    const fresh = await scrapeSheerLibrary({ maxPagesPerCreator: perCreator, env });
+    scrapedVideos = fresh.totalVideos;
+    // saveLibrary une (archivo) con lo previo y devuelve la biblioteca resultante.
+    const merged = await saveLibrary(fresh, env);
+    saved = !!merged;
+    library = merged ?? fresh;
+  } catch (e: any) {
+    error = e.message;
+  }
+} else {
+  // Mostrar lo último guardado en KV.
+  try {
+    library = await loadLibrary(env);
+  } catch (e: any) {
+    error = e.message;
+  }
+}
+
+const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
+
+const creators: any[] = library?.creators ?? [];
+const totalVideos: number = library?.totalVideos ?? 0;
+const totalCreators: number = library?.totalCreators ?? creators.length;
+const generatedAt: number | null = library?.generatedAt ?? null;
+
+const fmtDate = (ts: number | null) =>
+  ts ? new Date(ts).toLocaleString('es-ES', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
+---
+
+<Layout title="Scraper - Sheer">
+  <div class="mx-auto max-w-[1300px] px-4 py-6 sm:px-6 sm:py-8">
+    <SheerHeader title="Scraper de biblioteca" icon="fa-database">
+      <a slot="nav" href="/sheer/subscriptions" class="inline-flex items-center gap-2 text-[0.95rem] text-muted transition-all duration-300 hover:-translate-x-1 hover:text-accent">
+        <i class="fa-solid fa-arrow-left"></i> Suscripciones
+      </a>
+      {error ? (
+        <span slot="stats" class="text-danger"><i class="fa-solid fa-triangle-exclamation"></i> Error</span>
+      ) : (
+        <span slot="stats"><i class="fa-solid fa-database"></i> {totalCreators} creadores · {totalVideos} videos{justRan ? ` · ${elapsed}s` : ''}</span>
+      )}
+    </SheerHeader>
+
+    {/* Controles: dispara el scrape completo (SSR vuelve a recorrer todo). */}
+    <details class="group mb-8 rounded-2xl border border-line bg-card" open={!library}>
+      <summary class="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-sm font-semibold text-ink [&::-webkit-details-marker]:hidden">
+        <i class="fa-solid fa-cloud-arrow-down text-muted"></i> Scrapear y guardar en KV
+        <i class="fa-solid fa-chevron-down ml-auto text-xs text-muted transition-transform duration-300 group-open:rotate-180"></i>
+      </summary>
+      <form method="get" action="/sheer/scraper" class="flex flex-wrap items-end gap-3 px-4 pb-4 sm:gap-4 sm:px-5">
+        <input type="hidden" name="run" value="1" />
+        <div class="flex w-28 flex-none flex-col gap-1.5 sm:w-auto">
+          <label for="paginas" class="flex items-center gap-1.5 whitespace-nowrap text-xs font-semibold uppercase tracking-[0.5px] text-muted">
+            <i class="fa-solid fa-layer-group"></i> Págs./creador
+          </label>
+          <input
+            type="number"
+            id="paginas"
+            name="paginas"
+            min="0"
+            max="40"
+            value={perCreator}
+            placeholder="0 = todas"
+            class="w-full rounded-[10px] border border-line bg-[rgba(8,5,15,0.6)] px-3.5 py-2.5 text-[0.9rem] text-ink outline-none transition-all duration-300 hover:border-line-hover focus:border-line-hover sm:min-w-[140px]"
+          />
+        </div>
+        <button type="submit" class="btn btn--primary !mt-0 !w-auto !py-2.5 whitespace-nowrap">
+          <i class="fa-solid fa-cloud-arrow-down"></i> Scrapear todo
+        </button>
+        <p class="w-full text-[0.8rem] italic text-muted">
+          Recorre cada creador suscrito y <strong>une</strong> los videos con los ya guardados en
+          <code class="text-accent">VS_C3_KV[sheer:library]</code> (modo archivo: nunca borra; los posts
+          eliminados en Sheer se conservan). 0 = todas las páginas (más lento).
+        </p>
+      </form>
+    </details>
+
+    {justRan && !error && (
+      <div class="mb-8 flex items-center gap-3 rounded-2xl border border-line bg-card px-4 py-3 text-[0.9rem] sm:px-5">
+        <i class={`fa-solid ${saved ? 'fa-circle-check text-accent' : 'fa-triangle-exclamation text-danger'} text-lg`}></i>
+        <span class="text-ink">
+          {saved
+            ? `Scrape: ${scrapedVideos} videos en ${elapsed}s. Biblioteca tras la unión: ${totalCreators} creadores · ${totalVideos} videos.`
+            : 'El scrape terminó pero no se pudo guardar en KV (¿binding VS_C3_KV disponible?).'}
+        </span>
+      </div>
+    )}
+
+    {error ? (
+      <div class="px-8 py-16 text-center text-[1.2rem] text-danger">
+        <i class="fa-solid fa-triangle-exclamation mb-4 block text-5xl"></i>
+        <p>{error}</p>
+      </div>
+    ) : !library ? (
+      <div class="px-8 py-16 text-center text-[1.2rem] text-muted">
+        <i class="fa-solid fa-database mb-4 block text-5xl text-muted"></i>
+        <p>No hay biblioteca guardada todavía. Pulsa «Scrapear todo» para generarla.</p>
+      </div>
+    ) : creators.length === 0 ? (
+      <div class="px-8 py-16 text-center text-[1.2rem] text-muted">
+        <i class="fa-solid fa-heart-crack mb-4 block text-5xl text-muted"></i>
+        <p>No se encontraron creadores suscritos.</p>
+      </div>
+    ) : (
+      <>
+        <p class="mb-5 text-[0.85rem] text-muted">
+          <i class="fa-solid fa-clock-rotate-left"></i> Última actualización: {fmtDate(generatedAt)}
+        </p>
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {creators.map((c: any) => (
+            <div class="flex items-center gap-4 rounded-2xl border border-line bg-card px-4 py-4 transition-all duration-300 hover:border-line-hover">
+              {c.headshot ? (
+                <img src={c.headshot} alt={c.name} class="h-12 w-12 shrink-0 rounded-full object-cover" loading="lazy" />
+              ) : (
+                <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[rgba(255,255,255,0.05)] text-muted">
+                  <i class="fa-solid fa-user"></i>
+                </div>
+              )}
+              <div class="min-w-0 grow">
+                <a
+                  href={`/sheer/${c.alias}`}
+                  class="block truncate text-[1.05rem] font-bold text-ink transition-colors hover:text-accent"
+                >
+                  {c.name || c.alias}
+                </a>
+                <div class="mt-0.5 truncate text-[0.85rem] text-muted">@{c.alias}</div>
+              </div>
+              {c.error ? (
+                <span class="shrink-0 rounded-full border border-danger/40 bg-[rgba(8,5,15,0.6)] px-3 py-1.5 text-[0.78rem] text-danger" title={c.error}>
+                  <i class="fa-solid fa-triangle-exclamation"></i> error
+                </span>
+              ) : (
+                <span class="shrink-0 rounded-full border border-line bg-[rgba(8,5,15,0.6)] px-3 py-1.5 text-[0.8rem] text-muted">
+                  {c.count} {c.count === 1 ? 'video' : 'videos'}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      </>
+    )}
+  </div>
+</Layout>
