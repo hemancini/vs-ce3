@@ -1,145 +1,58 @@
 [
   {
-    "name": "ACCIDSESSID",
-    "value": "cqo8d08vkofat4n3nujeaf3ehg",
-    "domain": "www.sheer.com",
-    "path": "/",
-    "secure": true,
-    "httpOnly": true,
-    "sameSite": "unspecified",
-    "expirationDate": 1781891788.285807,
-    "storeId": "0"
+    "name": "language",
+    "value": "es"
   },
   {
-    "name": "OLD_JDIALOG",
-    "value": "AAAAAELDL8SZJFY09YX9GFM2LO1CB63SQ2DXZWWTJJZHN0XSAS",
-    "domain": "www.sheer.com",
-    "path": "/",
-    "secure": false,
-    "httpOnly": false,
-    "sameSite": "unspecified",
-    "expirationDate": 1781935054,
-    "storeId": "0"
-  },
-  {
-    "name": "entry_point",
-    "value": "https%3A%2F%2Fwww.sheer.com%2Fcreators",
-    "domain": "www.sheer.com",
-    "path": "/",
-    "secure": false,
-    "httpOnly": false,
-    "sameSite": "unspecified",
-    "expirationDate": 1781934989,
-    "storeId": "0"
+    "name": "JDIALOG3",
+    "value": "KM2CTND2780SR2YTDLMO1872C53ONYHGUBYOWSJ1RQR741EVXH"
   },
   {
     "name": "language",
-    "value": "es",
-    "domain": "www.sheer.com",
-    "path": "/",
-    "secure": false,
-    "httpOnly": false,
-    "sameSite": "unspecified",
-    "expirationDate": 1797400621.976011,
-    "storeId": "0"
+    "value": "es"
+  },
+  {
+    "name": "ACCIDSESSID",
+    "value": "0a8ou0dr3edn7phinda74gijig"
+  },
+  {
+    "name": "OLD_JDIALOG",
+    "value": "AAAAAELDL8SZJFY09YX9GFM2LO1CB63SQ2DXZWWTJJZHN0XSAS"
   },
   {
     "name": "http_referer",
-    "value": "https%3A%2F%2Faccounts.google.com%2F",
-    "domain": "www.sheer.com",
-    "path": "/",
-    "secure": false,
-    "httpOnly": false,
-    "sameSite": "unspecified",
-    "expirationDate": 1781935024,
-    "storeId": "0"
+    "value": ""
+  },
+  {
+    "name": "entry_point",
+    "value": "https%3A%2F%2Fwww.sheer.com%2Fcreators"
   },
   {
     "name": "JDIALOG3",
-    "value": "KM2CTND2780SR2YTDLMO1872C53ONYHGUBYOWSJ1RQR741EVXH",
-    "domain": "www.sheer.com",
-    "path": "/",
-    "secure": false,
-    "httpOnly": false,
-    "sameSite": "unspecified",
-    "expirationDate": 1797400654.814306,
-    "storeId": "0"
+    "value": "3KBQG19XRM216KVO28YZ562S2UZHGWB1FCN6E2ARBLFKUM4GC6"
   },
   {
     "name": "JDIALOG3",
-    "value": "AAAAAELDL8SZJFY09YX9GFM2LO1CB63SQ2DXZWWTJJZHN0XSAS",
-    "domain": ".sheer.com",
-    "path": "/",
-    "secure": false,
-    "httpOnly": false,
-    "sameSite": "unspecified",
-    "expirationDate": 1784526988.286053,
-    "storeId": "0"
+    "value": "AAAAAELDL8SZJFY09YX9GFM2LO1CB63SQ2DXZWWTJJZHN0XSAS"
   },
   {
     "name": "_csrf-sheer",
-    "value": "52R4Y18OMSVNY10ZAPOB4ISOVOZI49R6",
-    "domain": ".sheer.com",
-    "path": "/",
-    "secure": false,
-    "httpOnly": true,
-    "sameSite": "unspecified",
-    "expirationDate": 1797400588.286245,
-    "storeId": "0"
-  },
-  {
-    "name": "redirect",
-    "value": "https%3A%2F%2Fwww.sheer.com%2Fcreators",
-    "domain": ".sheer.com",
-    "path": "/",
-    "secure": false,
-    "httpOnly": true,
-    "sameSite": "unspecified",
-    "expirationDate": 1781852218.973311,
-    "storeId": "0"
-  },
-  {
-    "name": "refresh_token_hash",
-    "value": "ccdd0950e59786700df7c8f1b95be199",
-    "domain": ".sheer.com",
-    "path": "/",
-    "secure": false,
-    "httpOnly": true,
-    "sameSite": "unspecified",
-    "expirationDate": 1783058221.000856,
-    "storeId": "0"
+    "value": "52R4Y18OMSVNY10ZAPOB4ISOVOZI49R6"
   },
   {
     "name": "site_version",
-    "value": "only_women",
-    "domain": ".sheer.com",
-    "path": "/",
-    "secure": false,
-    "httpOnly": false,
-    "sameSite": "unspecified",
-    "expirationDate": 1797400664.409268,
-    "storeId": "0"
+    "value": "only_women"
   },
   {
     "name": "sheeraverified",
-    "value": "ea8076918fedaae470f43bab97808f7b",
-    "domain": ".sheer.com",
-    "path": "/",
-    "secure": false,
-    "httpOnly": false,
-    "sameSite": "unspecified",
-    "expirationDate": 1797400621.976104,
-    "storeId": "0"
+    "value": "ea8076918fedaae470f43bab97808f7b"
   },
   {
     "name": "sidebar_state",
-    "value": "%7B%22compact%22%3Afalse%2C%22discover%22%3Atrue%2C%22library%22%3Atrue%7D",
-    "domain": ".sheer.com",
-    "path": "/",
-    "secure": false,
-    "httpOnly": false,
-    "sameSite": "unspecified",
-    "expirationDate": 1797400653.276909,
-    "storeId": "0"
+    "value": "%7B%22compact%22%3Afalse%2C%22discover%22%3Atrue%2C%22library%22%3Atrue%7D"
+  },
+  {
+    "name": "refresh_token_hash",
+    "value": "d4fac1c87d46f1b8a45e57d3510d6be7"
   }
 ]

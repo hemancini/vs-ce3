@@ -1,0 +1,313 @@
+// src/lib/sheer/scraper.js
+//
+// Librería de scraping de Sheer usada por la app SSR. El HTML server-side de
+// Sheer ya trae 10 posts por página (?page=N) con su <video><source> .mp4
+// inline, así que basta con fetch() + node-html-parser enviando la cookie de
+// sesión — no hace falta navegador ni hover.
+//
+// Diseñada para SSR on-demand: scrapeSheer() recorre N páginas (1 fetch por
+// página, con un pool de concurrencia) y devuelve los videos deduplicados +
+// el total de páginas detectado.
+//
+// Portabilidad: el fetch nativo de Node (undici) revienta con
+// HeadersOverflowError porque Sheer manda muchísimas cabeceras Set-Cookie. Por
+// eso fetchHtml hace fallback a node:https con maxHeaderSize ampliado cuando
+// detecta ese error (solo ocurre en `astro dev`/Node; en Cloudflare Workers el
+// fetch nativo maneja bien las cabeceras grandes).
+
+import { parse } from 'node-html-parser';
+
+const BASE_URL = 'https://www.sheer.com';
+const DEFAULT_ALIAS = 'TheGrey';
+
+const UA =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+const BROWSER_HEADERS = {
+  accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+  'accept-language': 'es-ES,es;q=0.9,en;q=0.8',
+  'user-agent': UA,
+};
+
+const normStr = (s) => (s == null ? '' : String(s).replace(/&amp;/g, '&'));
+const isEmpty = (s) => s == null || String(s).trim() === '';
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ── Cookies ──────────────────────────────────────────────────────────────────
+// Preferimos KV ('sheer:cookies'); si no hay, caemos al archivo local
+// config/cookies.json (solo existe en dev/Node). Devuelve la cabecera "k=v; …".
+function cookiesToHeader(cookies) {
+  return (cookies || [])
+    .filter((c) => c && c.name)
+    .map((c) => `${c.name}=${c.value}`)
+    .join('; ');
+}
+
+async function resolveCookieHeader(env) {
+  try {
+    const raw = await env?.VS_C3_KV?.get('sheer:cookies');
+    if (raw) return cookiesToHeader(JSON.parse(raw));
+  } catch {}
+  try {
+    const fs = (await import('node:fs')).default;
+    const path = (await import('node:path')).default;
+    const p = path.resolve(process.cwd(), 'config/cookies.json');
+    if (fs.existsSync(p)) return cookiesToHeader(JSON.parse(fs.readFileSync(p, 'utf8')));
+  } catch {}
+  return '';
+}
+
+// ── Fetch con fallback para cabeceras gigantes ───────────────────────────────
+function isHeaderOverflow(err) {
+  const code = err?.code || err?.cause?.code;
+  return (
+    code === 'UND_ERR_HEADERS_OVERFLOW' ||
+    /headers? overflow/i.test(err?.message || '') ||
+    /headers? overflow/i.test(err?.cause?.message || '')
+  );
+}
+
+// node:https con maxHeaderSize ampliado (solo Node/dev).
+async function fetchHtmlNode(url, cookieHeader) {
+  const https = (await import('node:https')).default;
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const req = https.request(
+      {
+        hostname: u.hostname,
+        path: u.pathname + u.search,
+        method: 'GET',
+        maxHeaderSize: 256 * 1024,
+        headers: { ...BROWSER_HEADERS, cookie: cookieHeader },
+      },
+      (res) => {
+        let data = '';
+        res.setEncoding('utf8');
+        res.on('data', (d) => { data += d; });
+        res.on('end', () => resolve(data));
+      },
+    );
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+// Una vez que el fetch nativo revienta por overflow (Node/dev), recordamos que
+// hay que usar node:https directamente y no malgastamos un intento nativo por
+// cada página. En Workers el fetch nativo no falla, así que esto nunca se activa.
+let preferNodeHttps = false;
+
+async function fetchHtml(url, cookieHeader) {
+  if (preferNodeHttps) return fetchHtmlNode(url, cookieHeader);
+  try {
+    const res = await fetch(url, {
+      redirect: 'follow',
+      headers: { ...BROWSER_HEADERS, cookie: cookieHeader },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.text();
+  } catch (err) {
+    if (isHeaderOverflow(err)) {
+      preferNodeHttps = true;
+      return fetchHtmlNode(url, cookieHeader);
+    }
+    throw err;
+  }
+}
+
+// ── Parseo de una página SSR ─────────────────────────────────────────────────
+function parsePage(html) {
+  const root = parse(html);
+  return root.querySelectorAll('article.post[data-post-id]').map((post) => {
+    const video = post.querySelector('video.js-video-source, video');
+    const sources = video
+      ? video
+          .querySelectorAll('source')
+          .map((s) => ({
+            src: normStr(s.getAttribute('src')),
+            size: s.getAttribute('size'),
+            bitrate: s.getAttribute('bitrate'),
+          }))
+          .filter((s) => !isEmpty(s.src))
+      : [];
+
+    const postId = post.getAttribute('data-post-id') || '';
+    const videoId = video ? video.getAttribute('data-video-id') || '' : '';
+    const contentId = video ? video.getAttribute('data-content-id') || '' : '';
+    const alias = video ? video.getAttribute('data-alias') || '' : '';
+
+    let title = post.querySelector('[data-post-title]')?.getAttribute('data-post-title') || '';
+    if (!title) {
+      title = (post.querySelector('.post-title, .title, .video-title, h3, h4, .post-text')?.text || '').trim();
+    }
+
+    // poster: en SSR vive en data-poster del <video>; fallback a la imagen.
+    let poster = normStr(video?.getAttribute('data-poster') || video?.getAttribute('poster') || '');
+    if (!poster) {
+      const imgEl = post.querySelector('img.video-poster__img, img.video-poster__background');
+      if (imgEl) poster = normStr(imgEl.getAttribute('src') || imgEl.getAttribute('data-src') || '');
+    }
+    if (!poster) {
+      const bgEl = post.querySelector('.video-poster__background');
+      const m = (bgEl?.getAttribute('style') || '').match(/url\(['"]?([^'"]+)['"]?\)/);
+      if (m) poster = normStr(m[1]);
+    }
+
+    const models = post
+      .querySelectorAll('.post__featuring-models__list-item')
+      .map((el) => ({ id: el.getAttribute('data-model-id') || '', name: el.text.trim() }))
+      .filter((mdl) => mdl.name);
+
+    const tags = post
+      .querySelectorAll('.post-tags__item')
+      .map((li) => {
+        const link = li.querySelector('.post-tags__link');
+        const tagAlias = li.getAttribute('data-tag-alias') || '';
+        return {
+          id: li.getAttribute('data-tag-id') || '',
+          alias: tagAlias,
+          name: link ? link.text.trim() : tagAlias,
+        };
+      })
+      .filter((t) => t.alias || t.name);
+
+    let views = null;
+    const viewsEl = post.querySelector('.post__counter--views strong');
+    if (viewsEl) {
+      const raw = (viewsEl.text || '').replace(/[^\d]/g, '');
+      if (raw) views = parseInt(raw, 10);
+    }
+
+    const date = (post.querySelector('.post__date-text, .post__date')?.text || '').trim();
+    const duration = (post.querySelector('.runtime-tag span, .runtime-tag')?.text || '').trim();
+
+    return {
+      postId,
+      videoId,
+      contentId,
+      alias,
+      title: title || `Video ${videoId || postId}`,
+      poster,
+      models,
+      tags,
+      views,
+      date,
+      duration,
+      sources,
+    };
+  });
+}
+
+// total_pages viene en el JSON de APP_CONFIG:
+// ...,"pagination":{"page":"1","total_pages":40}
+function detectTotalPages(html) {
+  const m = html.match(/"total_pages"\s*:\s*(\d+)/);
+  return m ? parseInt(m[1], 10) : 1;
+}
+
+function buildPageUrl(alias, page) {
+  const u = new URL(`${BASE_URL}/${alias}`);
+  u.searchParams.set('page', String(page));
+  return u.toString();
+}
+
+// ── Pool de concurrencia ─────────────────────────────────────────────────────
+async function runPool(items, concurrency, worker) {
+  let idx = 0;
+  async function next() {
+    while (idx < items.length) {
+      const i = idx++;
+      await worker(items[i], i);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.max(1, concurrency) }, next));
+}
+
+/**
+ * Scrapea N páginas del catálogo de un creador de Sheer y devuelve los videos
+ * (deduplicados por postId/videoId) más el total de páginas detectado.
+ *
+ * @param {object}  [opts]
+ * @param {string}  [opts.alias]        creador (default: TheGrey)
+ * @param {number}  [opts.maxPages]     páginas a recorrer (default 1)
+ * @param {number}  [opts.concurrency]  fetches en paralelo (default 4)
+ * @param {any}     [opts.env]          runtime env (para VS_C3_KV)
+ * @returns {Promise<{ videos: any[], totalPages: number, alias: string }>}
+ */
+export async function scrapeSheer({ alias = DEFAULT_ALIAS, maxPages = 1, concurrency = 4, env } = {}) {
+  const cookieHeader = await resolveCookieHeader(env);
+  if (!cookieHeader) {
+    throw new Error('No hay cookies de Sheer (ni en VS_C3_KV[sheer:cookies] ni en config/cookies.json).');
+  }
+
+  const firstHtml = await fetchHtml(buildPageUrl(alias, 1), cookieHeader);
+  if (/name=["']?password|type=["']?password/i.test(firstHtml) && !firstHtml.includes('data-post-id')) {
+    throw new Error('Sesión no válida o página de login — las cookies pueden haber expirado.');
+  }
+
+  const totalPages = detectTotalPages(firstHtml);
+  const pages = Math.max(1, Math.min(maxPages || 1, totalPages));
+
+  const all = parsePage(firstHtml);
+
+  if (pages > 1) {
+    const rest = Array.from({ length: pages - 1 }, (_, i) => i + 2);
+    await runPool(rest, concurrency, async (p) => {
+      try {
+        const html = await fetchHtml(buildPageUrl(alias, p), cookieHeader);
+        all.push(...parsePage(html));
+      } catch {
+        // Página fallida: la saltamos sin abortar todo el scrape.
+      }
+    });
+  }
+
+  // Dedup por postId (fallback a videoId). Cada página trae posts distintos,
+  // así que basta una pasada simple.
+  const seen = new Set();
+  const videos = all.filter((v) => {
+    if (!v.sources || v.sources.length === 0) return false;
+    const key = v.postId || v.videoId;
+    if (key && seen.has(key)) return false;
+    if (key) seen.add(key);
+    return true;
+  });
+
+  return { videos, totalPages, alias };
+}
+
+/**
+ * Scrapea UNA sola página del catálogo. Pensado para el scroll infinito: el
+ * cliente pide ?page=N y recibe solo los videos de esa página.
+ *
+ * @param {object} [opts]
+ * @param {string} [opts.alias]  creador (default: TheGrey)
+ * @param {number} [opts.page]   número de página (default 1)
+ * @param {any}    [opts.env]    runtime env (para VS_C3_KV)
+ * @returns {Promise<{ videos: any[], totalPages: number, page: number, alias: string }>}
+ */
+export async function scrapeSheerPage({ alias = DEFAULT_ALIAS, page = 1, env } = {}) {
+  const cookieHeader = await resolveCookieHeader(env);
+  if (!cookieHeader) {
+    throw new Error('No hay cookies de Sheer (ni en VS_C3_KV[sheer:cookies] ni en config/cookies.json).');
+  }
+
+  const html = await fetchHtml(buildPageUrl(alias, page), cookieHeader);
+  if (page === 1 && /name=["']?password|type=["']?password/i.test(html) && !html.includes('data-post-id')) {
+    throw new Error('Sesión no válida o página de login — las cookies pueden haber expirado.');
+  }
+
+  const totalPages = detectTotalPages(html);
+  const seen = new Set();
+  const videos = parsePage(html).filter((v) => {
+    if (!v.sources || v.sources.length === 0) return false;
+    const key = v.postId || v.videoId;
+    if (key && seen.has(key)) return false;
+    if (key) seen.add(key);
+    return true;
+  });
+
+  return { videos, totalPages, page, alias };
+}
+
+export { DEFAULT_ALIAS };

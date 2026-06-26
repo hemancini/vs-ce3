@@ -1,0 +1,264 @@
+---
+// Sección de autenticación de Sheer. Dos métodos para conseguir la cookie de
+// sesión: (1) pegar cookies a mano, (2) iniciar sesión con email/contraseña. En
+// ambos casos se guardan en KV (sheer:cookies) + config/cookies.json (dev). Un
+// botón "Validar" comprueba si la sesión guardada sigue activa. Todo el trabajo
+// pesado vive en /api/sheer/auth; aquí solo está la UI + el fetch del cliente.
+---
+
+<section
+  id="auth-panel"
+  class="mb-8 overflow-hidden rounded-2xl border border-line bg-card"
+>
+  <button
+    type="button"
+    id="auth-toggle"
+    class="flex w-full items-center justify-between gap-3 px-4 py-3.5 text-left transition-colors hover:bg-card-hover sm:px-5"
+    aria-expanded="false"
+  >
+    <span class="flex items-center gap-2.5 text-[0.95rem] font-semibold text-ink">
+      <i class="fa-solid fa-key text-accent"></i> Autenticación
+    </span>
+    <span class="flex items-center gap-3">
+      <span
+        id="auth-badge"
+        class="inline-flex items-center gap-1.5 rounded-full border border-line bg-[rgba(8,5,15,0.6)] px-3 py-1 text-[0.78rem] font-semibold text-muted"
+      >
+        <i class="fa-solid fa-circle-notch fa-spin"></i> Comprobando…
+      </span>
+      <i id="auth-chevron" class="fa-solid fa-chevron-down text-muted transition-transform"></i>
+    </span>
+  </button>
+
+  <div id="auth-body" class="hidden border-t border-line px-4 py-5 sm:px-5">
+    {/* Selector de método */}
+    <div class="mb-5 inline-flex rounded-[10px] border border-line bg-[rgba(8,5,15,0.6)] p-1">
+      <button type="button" data-tab="cookies" class="auth-tab rounded-md px-3.5 py-1.5 text-[0.85rem] font-semibold text-muted transition-all">
+        <i class="fa-solid fa-cookie-bite"></i> Cookies
+      </button>
+      <button type="button" data-tab="login" class="auth-tab rounded-md px-3.5 py-1.5 text-[0.85rem] font-semibold text-muted transition-all">
+        <i class="fa-solid fa-right-to-bracket"></i> Email y contraseña
+      </button>
+    </div>
+
+    {/* Método 1: pegar cookies */}
+    <div data-panel="cookies" class="auth-tabpanel flex flex-col gap-3">
+      <label for="auth-cookies" class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.5px] text-muted">
+        <i class="fa-solid fa-cookie-bite"></i> Cookies de sesión
+      </label>
+      <textarea
+        id="auth-cookies"
+        rows="4"
+        placeholder='Pega aquí las cookies: JSON [{"name":"...","value":"..."}], objeto {"name":"value"} o cabecera "k=v; k2=v2".'
+        class="w-full resize-y rounded-[10px] border border-line bg-[rgba(8,5,15,0.6)] px-3.5 py-2.5 font-mono text-[0.82rem] text-ink outline-none transition-all duration-300 hover:border-line-hover focus:border-line-hover"
+      ></textarea>
+      <div class="flex flex-wrap gap-3">
+        <button type="button" id="auth-save-cookies" class="btn btn--primary !mt-0">
+          <i class="fa-solid fa-floppy-disk"></i> Guardar y validar
+        </button>
+      </div>
+    </div>
+
+    {/* Método 2: email + contraseña */}
+    <div data-panel="login" class="auth-tabpanel hidden flex-col gap-3">
+      <div class="flex flex-col gap-3 sm:flex-row sm:gap-4">
+        <div class="flex flex-1 flex-col gap-1.5">
+          <label for="auth-email" class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.5px] text-muted">
+            <i class="fa-solid fa-envelope"></i> Email
+          </label>
+          <input
+            type="email"
+            id="auth-email"
+            autocomplete="username"
+            placeholder="tu@email.com"
+            class="w-full rounded-[10px] border border-line bg-[rgba(8,5,15,0.6)] px-3.5 py-2.5 text-[0.9rem] text-ink outline-none transition-all duration-300 hover:border-line-hover focus:border-line-hover"
+          />
+        </div>
+        <div class="flex flex-1 flex-col gap-1.5">
+          <label for="auth-password" class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.5px] text-muted">
+            <i class="fa-solid fa-lock"></i> Contraseña
+          </label>
+          <input
+            type="password"
+            id="auth-password"
+            autocomplete="current-password"
+            placeholder="••••••••"
+            class="w-full rounded-[10px] border border-line bg-[rgba(8,5,15,0.6)] px-3.5 py-2.5 text-[0.9rem] text-ink outline-none transition-all duration-300 hover:border-line-hover focus:border-line-hover"
+          />
+        </div>
+      </div>
+      <div class="flex flex-wrap gap-3">
+        <button type="button" id="auth-login" class="btn btn--primary !mt-0">
+          <i class="fa-solid fa-right-to-bracket"></i> Iniciar sesión
+        </button>
+      </div>
+      <p class="text-[0.78rem] italic text-muted">
+        Las credenciales se envían al servidor solo para obtener la cookie; no se guardan.
+      </p>
+    </div>
+
+    {/* Acciones comunes + resultado */}
+    <div class="mt-5 flex flex-wrap items-center gap-3 border-t border-line pt-4">
+      <button type="button" id="auth-validate" class="flex cursor-pointer items-center gap-1.5 rounded-[10px] border border-line bg-[rgba(255,255,255,0.05)] px-4 py-2.5 text-[0.85rem] text-ink transition-all duration-300 hover:border-line-hover hover:bg-card-hover">
+        <i class="fa-solid fa-shield-halved"></i> Validar sesión guardada
+      </button>
+      <span id="auth-result" class="text-[0.85rem] text-muted"></span>
+    </div>
+  </div>
+</section>
+
+<script is:inline>
+  (() => {
+    const panel = document.getElementById('auth-panel');
+    if (!panel) return;
+
+    const toggle = document.getElementById('auth-toggle');
+    const body = document.getElementById('auth-body');
+    const chevron = document.getElementById('auth-chevron');
+    const badge = document.getElementById('auth-badge');
+    const result = document.getElementById('auth-result');
+    const tabs = panel.querySelectorAll('.auth-tab');
+    const panels = panel.querySelectorAll('.auth-tabpanel');
+
+    // ── Plegado ────────────────────────────────────────────────────────────
+    toggle?.addEventListener('click', () => {
+      const open = body?.classList.toggle('hidden') === false;
+      toggle.setAttribute('aria-expanded', String(open));
+      if (chevron) chevron.style.transform = open ? 'rotate(180deg)' : '';
+    });
+
+    // ── Tabs ───────────────────────────────────────────────────────────────
+    const selectTab = (name) => {
+      tabs.forEach((t) => {
+        const active = t.getAttribute('data-tab') === name;
+        t.classList.toggle('bg-card', active);
+        t.classList.toggle('text-ink', active);
+        t.classList.toggle('text-muted', !active);
+      });
+      panels.forEach((p) => {
+        const active = p.getAttribute('data-panel') === name;
+        p.classList.toggle('hidden', !active);
+        p.classList.toggle('flex', active);
+      });
+    };
+    tabs.forEach((t) => t.addEventListener('click', () => selectTab(t.getAttribute('data-tab'))));
+    selectTab('cookies');
+
+    // ── Badge de estado ──────────────────────────────────────────────────────
+    const setBadge = (state, text) => {
+      if (!badge) return;
+      const styles = {
+        loading: ['text-muted', '<i class="fa-solid fa-circle-notch fa-spin"></i>'],
+        ok: ['text-[#4ade80]', '<i class="fa-solid fa-circle-check"></i>'],
+        bad: ['text-danger', '<i class="fa-solid fa-circle-xmark"></i>'],
+      };
+      const [cls, icon] = styles[state] || styles.loading;
+      badge.className = `inline-flex items-center gap-1.5 rounded-full border border-line bg-[rgba(8,5,15,0.6)] px-3 py-1 text-[0.78rem] font-semibold ${cls}`;
+      badge.innerHTML = `${icon} ${text}`;
+    };
+
+    const setResult = (state, text) => {
+      if (!result) return;
+      const cls = state === 'ok' ? 'text-[#4ade80]' : state === 'bad' ? 'text-danger' : 'text-muted';
+      result.className = `text-[0.85rem] ${cls}`;
+      result.textContent = text;
+    };
+
+    const busy = (btn, on, busyLabel) => {
+      if (!btn) return;
+      if (on) {
+        btn.dataset._html = btn.innerHTML;
+        btn.disabled = true;
+        btn.style.opacity = '0.6';
+        btn.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> ${busyLabel}`;
+      } else {
+        btn.disabled = false;
+        btn.style.opacity = '';
+        if (btn.dataset._html) btn.innerHTML = btn.dataset._html;
+      }
+    };
+
+    const api = async (method, payload) => {
+      const opts = { method };
+      if (payload) {
+        opts.headers = { 'content-type': 'application/json' };
+        opts.body = JSON.stringify(payload);
+      }
+      const res = await fetch('/api/sheer/auth', opts);
+      return res.json();
+    };
+
+    // ── Validación inicial + botón ───────────────────────────────────────────
+    const refreshStatus = async () => {
+      setBadge('loading', 'Comprobando…');
+      try {
+        const data = await api('GET');
+        if (data.valid) setBadge('ok', 'Sesión activa');
+        else setBadge('bad', data.count ? 'Sesión inactiva' : 'Sin cookies');
+        return data;
+      } catch {
+        setBadge('bad', 'Error');
+        return { valid: false };
+      }
+    };
+
+    document.getElementById('auth-validate')?.addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      busy(btn, true, 'Validando…');
+      setResult('loading', '');
+      const data = await refreshStatus();
+      setResult(data.valid ? 'ok' : 'bad', data.valid ? 'Sesión activa ✓' : `Sesión inactiva — ${data.reason || 'sin sesión'}`);
+      busy(btn, false);
+    });
+
+    // ── Guardar cookies pegadas ──────────────────────────────────────────────
+    document.getElementById('auth-save-cookies')?.addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      const cookies = document.getElementById('auth-cookies')?.value.trim();
+      if (!cookies) return setResult('bad', 'Pega las cookies primero.');
+      busy(btn, true, 'Guardando…');
+      setResult('loading', '');
+      try {
+        const data = await api('POST', { action: 'save', cookies });
+        if (data.ok) {
+          setBadge(data.valid ? 'ok' : 'bad', data.valid ? 'Sesión activa' : 'Sesión inactiva');
+          setResult(data.valid ? 'ok' : 'bad',
+            `${data.count} cookies guardadas` + (data.valid ? ' — sesión activa ✓' : ` — pero ${data.reason || 'sesión inactiva'}`));
+        } else {
+          setResult('bad', data.error || 'No se pudieron guardar las cookies.');
+        }
+      } catch {
+        setResult('bad', 'Error de red al guardar.');
+      }
+      busy(btn, false);
+    });
+
+    // ── Login email/contraseña ───────────────────────────────────────────────
+    document.getElementById('auth-login')?.addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      const email = document.getElementById('auth-email')?.value.trim();
+      const password = document.getElementById('auth-password')?.value;
+      if (!email || !password) return setResult('bad', 'Email y contraseña son requeridos.');
+      busy(btn, true, 'Iniciando sesión…');
+      setResult('loading', '');
+      try {
+        const data = await api('POST', { action: 'login', email, password });
+        if (data.ok) {
+          setBadge('ok', 'Sesión activa');
+          setResult('ok', `Sesión iniciada — ${data.count} cookies guardadas ✓`);
+          const pw = document.getElementById('auth-password');
+          if (pw) pw.value = '';
+        } else {
+          setBadge('bad', 'Sesión inactiva');
+          setResult('bad', data.error || 'Login fallido.');
+        }
+      } catch {
+        setResult('bad', 'Error de red en el login.');
+      }
+      busy(btn, false);
+    });
+
+    // Comprobación de estado al cargar.
+    refreshStatus();
+  })();
+</script>

@@ -1,8 +1,10 @@
-// Las dependencias de Node (playwright, node:fs, node:path, dotenv) se importan
-// dinámicamente dentro del handler. Este endpoint SOLO funciona en `astro dev`
-// (Node): Cloudflare Workers no tiene navegador ni filesystem. El scraping se
-// ejecuta en local y el resultado se guarda en KV (VIDEOS_KV), que en dev usa
-// el KV local de Miniflare gracias a platformProxy.
+// Scraper por SSR puro: en vez de Playwright, descargamos cada página
+// `?page=N` con node:https (incluyendo la cookie de sesión) y parseamos el HTML
+// con node-html-parser. El sitio server-renderiza 10 posts por página con su
+// <video><source> .mp4 inline, así que no hace falta navegador ni hover. Las
+// dependencias de Node (node:fs, node:path, node:https, dotenv,
+// node-html-parser) se importan dinámicamente dentro del handler porque el
+// filesystem solo existe en `astro dev` (Node), no en Cloudflare Workers.
 
 // --- Consolidación / normalización de videos ---
 const normStr = (s) => (s == null ? '' : String(s).replace(/&amp;/g, '&'));
@@ -116,22 +118,29 @@ const consolidateVideos = (videos) => {
     .sort((a, b) => (parseInt(b.postId, 10) || 0) - (parseInt(a.postId, 10) || 0));
 };
 
-export const GET = async ({ request }) => {
+export const GET = async (context) => {
+  const { request } = context;
   const url = new URL(request.url);
   const maxPagesParam = url.searchParams.get('maxPages') || '';
 
+  // Binding de KV (en dev lo provee el platformProxy de Miniflare). El resultado
+  // se persiste aquí además de en videos.json.
+  const kv = context.locals?.runtime?.env?.VS_C3_KV ?? null;
+  const KV_KEY = 'sheer:videos';
+
   // Carga diferida de dependencias Node-only (no se bundlean para Cloudflare).
-  // En producción (Cloudflare Workers) estos módulos no existen: el scraper SOLO
-  // funciona en local con `astro dev`. Si fallan, devolvemos un error legible por
-  // SSE en vez de un 500 crudo.
-  let chromium, fs, path, dotenv;
+  // En producción (Cloudflare Workers) node:https/node:fs no existen: el scraper
+  // SOLO funciona en local con `astro dev`. Si fallan, devolvemos un error
+  // legible por SSE en vez de un 500 crudo.
+  let https, fs, path, dotenv, parseHtml;
   try {
-    ({ chromium } = await import('playwright'));
+    https = (await import('node:https')).default;
     fs = (await import('node:fs')).default;
     path = (await import('node:path')).default;
     dotenv = (await import('dotenv')).default;
+    ({ parse: parseHtml } = await import('node-html-parser'));
   } catch (e) {
-    const msg = 'El scraper solo puede ejecutarse en local (astro dev). Cloudflare Workers no soporta Playwright ni el filesystem. Scrapea en local y sube los datos a KV.';
+    const msg = 'El scraper solo puede ejecutarse en local (astro dev). Cloudflare Workers no soporta el filesystem para leer cookies/escribir videos.json. Scrapea en local y sube los datos a KV.';
     const body =
       `event: log\ndata: ${JSON.stringify({ message: `[ERROR] ${msg}`, isError: true })}\n\n` +
       `event: status\ndata: ${JSON.stringify({ status: 'error', message: msg })}\n\n`;
@@ -168,23 +177,15 @@ export const GET = async ({ request }) => {
         }
       };
 
-      sendSSE('status', { status: 'started', message: 'Iniciando Playwright en el servidor Astro...' });
+      sendSSE('status', { status: 'started', message: 'Iniciando scraper SSR (fetch) en el servidor Astro...' });
 
-      let browser = null;
       let isAborted = false;
 
       // Handle client cancellation
-      request.signal.addEventListener('abort', async () => {
+      request.signal.addEventListener('abort', () => {
         isAborted = true;
         streamClosed = true;
-        console.log('Client aborted SSE connection. Closing Playwright...');
-        if (browser) {
-          try {
-            await browser.close();
-          } catch (e) {
-            console.error('Error closing browser on abort:', e);
-          }
-        }
+        console.log('Client aborted SSE connection. Stopping scraper...');
       });
 
       try {
@@ -199,353 +200,230 @@ export const GET = async ({ request }) => {
         let cookies = [];
         try {
           cookies = JSON.parse(fs.readFileSync(cookiesPath, 'utf8'));
-          cookies = cookies.map(cookie => {
-            const cleaned = { ...cookie };
-            if (cleaned.sameSite) {
-              const normalized = cleaned.sameSite.charAt(0).toUpperCase() + cleaned.sameSite.slice(1).toLowerCase();
-              if (['Strict', 'Lax', 'None'].includes(normalized)) {
-                cleaned.sameSite = normalized;
-              } else {
-                delete cleaned.sameSite;
-              }
-            }
-            return cleaned;
-          });
         } catch (err) {
           throw new Error(`Error al leer/procesar cookies.json: ${err.message}`);
         }
-
-        if (isAborted) return;
+        const cookieHeader = cookies
+          .filter((c) => c && c.name)
+          .map((c) => `${c.name}=${c.value}`)
+          .join('; ');
 
         sendSSE('log', { message: `Loaded ${cookies.length} cookies from ${cookiesPath}` });
 
-        sendSSE('log', { message: 'Launching browser...' });
-        browser = await chromium.launch({ headless: true });
+        const saveProgress = async (videosList) => {
+          // Consolidar: dedup por postId/contentId/title + normalización antes de guardar
+          const cleanList = consolidateVideos(videosList);
+          const payload = JSON.stringify(cleanList, null, 2);
 
-        const context = await browser.newContext({
-          viewport: { width: 1280, height: 720 }
-        });
-
-        // Bloquear descargas innecesarias (solo leemos el DOM, no reproducimos media)
-        await context.route('**/*', (route) => {
-          const t = route.request().resourceType();
-          return (t === 'image' || t === 'media' || t === 'font')
-            ? route.abort()
-            : route.continue();
-        });
-
-        if (isAborted) {
-          await browser.close();
-          return;
-        }
-
-        sendSSE('log', { message: 'Injecting session cookies...' });
-        await context.addCookies(cookies);
-
-        const page = await context.newPage();
-
-        const targetUrl = new URL(loginUrl);
-        targetUrl.searchParams.set('page', '1');
-
-        if (isAborted) {
-          await browser.close();
-          return;
-        }
-
-        sendSSE('log', { message: `Navigating to first page: ${targetUrl.toString()}` });
-        await page.goto(targetUrl.toString(), { waitUntil: 'load' });
-
-        if (isAborted) {
-          await browser.close();
-          return;
-        }
-
-        // Check if redirect to login occurred
-        const usernameInput = page.locator('input[type="email"], input[type="text"], input[name="email"], input[name="username"]').first();
-        try {
-          await usernameInput.waitFor({ state: 'visible', timeout: 4000 });
-          throw new Error('Redirigido a la página de login o campos visibles. Las cookies de sesión pueden haber expirado.');
-        } catch (e) {
-          // OK, no login inputs found
-          if (e.message.includes('Redirigido')) {
-            throw e;
-          }
-        }
-
-        // Get total pages
-        const totalPages = await page.evaluate(() => {
-          return window.APP_CONFIG?.pagination?.total_pages || 1;
-        });
-
-        sendSSE('log', { message: `Successfully authenticated. Total pages found: ${totalPages}` });
-
-        const envMaxPages = parseInt(maxPagesParam || process.env.MAX_PAGES, 10);
-        const maxPages = (!isNaN(envMaxPages) && envMaxPages > 0) ? Math.min(envMaxPages, totalPages) : totalPages;
-        if (maxPages !== totalPages) {
-          sendSSE('log', { message: `Limit applied: Scraping only up to ~${maxPages} pages worth of posts` });
-        }
-
-        const allVideos = [];
-
-        const saveProgress = (videosList) => {
+          // 1) Archivo (lo importan estáticamente las páginas de /sheer en build)
           try {
-            // Consolidar: dedup por postId/contentId/title + normalización antes de guardar
-            const cleanList = consolidateVideos(videosList);
-
             const apiJsonPath = path.resolve(process.cwd(), 'src/pages/api/sheer/videos.json');
             const apiJsonDir = path.dirname(apiJsonPath);
             if (!fs.existsSync(apiJsonDir)) {
               fs.mkdirSync(apiJsonDir, { recursive: true });
             }
-            fs.writeFileSync(apiJsonPath, JSON.stringify(cleanList, null, 2), 'utf8');
+            fs.writeFileSync(apiJsonPath, payload, 'utf8');
           } catch (e) {
-            console.error('Error in progressive saveProgress:', e);
+            console.error('Error guardando videos.json:', e);
+          }
+
+          // 2) KV (VS_C3_KV) — fuente persistente para runtime/producción
+          if (kv) {
+            try {
+              await kv.put(KV_KEY, payload);
+            } catch (e) {
+              console.error('Error guardando en VS_C3_KV:', e);
+            }
           }
         };
 
-        // El sitio usa scroll infinito: navegamos a page=1 y vamos haciendo scroll
-        // hasta el fondo para que carguen más posts. El antiguo loop de ?page=N se
-        // quedaba atascado en "1/40" porque este mismo scroll nunca dejaba de cargar
-        // posts y el while interno jamás terminaba la página 1.
-        const pageUrl = new URL(loginUrl);
-        pageUrl.searchParams.set('page', '1');
+        // --- HTTP GET con node:https. Usamos maxHeaderSize ampliado porque el
+        // servidor manda muchísimas cabeceras Set-Cookie y el fetch nativo
+        // (undici) revienta con HeadersOverflowError. ---
+        const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36';
+        const fetchPage = (pageNum) => new Promise((resolve, reject) => {
+          const u = new URL(loginUrl);
+          u.searchParams.set('page', String(pageNum));
+          const req = https.request({
+            hostname: u.hostname,
+            path: u.pathname + u.search,
+            method: 'GET',
+            maxHeaderSize: 256 * 1024,
+            headers: {
+              cookie: cookieHeader,
+              'user-agent': USER_AGENT,
+              accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+              'accept-language': 'en-US,en;q=0.9',
+            },
+          }, (res) => {
+            let data = '';
+            res.setEncoding('utf8');
+            res.on('data', (d) => { data += d; });
+            res.on('end', () => resolve({ status: res.statusCode, html: data }));
+          });
+          req.on('error', reject);
+          req.end();
+        });
 
-        sendSSE('log', { message: `Cargando catálogo (scroll infinito): ${pageUrl.toString()}` });
-        await page.goto(pageUrl.toString(), { waitUntil: 'load' });
+        // --- Parseo de una página SSR: extrae los videos del HTML con
+        // node-html-parser (mismos campos que extraía el evaluate de Playwright). ---
+        const parsePage = (html) => {
+          const root = parseHtml(html);
+          return root.querySelectorAll('article.post[data-post-id]').map((post) => {
+            const video = post.querySelector('video.js-video-source, video');
+            const sources = video
+              ? video.querySelectorAll('source')
+                  .map((s) => ({
+                    src: normStr(s.getAttribute('src')),
+                    size: s.getAttribute('size'),
+                    bitrate: s.getAttribute('bitrate'),
+                  }))
+                  .filter((s) => !isEmpty(s.src))
+              : [];
 
-        try {
-          await page.waitForSelector('article.post[data-post-id], video.js-video-source', { timeout: 8000 });
-        } catch (e) {
-          sendSSE('log', { message: `Warning: Post container selector not found within 8s.` });
+            const postId = post.getAttribute('data-post-id') || '';
+            const videoId = video ? (video.getAttribute('data-video-id') || '') : '';
+            const contentId = video ? (video.getAttribute('data-content-id') || '') : '';
+            const alias = video ? (video.getAttribute('data-alias') || '') : '';
+
+            // title: data-post-title es lo más fiable; fallback a selectores de texto
+            let title = post.querySelector('[data-post-title]')?.getAttribute('data-post-title') || '';
+            if (!title) {
+              title = (post.querySelector('.post-title, .title, .video-title, h3, h4, .post-text')?.text || '').trim();
+            }
+
+            // poster: en SSR vive en data-poster del <video>; fallback a la imagen
+            let poster = normStr(video?.getAttribute('data-poster') || video?.getAttribute('poster') || '');
+            if (!poster) {
+              const imgEl = post.querySelector('img.video-poster__img, img.video-poster__background');
+              if (imgEl) poster = normStr(imgEl.getAttribute('src') || imgEl.getAttribute('data-src') || '');
+            }
+            if (!poster) {
+              const bgEl = post.querySelector('.video-poster__background');
+              const m = (bgEl?.getAttribute('style') || '').match(/url\(['"]?([^'"]+)['"]?\)/);
+              if (m) poster = normStr(m[1]);
+            }
+
+            const models = post.querySelectorAll('.post__featuring-models__list-item')
+              .map((el) => ({ id: el.getAttribute('data-model-id') || '', name: el.text.trim() }))
+              .filter((mdl) => mdl.name);
+
+            const tags = post.querySelectorAll('.post-tags__item')
+              .map((li) => {
+                const link = li.querySelector('.post-tags__link');
+                const tagAlias = li.getAttribute('data-tag-alias') || '';
+                return {
+                  id: li.getAttribute('data-tag-id') || '',
+                  alias: tagAlias,
+                  name: link ? link.text.trim() : tagAlias,
+                };
+              })
+              .filter((t) => t.alias || t.name);
+
+            let views = null;
+            const viewsEl = post.querySelector('.post__counter--views strong');
+            if (viewsEl) {
+              const raw = (viewsEl.text || '').replace(/[^\d]/g, '');
+              if (raw) views = parseInt(raw, 10);
+            }
+
+            const date = (post.querySelector('.post__date-text, .post__date')?.text || '').trim();
+            const duration = (post.querySelector('.runtime-tag span, .runtime-tag')?.text || '').trim();
+
+            return {
+              postId,
+              videoId,
+              contentId,
+              alias,
+              title: title || `Video ${videoId || postId}`,
+              poster,
+              models,
+              tags,
+              views,
+              date,
+              duration,
+              sources,
+            };
+          });
+        };
+
+        if (isAborted) return;
+
+        sendSSE('log', { message: `Descargando primera página: ${loginUrl}?page=1` });
+        const first = await fetchPage(1);
+
+        if (first.status === 401 || first.status === 403 ||
+            /name=["']?password|type=["']?password/i.test(first.html)) {
+          throw new Error(`Sesión no válida (HTTP ${first.status} o página de login). Las cookies de sesión pueden haber expirado.`);
         }
 
-        if (isAborted) {
-          await browser.close();
-          return;
+        // total_pages viene en el JSON de APP_CONFIG:
+        // ...,"pagination":{"page":"1","total_pages":40}
+        const tpMatch = first.html.match(/"total_pages"\s*:\s*(\d+)/);
+        const totalPages = tpMatch ? parseInt(tpMatch[1], 10) : 1;
+        sendSSE('log', { message: `Autenticado correctamente. Total de páginas: ${totalPages}` });
+
+        const envMaxPages = parseInt(maxPagesParam || process.env.MAX_PAGES, 10);
+        const maxPages = (!isNaN(envMaxPages) && envMaxPages > 0) ? Math.min(envMaxPages, totalPages) : totalPages;
+        if (maxPages !== totalPages) {
+          sendSSE('log', { message: `Límite aplicado: scrapeando solo ${maxPages} de ${totalPages} páginas` });
         }
 
-        const posts = page.locator('article.post[data-post-id]');
-
-        // Estimación de posts por "página" para la barra de progreso
-        const initialCount = await posts.count();
-        const perPage = initialCount > 0 ? initialCount : 10;
-        // Objetivo de posts a cargar (respeta el límite maxPages si se pidió)
-        const targetPosts = perPage * maxPages;
-        let estimatedTotal = targetPosts;
-        const limitApplied = maxPages < totalPages;
-        // Tope duro de seguridad: nunca debe quedar en bucle infinito
-        const HARD_CAP = targetPosts > 0 ? targetPosts + perPage * 2 : 5000;
-
-        sendSSE('log', { message: `Posts iniciales: ${initialCount}. Objetivo estimado: ${targetPosts}` });
-
+        const allVideos = [];
         const seenKeys = new Set();
-        let processedIndex = 0;
-        let noGrowthTicks = 0;
-        const MAX_NO_GROWTH = 4;
 
-        while (true) {
-          if (isAborted) {
-            await browser.close();
-            return;
+        const ingest = (videos) => {
+          for (const v of videos) {
+            if (!v.sources || v.sources.length === 0) continue;
+            const key = v.postId || v.videoId;
+            if (key && seenKeys.has(key)) continue;
+            if (key) seenKeys.add(key);
+            allVideos.push(v);
           }
+        };
 
-          const currentCount = await posts.count();
-          const limit = Math.min(currentCount, HARD_CAP);
+        // Página 1 ya descargada
+        ingest(parsePage(first.html));
+        sendSSE('videos_found', { count: allVideos.length });
+        sendSSE('progress', { current: 1, total: maxPages });
 
-          // Procesar (hover + extraer) los posts nuevos cargados hasta ahora
-          for (let i = processedIndex; i < limit; i++) {
-            if (isAborted) {
-              await browser.close();
-              return;
-            }
-            const post = posts.nth(i);
+        // Resto de páginas con concurrencia limitada (pool de workers sobre una cola)
+        const CONCURRENCY = 4;
+        let nextPage = 2;
+        let completedPages = 1;
+
+        const worker = async () => {
+          while (!isAborted) {
+            const pageNum = nextPage++;
+            if (pageNum > maxPages) return;
             try {
-              await post.scrollIntoViewIfNeeded({ timeout: 2000 });
-              await post.hover({ timeout: 2000 });
-              // Esperar al evento real (que se inyecte el <source>) en vez de un fijo de 400ms
-              await post.locator('video source').first()
-                .waitFor({ state: 'attached', timeout: 1500 }).catch(() => {});
-
-              const videoLocator = post.locator('video.js-video-source, video');
-              const videoCount = await videoLocator.count().catch(() => 0);
-              if (videoCount > 0) {
-                const videoData = await videoLocator.first().evaluate((video) => {
-                  const videoId = video.getAttribute('data-video-id');
-                  const contentId = video.getAttribute('data-content-id');
-                  const alias = video.getAttribute('data-alias');
-
-                  const sources = Array.from(video.querySelectorAll('source')).map(source => ({
-                    src: source.getAttribute('src'),
-                    size: source.getAttribute('size'),
-                    bitrate: source.getAttribute('bitrate')
-                  }));
-
-                  const postContainer = video.closest('article.post[data-post-id]');
-                  const postId = postContainer ? postContainer.getAttribute('data-post-id') : '';
-                  let title = '';
-                  if (postContainer) {
-                    // Try data attribute first (most reliable)
-                    const dislikeBtn = postContainer.querySelector('[data-post-title]');
-                    if (dislikeBtn) {
-                      title = dislikeBtn.getAttribute('data-post-title');
-                    }
-                    // Fallback to text selectors
-                    if (!title) {
-                      const titleEl = postContainer.querySelector('.post-title, .title, .video-title, h3, h4, .post-text');
-                      if (titleEl) {
-                        title = titleEl.textContent.trim();
-                      }
-                    }
-                  }
-
-                  let poster = video.getAttribute('poster') || '';
-                  if (!poster && postContainer) {
-                    const imgEl = postContainer.querySelector('img.video-poster__img, img.video-poster__background');
-                    if (imgEl) {
-                      poster = imgEl.getAttribute('src') || imgEl.getAttribute('data-src') || '';
-                    }
-                    if (!poster) {
-                      const bgEl = postContainer.querySelector('.video-poster__background');
-                      if (bgEl) {
-                        const bgStyle = bgEl.getAttribute('style') || '';
-                        const match = bgStyle.match(/url\(['"]?([^'"]+)['"]?\)/);
-                        if (match) {
-                          poster = match[1];
-                        }
-                      }
-                    }
-                  }
-                  if (poster) {
-                    poster = poster.replace(/&amp;/g, '&');
-                  }
-
-                  // Extract featuring models (actrices)
-                  const models = [];
-                  if (postContainer) {
-                    postContainer.querySelectorAll('.post__featuring-models__list-item').forEach((el) => {
-                      const name = (el.textContent || '').trim();
-                      const id = el.getAttribute('data-model-id') || '';
-                      if (name) models.push({ id, name });
-                    });
-                  }
-
-                  // Extract tags (categorías)
-                  const tags = [];
-                  if (postContainer) {
-                    postContainer.querySelectorAll('.post-tags__item').forEach((li) => {
-                      const alias = li.getAttribute('data-tag-alias') || '';
-                      const id = li.getAttribute('data-tag-id') || '';
-                      const link = li.querySelector('.post-tags__link');
-                      const name = link ? link.textContent.trim() : alias;
-                      if (alias || name) tags.push({ id, alias, name });
-                    });
-                  }
-
-                  // Extract views count
-                  let views = null;
-                  if (postContainer) {
-                    const viewsEl = postContainer.querySelector('.post__counter--views strong');
-                    if (viewsEl) {
-                      const raw = (viewsEl.textContent || '').replace(/[^\d]/g, '');
-                      if (raw) views = parseInt(raw, 10);
-                    }
-                  }
-
-                  // Extract publish date (e.g. "Jan 18, 2023")
-                  let date = '';
-                  if (postContainer) {
-                    const dateEl = postContainer.querySelector('.post__date-text, .post__date');
-                    if (dateEl) date = (dateEl.textContent || '').trim();
-                  }
-
-                  // Extract runtime / duration (e.g. "23:01")
-                  let duration = '';
-                  if (postContainer) {
-                    const durationEl = postContainer.querySelector('.runtime-tag span, .runtime-tag');
-                    if (durationEl) duration = (durationEl.textContent || '').trim();
-                  }
-
-                  return {
-                    postId,
-                    videoId,
-                    contentId,
-                    alias,
-                    title: title || `Video ${videoId || postId}`,
-                    poster,
-                    models,
-                    tags,
-                    views,
-                    date,
-                    duration,
-                    sources
-                  };
-                }).catch(() => null);
-
-                if (videoData && videoData.sources && videoData.sources.length > 0) {
-                  const key = videoData.postId || videoData.videoId || `idx:${i}`;
-                  if (!seenKeys.has(key)) {
-                    seenKeys.add(key);
-                    allVideos.push(videoData);
-                    sendSSE('log', { message: `Extracted: "${videoData.title}" (Post ID: ${videoData.postId})` });
-                    sendSSE('videos_found', { count: allVideos.length });
-                    // Guardado progresivo cada 50 videos nuevos
-                    if (allVideos.length % 50 === 0) saveProgress(allVideos);
-                  }
-                }
-              } else {
-                sendSSE('log', { message: `Hovered post index ${i} - No video tag found` });
-              }
+              const { html } = await fetchPage(pageNum);
+              const videos = parsePage(html);
+              ingest(videos);
+              sendSSE('log', { message: `Página ${pageNum}/${maxPages}: ${videos.length} posts (total ${allVideos.length})` });
             } catch (e) {
-              sendSSE('log', { message: `Error processing post index ${i}: ${e.message}` });
+              sendSSE('log', { message: `Error en página ${pageNum}: ${e.message}`, isError: true });
+            } finally {
+              completedPages++;
+              sendSSE('videos_found', { count: allVideos.length });
+              sendSSE('progress', { current: completedPages, total: maxPages });
+              // Guardado progresivo cada 5 páginas
+              if (completedPages % 5 === 0) await saveProgress(allVideos);
             }
           }
+        };
 
-          processedIndex = limit;
-          if (estimatedTotal < currentCount) estimatedTotal = currentCount;
-          sendSSE('progress', { current: processedIndex, total: estimatedTotal });
+        const poolSize = Math.min(CONCURRENCY, Math.max(0, maxPages - 1));
+        await Promise.all(Array.from({ length: poolSize }, worker));
 
-          // ¿Alcanzamos el tope de seguridad o el límite pedido por maxPages?
-          if (processedIndex >= HARD_CAP) {
-            sendSSE('log', { message: `Tope de seguridad alcanzado (${processedIndex} posts). Deteniendo.` });
-            break;
-          }
-          if (limitApplied && processedIndex >= targetPosts) {
-            sendSSE('log', { message: `Límite maxPages alcanzado: ${processedIndex} posts (~${maxPages} páginas).` });
-            break;
-          }
+        if (isAborted) return;
 
-          // Scroll hasta el fondo para disparar la carga de más posts
-          await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-          await page.waitForTimeout(800);
-
-          const newCount = await posts.count();
-          if (newCount === currentCount) {
-            noGrowthTicks++;
-            sendSSE('log', { message: `Sin posts nuevos tras scroll (${noGrowthTicks}/${MAX_NO_GROWTH}). Cargados: ${newCount}` });
-            if (noGrowthTicks >= MAX_NO_GROWTH) {
-              sendSSE('log', { message: `No hay más contenido para cargar. Fin del scroll.` });
-              break;
-            }
-          } else {
-            noGrowthTicks = 0;
-          }
-        }
-
-        if (isAborted) {
-          await browser.close();
-          return;
-        }
-
-        sendSSE('log', { message: `Extraction complete. Total videos collected: ${allVideos.length}` });
+        sendSSE('log', { message: `Extracción completa. Total de videos: ${allVideos.length}` });
         sendSSE('complete', { total: allVideos.length });
 
-        // Save detailed JSON one final time to be safe
-        saveProgress(allVideos);
-        sendSSE('log', { message: `Successfully saved all metadata files.` });
-
-        // Finished browser
-        await browser.close();
-        browser = null;
+        // Guardado final
+        await saveProgress(allVideos);
+        sendSSE('log', { message: `Metadata guardada en videos.json${kv ? ' y en VS_C3_KV' : ' (VS_C3_KV no disponible)'}.` });
 
         sendSSE('status', { status: 'finished', code: 0, message: 'Scraping completado con éxito' });
         if (!streamClosed) {
@@ -558,11 +436,6 @@ export const GET = async ({ request }) => {
         sendSSE('log', { message: `[ERROR] ${err.message}`, isError: true });
         sendSSE('status', { status: 'error', message: err.message });
 
-        if (browser) {
-          try {
-            await browser.close();
-          } catch (e) {}
-        }
         if (!streamClosed) {
           streamClosed = true;
           try {
