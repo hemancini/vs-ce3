@@ -310,4 +310,156 @@ export async function scrapeSheerPage({ alias = DEFAULT_ALIAS, page = 1, env } =
   return { videos, totalPages, page, alias };
 }
 
+// ── Suscripciones ────────────────────────────────────────────────────────────
+// Parsea la página /subscriptions (SSR): una tarjeta por creador suscrito, cada
+// una con su cabecera (nombre, alias, avatar, estado de suscripción) y una lista
+// de posts de vista previa (poster + clip .mp4 al hover + enlace al post).
+function parseSubscriptions(html) {
+  const root = parse(html);
+  return root.querySelectorAll('.js-subscription-account').map((acc) => {
+    const header = acc.querySelector('.subscription-accounts__header');
+    const alias = header?.getAttribute('data-dialog-alias') || '';
+    const name = (acc.querySelector('.name')?.text || '').trim();
+    const headshot = normStr(acc.querySelector('.avatar img')?.getAttribute('src') || '');
+
+    // Botón de suscripción: estado ("Suscrito hasta …") y poster de portada.
+    const subBtn = acc.querySelector('.js-subscribe-button');
+    const status = (acc.querySelector('.btn-loading__text')?.text || '').trim();
+    const poster = normStr(subBtn?.getAttribute('data-poster') || '');
+
+    const posts = acc
+      .querySelectorAll('.js-preview-post')
+      .map((post) => {
+        const link = post.querySelector('.js-post-link, a');
+        const img = post.querySelector('.post__image img');
+        return {
+          postId: link?.getAttribute('data-post-id') || '',
+          url: normStr(link?.getAttribute('href') || ''),
+          title: (post.querySelector('.post__title')?.text || '').trim(),
+          // data-lazy trae el poster real; src suele ser un placeholder bloqueado.
+          poster: normStr(img?.getAttribute('data-lazy') || img?.getAttribute('src') || ''),
+          preview: normStr(post.getAttribute('data-preview') || ''),
+        };
+      })
+      .filter((p) => p.postId || p.title);
+
+    return { alias, name, headshot, poster, status, posts };
+  });
+}
+
+/**
+ * Scrapea la página de suscripciones activas del usuario (/subscriptions).
+ * Devuelve un creador por suscripción con sus posts de vista previa.
+ *
+ * @param {object} [opts]
+ * @param {any}    [opts.env]  runtime env (para VS_C3_KV)
+ * @returns {Promise<{ accounts: any[] }>}
+ */
+export async function scrapeSheerSubscriptions({ env } = {}) {
+  const cookieHeader = await resolveCookieHeader(env);
+  if (!cookieHeader) {
+    throw new Error('No hay cookies de Sheer (ni en VS_C3_KV[sheer:cookies] ni en config/cookies.json).');
+  }
+
+  const html = await fetchHtml(`${BASE_URL}/subscriptions`, cookieHeader);
+  if (/name=["']?password|type=["']?password/i.test(html) && !html.includes('js-subscription-account')) {
+    throw new Error('Sesión no válida o página de login — las cookies pueden haber expirado.');
+  }
+
+  return { accounts: parseSubscriptions(html) };
+}
+
+// ── Membresías (feed) ────────────────────────────────────────────────────────
+// La página /memberships (requiere cookie de sesión: sin ella muestra el
+// "Discover Memberships" público) agrega en un único feed los videos full de
+// TODOS los creadores a los que estás suscrito. Su markup es idéntico al del
+// catálogo por creador (article.post[data-post-id] con <video><source>), así que
+// reutilizamos parsePage()/detectTotalPages(); cada post trae su propio
+// data-alias. Soporta paginación ?page=N como el catálogo.
+const MEMBERSHIP_PATH = 'memberships';
+
+function buildMembershipUrl(page) {
+  const u = new URL(`${BASE_URL}/${MEMBERSHIP_PATH}`);
+  u.searchParams.set('page', String(page));
+  return u.toString();
+}
+
+// Dedup compartido: descarta posts sin fuentes y duplicados por postId/videoId.
+function dedupVideos(all) {
+  const seen = new Set();
+  return all.filter((v) => {
+    if (!v.sources || v.sources.length === 0) return false;
+    const key = v.postId || v.videoId;
+    if (key && seen.has(key)) return false;
+    if (key) seen.add(key);
+    return true;
+  });
+}
+
+function isLoginHtml(html) {
+  return /name=["']?password|type=["']?password/i.test(html) && !html.includes('data-post-id');
+}
+
+/**
+ * Scrapea N páginas del feed de membresías (/memberships) y devuelve los
+ * videos (deduplicados) más el total de páginas detectado.
+ *
+ * @param {object} [opts]
+ * @param {number} [opts.maxPages]     páginas a recorrer (default 1)
+ * @param {number} [opts.concurrency]  fetches en paralelo (default 4)
+ * @param {any}    [opts.env]          runtime env (para VS_C3_KV)
+ * @returns {Promise<{ videos: any[], totalPages: number }>}
+ */
+export async function scrapeSheerMemberships({ maxPages = 1, concurrency = 4, env } = {}) {
+  const cookieHeader = await resolveCookieHeader(env);
+  if (!cookieHeader) {
+    throw new Error('No hay cookies de Sheer (ni en VS_C3_KV[sheer:cookies] ni en config/cookies.json).');
+  }
+
+  const firstHtml = await fetchHtml(buildMembershipUrl(1), cookieHeader);
+  if (isLoginHtml(firstHtml)) {
+    throw new Error('Sesión no válida o página de login — las cookies pueden haber expirado.');
+  }
+
+  const totalPages = detectTotalPages(firstHtml);
+  const pages = Math.max(1, Math.min(maxPages || 1, totalPages));
+  const all = parsePage(firstHtml);
+
+  if (pages > 1) {
+    const rest = Array.from({ length: pages - 1 }, (_, i) => i + 2);
+    await runPool(rest, concurrency, async (p) => {
+      try {
+        all.push(...parsePage(await fetchHtml(buildMembershipUrl(p), cookieHeader)));
+      } catch {
+        // Página fallida: la saltamos sin abortar todo el scrape.
+      }
+    });
+  }
+
+  return { videos: dedupVideos(all), totalPages };
+}
+
+/**
+ * Scrapea UNA sola página del feed de membresías. Pensado para el scroll
+ * infinito: el cliente pide ?page=N y recibe solo los videos de esa página.
+ *
+ * @param {object} [opts]
+ * @param {number} [opts.page]  número de página (default 1)
+ * @param {any}    [opts.env]   runtime env (para VS_C3_KV)
+ * @returns {Promise<{ videos: any[], totalPages: number, page: number }>}
+ */
+export async function scrapeSheerMembershipsPage({ page = 1, env } = {}) {
+  const cookieHeader = await resolveCookieHeader(env);
+  if (!cookieHeader) {
+    throw new Error('No hay cookies de Sheer (ni en VS_C3_KV[sheer:cookies] ni en config/cookies.json).');
+  }
+
+  const html = await fetchHtml(buildMembershipUrl(page), cookieHeader);
+  if (page === 1 && isLoginHtml(html)) {
+    throw new Error('Sesión no válida o página de login — las cookies pueden haber expirado.');
+  }
+
+  return { videos: dedupVideos(parsePage(html)), totalPages: detectTotalPages(html), page };
+}
+
 export { DEFAULT_ALIAS };

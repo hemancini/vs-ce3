@@ -6,118 +6,218 @@ interface Props {
 }
 const { video } = Astro.props;
 
-const cleanTitle = (title: string) => title || 'Video sin título';
+const cleanTitle = (title: string) => title || "Video sin título";
 
 const sizes = video.sources?.map((s: any) => s.size).filter(Boolean) || [];
 const sortedSizes = sizes.map(Number).sort((a: number, b: number) => b - a);
-const maxRes = sortedSizes[0] ? sortedSizes[0] + 'p' : 'SD';
 const maxResNum = sortedSizes[0] || 0;
 
+// Preview de hover: usamos la fuente de menor resolución para no descargar el
+// video completo en alta calidad. El <video> sólo carga (preload="none") y se
+// reproduce al pasar el cursor; el script de la página cablea play/pause.
+const previewSrc =
+  [...(video.sources || [])]
+    .filter((s: any) => s.src)
+    .sort((a: any, b: any) => (Number(a.size) || 0) - (Number(b.size) || 0))[0]
+    ?.src || "";
+
 const modelNames = (video.models || []).map((m: any) => m.name).filter(Boolean);
-const tagAliases = (video.tags || []).map((t: any) => t.alias || t.name).filter(Boolean);
+const tagAliases = (video.tags || [])
+  .map((t: any) => t.alias || t.name)
+  .filter(Boolean);
 const tagNames = (video.tags || []).map((t: any) => t.name).filter(Boolean);
 const tagList = (video.tags || [])
   .map((t: any) => ({ name: t.name, alias: t.alias || t.name }))
   .filter((t: any) => t.name);
-const searchBlob = [video.title, ...modelNames, ...tagNames].join(' ').toLowerCase();
+const searchBlob = [video.title, ...modelNames, ...tagNames]
+  .join(" ")
+  .toLowerCase();
 
 const views = video.views == null ? null : Number(video.views);
-const dateStr = video.date || '';
-const duration = video.duration || '';
+const dateStr = video.date || "";
+const duration = video.duration || "";
 const dateMs = dateStr ? Date.parse(dateStr) || 0 : 0;
+
+// Datos que necesita el player. Ya no hay catálogo estático: al hacer clic la
+// tarjeta los guarda en sessionStorage y /sheer/play los lee desde ahí.
+const playerData = JSON.stringify({
+  postId: video.postId,
+  videoId: video.videoId,
+  contentId: video.contentId,
+  alias: video.alias,
+  title: video.title,
+  poster: video.poster,
+  duration: video.duration,
+  sources: video.sources || [],
+});
 ---
 
 <div
   class="video-card group"
   data-title={video.title}
   data-id={video.postId}
+  data-alias={video.alias}
   data-search={searchBlob}
-  data-models={modelNames.join('|').toLowerCase()}
-  data-tags={tagAliases.join('|').toLowerCase()}
+  data-models={modelNames.join("|").toLowerCase()}
+  data-tags={tagAliases.join("|").toLowerCase()}
   data-res={maxResNum}
   data-views={views ?? 0}
   data-date={dateMs}
-  onclick={`window.location.href='/sheer/play?postId=${video.postId}'`}
+  data-player={playerData}
+  onclick={`(window.sheerActivateCard||function(c){try{localStorage.setItem('sheer:player:'+c.dataset.id,c.dataset.player)}catch(e){};if(window.openSheerModal){window.openSheerModal(c.dataset.id)}else{window.location.href='/sheer/play?postId='+c.dataset.id}})(this)`}
 >
   <div class="relative aspect-video w-full overflow-hidden bg-black">
-    <div class="absolute right-3 top-3 rounded-md border border-line bg-[rgba(8,5,15,0.75)] px-2.5 py-1 text-xs font-bold uppercase tracking-[0.5px] text-accent backdrop-blur-md">{maxRes}</div>
+    <a
+      href={`/sheer/play?postId=${video.postId}`}
+      target="_blank"
+      rel="noopener"
+      title="Abrir en una nueva pestaña"
+      onclick={`event.stopPropagation();try{const c=this.closest('.video-card');localStorage.setItem('sheer:player:'+c.dataset.id,c.dataset.player)}catch(e){}`}
+      class="absolute right-3 top-3 z-20 flex items-center justify-center rounded-md border border-line bg-[rgba(8,5,15,0.75)] px-2.5 py-1.5 text-xs text-accent backdrop-blur-md transition-colors hover:border-line-hover hover:text-ink"
+    >
+      <i class="fa-solid fa-up-right-from-square"></i>
+    </a>
 
-    {duration && (
-      <div class="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-md border border-line bg-[rgba(8,5,15,0.75)] px-2.5 py-1 text-xs font-bold tracking-[0.5px] text-ink backdrop-blur-md">
-        <i class="fa-solid fa-clock"></i> {duration}
-      </div>
-    )}
+    {
+      duration && (
+        <div class="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-md border border-line bg-[rgba(8,5,15,0.75)] px-2.5 py-1 text-xs font-bold tracking-[0.5px] text-ink backdrop-blur-md">
+          <i class="fa-solid fa-clock" /> {duration}
+        </div>
+      )
+    }
 
-    {video.poster ? (
-      <img
-        src={video.poster}
-        alt={cleanTitle(video.title)}
-        class="h-full w-full object-cover transition-all duration-300 group-hover:scale-105"
-        loading="lazy"
-      />
-    ) : (
-      <div class="flex h-full w-full flex-col items-center justify-center gap-2 [background:linear-gradient(135deg,#18122B_0%,#0c0817_100%)]">
-        <i class="fa-solid fa-clapperboard text-[2.5rem] text-white/10"></i>
-        <span class="text-[0.75rem] font-bold tracking-[1px] text-muted">SHEER CONTENT</span>
-      </div>
-    )}
+    {
+      video.poster ? (
+        <img
+          src={video.poster}
+          alt={cleanTitle(video.title)}
+          class="h-full w-full object-cover transition-all duration-300 group-hover:scale-105"
+          loading="lazy"
+        />
+      ) : (
+        <div class="flex h-full w-full flex-col items-center justify-center gap-2 [background:linear-gradient(135deg,#18122B_0%,#0c0817_100%)]">
+          <i class="fa-solid fa-clapperboard text-[2.5rem] text-white/10" />
+          <span class="text-[0.75rem] font-bold tracking-[1px] text-muted">
+            SHEER CONTENT
+          </span>
+        </div>
+      )
+    }
 
-    <div class="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-all duration-300 group-hover:opacity-100">
-      <div class="flex h-[54px] w-[54px] scale-[0.8] items-center justify-center rounded-full text-[1.3rem] text-white shadow-[0_4px_15px_rgba(138,59,205,0.4)] transition-all duration-300 [background:var(--primary-gradient)] group-hover:scale-100">
+    {
+      previewSrc && (
+        <video
+          class="absolute inset-0 h-full w-full object-cover opacity-0 transition-opacity duration-300 group-hover:opacity-100"
+          src={previewSrc}
+          muted
+          loop
+          playsinline
+          preload="none"
+          data-preview
+        />
+      )
+    }
+
+    <div
+      class="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-all duration-300 group-hover:opacity-100"
+    >
+      <div
+        class="flex h-[54px] w-[54px] scale-[0.8] items-center justify-center rounded-full text-[1.3rem] text-white shadow-[0_4px_15px_rgba(138,59,205,0.4)] transition-all duration-300 [background:var(--primary-gradient)] group-hover:scale-100"
+      >
         <i class="fa-solid fa-play"></i>
       </div>
     </div>
   </div>
 
   <div class="flex grow flex-col p-5">
-    <h2 class="mb-3 line-clamp-2 h-[2.8rem] text-base font-semibold leading-snug text-ink" title={video.title}>{cleanTitle(video.title)}</h2>
+    <h2
+      class="mb-3 line-clamp-2 h-[2.8rem] text-base font-semibold leading-snug text-ink"
+      title={video.title}
+    >
+      {cleanTitle(video.title)}
+    </h2>
 
-    {modelNames.length > 0 && (
-      <div class="mb-2.5 flex items-center gap-1.5 truncate text-[0.8rem] font-semibold text-accent" title={modelNames.join(', ')}>
-        <i class="fa-solid fa-user-tag"></i>
-        <span class="truncate">
-          {modelNames.map((name: string, i: number) => (
-            <>
-              {i > 0 && ', '}
-              <span
-                class="actress-link cursor-pointer hover:underline"
-                data-actress={name.toLowerCase()}
-                title={`Filtrar por ${name}`}
-              >{name}</span>
-            </>
+    {
+      modelNames.length > 0 && (
+        <div
+          class="mb-2.5 flex items-center gap-1.5 truncate text-[0.8rem] font-semibold text-accent"
+          title={modelNames.join(", ")}
+        >
+          <i class="fa-solid fa-user-tag" />
+          <span class="truncate">
+            {modelNames.map((name: string, i: number) => (
+              <>
+                {i > 0 && ", "}
+                <span
+                  class="actress-link cursor-pointer hover:underline"
+                  data-actress={name.toLowerCase()}
+                  title={`Filtrar por ${name}`}
+                >
+                  {name}
+                </span>
+              </>
+            ))}
+          </span>
+        </div>
+      )
+    }
+
+    {
+      tagList.length > 0 && (
+        <div class="mb-3.5 flex flex-wrap gap-1.5">
+          {tagList.slice(0, 3).map((t: any) => (
+            <span
+              class="cat-tag cursor-pointer transition-colors hover:border-line-hover hover:text-accent"
+              data-cat={t.alias}
+              title={`Filtrar por ${t.name}`}
+            >
+              {t.name}
+            </span>
           ))}
-        </span>
-      </div>
-    )}
-
-    {tagList.length > 0 && (
-      <div class="mb-3.5 flex flex-wrap gap-1.5">
-        {tagList.slice(0, 3).map((t: any) => (
-          <span class="cat-tag cursor-pointer transition-colors hover:border-line-hover hover:text-accent" data-cat={t.alias} title={`Filtrar por ${t.name}`}>{t.name}</span>
-        ))}
-        {tagList.length > 3 && <span class="cat-tag cat-tag--more">+{tagList.length - 3}</span>}
-      </div>
-    )}
-
-    <div class="mt-auto">
-      {(dateStr || views != null) && (
-        <div class="mb-2 flex items-center gap-3 text-[0.75rem] text-muted">
-          {dateStr && (
-            <span class="flex items-center gap-1.5"><i class="fa-solid fa-calendar-day"></i> {dateStr}</span>
-          )}
-          {views != null && (
-            <span class="flex items-center gap-1.5"><i class="fa-solid fa-eye"></i> {views.toLocaleString('es')} views</span>
+          {tagList.length > 3 && (
+            <span class="cat-tag cat-tag--more">+{tagList.length - 3}</span>
           )}
         </div>
-      )}
+      )
+    }
+
+    <div class="mt-auto">
+      {
+        (dateStr || views != null) && (
+          <div class="mb-2 flex items-center gap-3 text-[0.75rem] text-muted">
+            {dateStr && (
+              <span class="flex items-center gap-1.5">
+                <i class="fa-solid fa-calendar-day" /> {dateStr}
+              </span>
+            )}
+            {views != null && (
+              <span class="flex items-center gap-1.5">
+                <i class="fa-solid fa-eye" /> {views.toLocaleString("es")} views
+              </span>
+            )}
+          </div>
+        )
+      }
 
       <div class="flex items-center justify-between text-[0.8rem] text-muted">
         <span>ID: {video.postId}</span>
         <div class="flex gap-1.5">
-          {sortedSizes.slice(0, 3).map((size: number) => (
-            <span class={`res-tag ${size === sortedSizes[0] ? 'res-tag--highlight' : ''}`}>{size}p</span>
-          ))}
-          {sortedSizes.length > 3 && <span class="res-tag">+{sortedSizes.length - 3}</span>}
+          {
+            sortedSizes
+              .slice(0, 3)
+              .map((size: number) => (
+                <span
+                  class={`res-tag ${size === sortedSizes[0] ? "res-tag--highlight" : ""}`}
+                >
+                  {size}p
+                </span>
+              ))
+          }
+          {
+            sortedSizes.length > 3 && (
+              <span class="res-tag">+{sortedSizes.length - 3}</span>
+            )
+          }
         </div>
       </div>
     </div>

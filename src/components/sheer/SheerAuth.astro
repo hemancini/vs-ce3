@@ -1,68 +1,110 @@
 ---
-// Sección de autenticación de Sheer. Dos métodos para conseguir la cookie de
-// sesión: (1) pegar cookies a mano, (2) iniciar sesión con email/contraseña. En
-// ambos casos se guardan en KV (sheer:cookies) + config/cookies.json (dev). Un
-// botón "Validar" comprueba si la sesión guardada sigue activa. Todo el trabajo
-// pesado vive en /api/sheer/auth; aquí solo está la UI + el fetch del cliente.
+// Autenticación de Sheer como avatar con menú desplegable y modal.
+//
+//  ┌── Avatar circular con indicador flotante de estado (verde/rojo/cargando).
+//  │   Al hacer clic se despliega un menú con las opciones de sesión.
+//  └── Cada opción abre un modal:
+//        · Cookies          → pegar cookies a mano.
+//        · Email y contraseña → login con credenciales.
+//        · Validar sesión   → comprueba la sesión guardada.
+//
+// Dos métodos para conseguir la cookie de sesión: (1) pegar cookies a mano,
+// (2) iniciar sesión con email/contraseña. En ambos casos se guardan en KV
+// (sheer:cookies) + config/cookies.json (dev). Todo el trabajo pesado vive en
+// /api/sheer/auth; aquí solo está la UI + el fetch del cliente.
 ---
 
-<section
-  id="auth-panel"
-  class="mb-8 overflow-hidden rounded-2xl border border-line bg-card"
->
+<div id="auth-root" class="relative inline-block">
+  {/* ── Avatar + indicador flotante de estado ───────────────────────────── */}
   <button
     type="button"
-    id="auth-toggle"
-    class="flex w-full items-center justify-between gap-3 px-4 py-3.5 text-left transition-colors hover:bg-card-hover sm:px-5"
+    id="auth-avatar"
+    class="group relative flex h-11 w-11 items-center justify-center rounded-full border border-line bg-[rgba(8,5,15,0.6)] text-ink transition-all duration-300 hover:border-line-hover hover:bg-card-hover"
+    aria-haspopup="true"
     aria-expanded="false"
+    title="Autenticación"
   >
-    <span class="flex items-center gap-2.5 text-[0.95rem] font-semibold text-ink">
-      <i class="fa-solid fa-key text-accent"></i> Autenticación
-    </span>
-    <span class="flex items-center gap-3">
-      <span
-        id="auth-badge"
-        class="inline-flex items-center gap-1.5 rounded-full border border-line bg-[rgba(8,5,15,0.6)] px-3 py-1 text-[0.78rem] font-semibold text-muted"
-      >
-        <i class="fa-solid fa-circle-notch fa-spin"></i> Comprobando…
-      </span>
-      <i id="auth-chevron" class="fa-solid fa-chevron-down text-muted transition-transform"></i>
+    <i class="fa-solid fa-user text-[1.05rem]"></i>
+    {/* Punto de estado flotante */}
+    <span
+      id="auth-status-dot"
+      class="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full border-2 border-card bg-muted"
+      title="Comprobando…"
+    >
+      <span id="auth-status-ping" class="absolute inline-flex h-full w-full rounded-full bg-muted opacity-60"></span>
     </span>
   </button>
 
-  <div id="auth-body" class="hidden border-t border-line px-4 py-5 sm:px-5">
-    {/* Selector de método */}
-    <div class="mb-5 inline-flex rounded-[10px] border border-line bg-[rgba(8,5,15,0.6)] p-1">
-      <button type="button" data-tab="cookies" class="auth-tab rounded-md px-3.5 py-1.5 text-[0.85rem] font-semibold text-muted transition-all">
-        <i class="fa-solid fa-cookie-bite"></i> Cookies
+  {/* ── Menú desplegable ─────────────────────────────────────────────────── */}
+  <div
+    id="auth-menu"
+    class="absolute right-0 top-[calc(100%+0.5rem)] z-50 hidden w-60 max-w-[calc(100vw-2rem)] origin-top-right overflow-hidden rounded-xl border border-line bg-[#15101f] shadow-[0_12px_40px_rgba(0,0,0,0.5)] backdrop-blur-xl"
+    role="menu"
+  >
+    <div class="border-b border-line px-4 py-3">
+      <p class="text-[0.7rem] font-semibold uppercase tracking-[0.5px] text-muted">Sesión Sheer</p>
+      <p id="auth-menu-status" class="mt-0.5 flex items-center gap-1.5 text-[0.85rem] font-semibold text-muted">
+        <i class="fa-solid fa-circle-notch fa-spin"></i> Comprobando…
+      </p>
+    </div>
+    <div class="p-1.5">
+      <button type="button" data-open="cookies" class="auth-menu-item flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-[0.88rem] text-ink transition-colors hover:bg-card-hover" role="menuitem">
+        <i class="fa-solid fa-cookie-bite w-4 text-accent"></i> Pegar cookies
       </button>
-      <button type="button" data-tab="login" class="auth-tab rounded-md px-3.5 py-1.5 text-[0.85rem] font-semibold text-muted transition-all">
-        <i class="fa-solid fa-right-to-bracket"></i> Email y contraseña
+      <button type="button" data-open="login" class="auth-menu-item flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-[0.88rem] text-ink transition-colors hover:bg-card-hover" role="menuitem">
+        <i class="fa-solid fa-right-to-bracket w-4 text-accent"></i> Email y contraseña
+      </button>
+      <button type="button" data-open="validate" class="auth-menu-item flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-[0.88rem] text-ink transition-colors hover:bg-card-hover" role="menuitem">
+        <i class="fa-solid fa-shield-halved w-4 text-accent"></i> Validar sesión
+      </button>
+    </div>
+  </div>
+</div>
+
+{/* ── Modal ──────────────────────────────────────────────────────────────── */}
+<div
+  id="auth-modal"
+  class="fixed inset-0 z-[200] hidden items-center justify-center p-3 sm:p-6"
+  aria-hidden="true"
+>
+  <div class="absolute inset-0 bg-black/80 backdrop-blur-sm" data-close></div>
+
+  <div class="relative z-10 w-full max-w-[520px] overflow-hidden rounded-2xl border border-line bg-[#15101f] shadow-[0_20px_60px_rgba(0,0,0,0.6)]">
+    {/* Cabecera */}
+    <div class="flex items-center justify-between gap-3 border-b border-line px-5 py-4">
+      <h2 id="auth-modal-title" class="flex items-center gap-2.5 text-[1rem] font-semibold text-ink">
+        <i class="fa-solid fa-key text-accent"></i> Autenticación
+      </h2>
+      <button
+        type="button"
+        data-close
+        aria-label="Cerrar"
+        class="flex h-8 w-8 items-center justify-center rounded-full border border-line text-ink transition-all duration-300 hover:border-line-hover hover:text-accent"
+      >
+        <i class="fa-solid fa-xmark"></i>
       </button>
     </div>
 
-    {/* Método 1: pegar cookies */}
-    <div data-panel="cookies" class="auth-tabpanel flex flex-col gap-3">
-      <label for="auth-cookies" class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.5px] text-muted">
-        <i class="fa-solid fa-cookie-bite"></i> Cookies de sesión
-      </label>
-      <textarea
-        id="auth-cookies"
-        rows="4"
-        placeholder='Pega aquí las cookies: JSON [{"name":"...","value":"..."}], objeto {"name":"value"} o cabecera "k=v; k2=v2".'
-        class="w-full resize-y rounded-[10px] border border-line bg-[rgba(8,5,15,0.6)] px-3.5 py-2.5 font-mono text-[0.82rem] text-ink outline-none transition-all duration-300 hover:border-line-hover focus:border-line-hover"
-      ></textarea>
-      <div class="flex flex-wrap gap-3">
+    <div class="px-5 py-5">
+      {/* Método 1: pegar cookies */}
+      <div data-view="cookies" class="auth-view flex flex-col gap-3">
+        <label for="auth-cookies" class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.5px] text-muted">
+          <i class="fa-solid fa-cookie-bite"></i> Cookies de sesión
+        </label>
+        <textarea
+          id="auth-cookies"
+          rows="5"
+          placeholder='Pega aquí las cookies: JSON [{"name":"...","value":"..."}], objeto {"name":"value"} o cabecera "k=v; k2=v2".'
+          class="w-full resize-y rounded-[10px] border border-line bg-[rgba(8,5,15,0.6)] px-3.5 py-2.5 font-mono text-[0.82rem] text-ink outline-none transition-all duration-300 hover:border-line-hover focus:border-line-hover"
+        ></textarea>
         <button type="button" id="auth-save-cookies" class="btn btn--primary !mt-0">
           <i class="fa-solid fa-floppy-disk"></i> Guardar y validar
         </button>
       </div>
-    </div>
 
-    {/* Método 2: email + contraseña */}
-    <div data-panel="login" class="auth-tabpanel hidden flex-col gap-3">
-      <div class="flex flex-col gap-3 sm:flex-row sm:gap-4">
-        <div class="flex flex-1 flex-col gap-1.5">
+      {/* Método 2: email + contraseña */}
+      <div data-view="login" class="auth-view hidden flex-col gap-3">
+        <div class="flex flex-col gap-1.5">
           <label for="auth-email" class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.5px] text-muted">
             <i class="fa-solid fa-envelope"></i> Email
           </label>
@@ -74,7 +116,7 @@
             class="w-full rounded-[10px] border border-line bg-[rgba(8,5,15,0.6)] px-3.5 py-2.5 text-[0.9rem] text-ink outline-none transition-all duration-300 hover:border-line-hover focus:border-line-hover"
           />
         </div>
-        <div class="flex flex-1 flex-col gap-1.5">
+        <div class="flex flex-col gap-1.5">
           <label for="auth-password" class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.5px] text-muted">
             <i class="fa-solid fa-lock"></i> Contraseña
           </label>
@@ -86,81 +128,131 @@
             class="w-full rounded-[10px] border border-line bg-[rgba(8,5,15,0.6)] px-3.5 py-2.5 text-[0.9rem] text-ink outline-none transition-all duration-300 hover:border-line-hover focus:border-line-hover"
           />
         </div>
-      </div>
-      <div class="flex flex-wrap gap-3">
         <button type="button" id="auth-login" class="btn btn--primary !mt-0">
           <i class="fa-solid fa-right-to-bracket"></i> Iniciar sesión
         </button>
+        <p class="text-[0.78rem] italic text-muted">
+          Las credenciales se envían al servidor solo para obtener la cookie; no se guardan.
+        </p>
       </div>
-      <p class="text-[0.78rem] italic text-muted">
-        Las credenciales se envían al servidor solo para obtener la cookie; no se guardan.
-      </p>
-    </div>
 
-    {/* Acciones comunes + resultado */}
-    <div class="mt-5 flex flex-wrap items-center gap-3 border-t border-line pt-4">
-      <button type="button" id="auth-validate" class="flex cursor-pointer items-center gap-1.5 rounded-[10px] border border-line bg-[rgba(255,255,255,0.05)] px-4 py-2.5 text-[0.85rem] text-ink transition-all duration-300 hover:border-line-hover hover:bg-card-hover">
-        <i class="fa-solid fa-shield-halved"></i> Validar sesión guardada
-      </button>
-      <span id="auth-result" class="text-[0.85rem] text-muted"></span>
+      {/* Método 3: validar sesión guardada */}
+      <div data-view="validate" class="auth-view hidden flex-col gap-3">
+        <p class="text-[0.9rem] text-muted">
+          Comprueba si la sesión guardada en el servidor sigue activa.
+        </p>
+        <button type="button" id="auth-validate" class="btn btn--primary !mt-0">
+          <i class="fa-solid fa-shield-halved"></i> Validar sesión guardada
+        </button>
+      </div>
+
+      {/* Resultado común */}
+      <p id="auth-result" class="mt-4 min-h-[1.2em] text-[0.85rem] text-muted"></p>
     </div>
   </div>
-</section>
+</div>
 
 <script is:inline>
   (() => {
-    const panel = document.getElementById('auth-panel');
-    if (!panel) return;
+    const root = document.getElementById('auth-root');
+    if (!root) return;
 
-    const toggle = document.getElementById('auth-toggle');
-    const body = document.getElementById('auth-body');
-    const chevron = document.getElementById('auth-chevron');
-    const badge = document.getElementById('auth-badge');
+    const avatar = document.getElementById('auth-avatar');
+    const menu = document.getElementById('auth-menu');
+    const menuStatus = document.getElementById('auth-menu-status');
+    const dot = document.getElementById('auth-status-dot');
+    const ping = document.getElementById('auth-status-ping');
+    const modal = document.getElementById('auth-modal');
+    const modalTitle = document.getElementById('auth-modal-title');
     const result = document.getElementById('auth-result');
-    const tabs = panel.querySelectorAll('.auth-tab');
-    const panels = panel.querySelectorAll('.auth-tabpanel');
+    const views = modal.querySelectorAll('.auth-view');
 
-    // ── Plegado ────────────────────────────────────────────────────────────
-    toggle?.addEventListener('click', () => {
-      const open = body?.classList.toggle('hidden') === false;
-      toggle.setAttribute('aria-expanded', String(open));
-      if (chevron) chevron.style.transform = open ? 'rotate(180deg)' : '';
+    let lastFocus = null;
+
+    // ── Menú desplegable ─────────────────────────────────────────────────────
+    const openMenu = () => {
+      menu.classList.remove('hidden');
+      avatar.setAttribute('aria-expanded', 'true');
+    };
+    const closeMenu = () => {
+      menu.classList.add('hidden');
+      avatar.setAttribute('aria-expanded', 'false');
+    };
+    avatar?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      menu.classList.contains('hidden') ? openMenu() : closeMenu();
+    });
+    document.addEventListener('click', (e) => {
+      if (!root.contains(e.target)) closeMenu();
     });
 
-    // ── Tabs ───────────────────────────────────────────────────────────────
-    const selectTab = (name) => {
-      tabs.forEach((t) => {
-        const active = t.getAttribute('data-tab') === name;
-        t.classList.toggle('bg-card', active);
-        t.classList.toggle('text-ink', active);
-        t.classList.toggle('text-muted', !active);
-      });
-      panels.forEach((p) => {
-        const active = p.getAttribute('data-panel') === name;
-        p.classList.toggle('hidden', !active);
-        p.classList.toggle('flex', active);
-      });
+    // ── Modal ────────────────────────────────────────────────────────────────
+    const VIEW_TITLES = {
+      cookies: '<i class="fa-solid fa-cookie-bite text-accent"></i> Pegar cookies',
+      login: '<i class="fa-solid fa-right-to-bracket text-accent"></i> Email y contraseña',
+      validate: '<i class="fa-solid fa-shield-halved text-accent"></i> Validar sesión',
     };
-    tabs.forEach((t) => t.addEventListener('click', () => selectTab(t.getAttribute('data-tab'))));
-    selectTab('cookies');
 
-    // ── Badge de estado ──────────────────────────────────────────────────────
-    const setBadge = (state, text) => {
-      if (!badge) return;
-      const styles = {
-        loading: ['text-muted', '<i class="fa-solid fa-circle-notch fa-spin"></i>'],
-        ok: ['text-[#4ade80]', '<i class="fa-solid fa-circle-check"></i>'],
-        bad: ['text-danger', '<i class="fa-solid fa-circle-xmark"></i>'],
+    const openModal = (view) => {
+      views.forEach((v) => {
+        const active = v.getAttribute('data-view') === view;
+        v.classList.toggle('hidden', !active);
+        v.classList.toggle('flex', active);
+      });
+      if (modalTitle) modalTitle.innerHTML = VIEW_TITLES[view] || VIEW_TITLES.cookies;
+      setResult('loading', '');
+      lastFocus = document.activeElement;
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+      modal.setAttribute('aria-hidden', 'false');
+      document.body.style.overflow = 'hidden';
+      // Auto-validar al abrir la vista de validación.
+      if (view === 'validate') document.getElementById('auth-validate')?.click();
+    };
+
+    const closeModal = () => {
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+      modal.setAttribute('aria-hidden', 'true');
+      document.body.style.overflow = '';
+      if (lastFocus && lastFocus.focus) lastFocus.focus();
+    };
+
+    root.querySelectorAll('.auth-menu-item').forEach((item) => {
+      item.addEventListener('click', () => {
+        closeMenu();
+        openModal(item.getAttribute('data-open'));
+      });
+    });
+
+    modal.querySelectorAll('[data-close]').forEach((el) => el.addEventListener('click', closeModal));
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !modal.classList.contains('hidden')) closeModal();
+    });
+
+    // ── Indicador de estado (punto flotante + texto del menú) ──────────────────
+    const setStatus = (state, text) => {
+      const map = {
+        loading: { dot: 'bg-muted', txt: 'text-muted', icon: 'fa-circle-notch fa-spin', ping: 'bg-muted opacity-60' },
+        ok: { dot: 'bg-[#4ade80]', txt: 'text-[#4ade80]', icon: 'fa-circle-check', ping: 'bg-[#4ade80] opacity-50 animate-ping' },
+        bad: { dot: 'bg-danger', txt: 'text-danger', icon: 'fa-circle-xmark', ping: 'bg-danger opacity-40' },
       };
-      const [cls, icon] = styles[state] || styles.loading;
-      badge.className = `inline-flex items-center gap-1.5 rounded-full border border-line bg-[rgba(8,5,15,0.6)] px-3 py-1 text-[0.78rem] font-semibold ${cls}`;
-      badge.innerHTML = `${icon} ${text}`;
+      const s = map[state] || map.loading;
+      if (dot) {
+        dot.className = `absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full border-2 border-card ${s.dot}`;
+        dot.title = text;
+      }
+      if (ping) ping.className = `absolute inline-flex h-full w-full rounded-full ${s.ping}`;
+      if (menuStatus) {
+        menuStatus.className = `mt-0.5 flex items-center gap-1.5 text-[0.85rem] font-semibold ${s.txt}`;
+        menuStatus.innerHTML = `<i class="fa-solid ${s.icon}"></i> ${text}`;
+      }
     };
 
     const setResult = (state, text) => {
       if (!result) return;
       const cls = state === 'ok' ? 'text-[#4ade80]' : state === 'bad' ? 'text-danger' : 'text-muted';
-      result.className = `text-[0.85rem] ${cls}`;
+      result.className = `mt-4 min-h-[1.2em] text-[0.85rem] ${cls}`;
       result.textContent = text;
     };
 
@@ -190,14 +282,14 @@
 
     // ── Validación inicial + botón ───────────────────────────────────────────
     const refreshStatus = async () => {
-      setBadge('loading', 'Comprobando…');
+      setStatus('loading', 'Comprobando…');
       try {
         const data = await api('GET');
-        if (data.valid) setBadge('ok', 'Sesión activa');
-        else setBadge('bad', data.count ? 'Sesión inactiva' : 'Sin cookies');
+        if (data.valid) setStatus('ok', 'Sesión activa');
+        else setStatus('bad', data.count ? 'Sesión inactiva' : 'Sin cookies');
         return data;
       } catch {
-        setBadge('bad', 'Error');
+        setStatus('bad', 'Error');
         return { valid: false };
       }
     };
@@ -221,7 +313,7 @@
       try {
         const data = await api('POST', { action: 'save', cookies });
         if (data.ok) {
-          setBadge(data.valid ? 'ok' : 'bad', data.valid ? 'Sesión activa' : 'Sesión inactiva');
+          setStatus(data.valid ? 'ok' : 'bad', data.valid ? 'Sesión activa' : 'Sesión inactiva');
           setResult(data.valid ? 'ok' : 'bad',
             `${data.count} cookies guardadas` + (data.valid ? ' — sesión activa ✓' : ` — pero ${data.reason || 'sesión inactiva'}`));
         } else {
@@ -244,12 +336,12 @@
       try {
         const data = await api('POST', { action: 'login', email, password });
         if (data.ok) {
-          setBadge('ok', 'Sesión activa');
+          setStatus('ok', 'Sesión activa');
           setResult('ok', `Sesión iniciada — ${data.count} cookies guardadas ✓`);
           const pw = document.getElementById('auth-password');
           if (pw) pw.value = '';
         } else {
-          setBadge('bad', 'Sesión inactiva');
+          setStatus('bad', 'Sesión inactiva');
           setResult('bad', data.error || 'Login fallido.');
         }
       } catch {

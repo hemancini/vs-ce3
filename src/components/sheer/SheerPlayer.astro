@@ -1,0 +1,806 @@
+---
+// Card del reproductor de Sheer, reutilizable. La usa /sheer/play (página) y
+// SheerVideoModal (modal). El markup vive una sola vez en el DOM; el script
+// cablea los controles una vez y expone window.sheerPlayerLoad(videoData, opts)
+// para poblar y arrancar un video bajo demanda, y window.sheerPlayerStop().
+---
+
+<div
+  class="overflow-hidden rounded-3xl border border-line bg-[#120e1f] [background-image:linear-gradient(160deg,rgba(138,59,205,0.14)_0%,rgba(18,14,31,0)_45%,rgba(69,231,240,0.06)_100%)] shadow-[0_10px_30px_rgba(0,0,0,0.5)]"
+>
+  <div
+    class="relative aspect-video w-full bg-black group/player overflow-hidden"
+    id="player-container"
+  >
+    <div id="play-overlay" class="play-overlay">
+      <img
+        id="poster-img"
+        src=""
+        alt="Vista previa"
+        class="absolute inset-0 h-full w-full object-cover"
+      />
+      <button class="play-overlay__btn" aria-label="Reproducir video">
+        <i class="fa-solid fa-play ml-1"></i>
+      </button>
+    </div>
+
+    <video
+      id="main-video"
+      class="block h-full w-full cursor-pointer"
+      preload="none"
+      playsinline
+      data-default-src=""
+      data-preview-src=""
+    >
+      Tu navegador no soporta la reproducción de video HTML5.
+    </video>
+
+    <!-- Custom Video Controls -->
+    <div
+      id="custom-controls"
+      class="absolute bottom-0 left-0 right-0 z-20 flex flex-col gap-3 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-4 opacity-0 transition-opacity duration-300 pointer-events-none group-hover/player:opacity-100 group-focus-within/player:opacity-100 controls-visible"
+    >
+      <!-- Timeline / Progress Bar -->
+      <div
+        id="timeline-container"
+        class="relative group/timeline flex h-3 w-full cursor-pointer items-center pointer-events-auto select-none"
+      >
+        <!-- Preview Tooltip -->
+        <div
+          id="preview-tooltip"
+          class="absolute bottom-7 left-0 -translate-x-1/2 pointer-events-none opacity-0 transition-opacity duration-200 flex flex-col items-center gap-1.5 z-30"
+        >
+          <!-- Thumbnail wrapper: canvas shows last frame instantly; hidden video seeks in background -->
+          <div
+            class="relative w-40 aspect-video rounded-lg border border-[rgba(138,59,205,0.4)] bg-black overflow-hidden shadow-[0_5px_15px_rgba(0,0,0,0.8)]"
+          >
+            <canvas
+              id="preview-canvas"
+              class="absolute inset-0 w-full h-full object-cover"></canvas>
+            <video
+              id="preview-video"
+              class="absolute inset-0 w-full h-full object-cover opacity-0"
+              preload="metadata"
+              muted
+              playsinline></video>
+          </div>
+          <!-- Time stamp -->
+          <span
+            id="preview-time"
+            class="bg-base/90 text-accent text-xs px-2.5 py-0.5 rounded border border-line font-bold font-mono"
+            >00:00</span
+          >
+        </div>
+
+        <!-- Timeline Track -->
+        <div
+          class="h-1 w-full bg-white/20 rounded-full group-hover/timeline:h-2 transition-all duration-150 relative"
+        >
+          <!-- Load progress (buffered) -->
+          <div
+            id="buffered-bar"
+            class="absolute left-0 top-0 h-full bg-white/10 w-0 rounded-full transition-all duration-150"
+          >
+          </div>
+          <!-- Play progress -->
+          <div
+            id="progress-bar"
+            class="absolute left-0 top-0 h-full bg-gradient-to-r from-primary to-accent w-0 rounded-full shadow-[0_0_8px_var(--color-accent)]"
+          >
+          </div>
+        </div>
+        <!-- Scrubber handle -->
+        <div
+          id="scrubber-handle"
+          class="absolute h-3.5 w-3.5 rounded-full bg-accent border border-white opacity-0 group-hover/timeline:opacity-100 transition-opacity duration-150 shadow-[0_0_10px_rgba(69,231,240,0.8)] -translate-x-1/2 pointer-events-none"
+          style="left: 0%;"
+        >
+        </div>
+      </div>
+
+      <!-- Controls Row -->
+      <div
+        class="flex items-center justify-between pointer-events-auto text-ink"
+      >
+        <!-- Left side: Play/Pause, Volume, Time -->
+        <div class="flex items-center gap-4">
+          <!-- Play / Pause Button -->
+          <button
+            id="play-btn"
+            class="cursor-pointer text-xl transition-transform active:scale-95 hover:text-accent"
+            aria-label="Reproducir"
+          >
+            <i class="fa-solid fa-play"></i>
+          </button>
+
+          <!-- Volume Container -->
+          <div class="flex items-center gap-2 group/volume">
+            <!-- Mute Button -->
+            <button
+              id="mute-btn"
+              class="cursor-pointer text-lg hover:text-accent"
+              aria-label="Silenciar"
+            >
+              <i class="fa-solid fa-volume-high"></i>
+            </button>
+            <!-- Volume Slider -->
+            <input
+              type="range"
+              id="volume-slider"
+              min="0"
+              max="1"
+              step="0.05"
+              value="1"
+              class="w-0 group-hover/volume:w-16 transition-all duration-300 origin-left accent-accent cursor-pointer h-1 rounded-full bg-white/20 hover:bg-white/30"
+            />
+          </div>
+
+          <!-- Time display -->
+          <div class="text-sm font-mono text-muted">
+            <span id="current-time">0:00</span>
+            <span class="mx-1">/</span>
+            <span id="duration-time">0:00</span>
+          </div>
+        </div>
+
+        <!-- Right side: Quality + Fullscreen -->
+        <div class="flex items-center gap-4">
+          <!-- Quality / Resolution Selector -->
+          <div class="relative" id="quality-wrap">
+            <button
+              id="quality-btn"
+              class="flex cursor-pointer items-center gap-1.5 text-sm font-bold hover:text-accent active:scale-95"
+              aria-label="Calidad"
+              aria-haspopup="true"
+            >
+              <i class="fa-solid fa-gear"></i>
+              <span id="quality-label">Auto</span>
+            </button>
+            <div
+              id="quality-menu"
+              class="absolute bottom-full right-0 z-30 mb-3 hidden min-w-[160px] flex-col gap-1 rounded-xl border border-line bg-[rgba(8,5,15,0.95)] p-2 shadow-[0_10px_30px_rgba(0,0,0,0.6)] backdrop-blur-md"
+            >
+            </div>
+          </div>
+
+          <!-- Fullscreen Button -->
+          <button
+            id="fullscreen-btn"
+            class="cursor-pointer text-lg hover:text-accent active:scale-95"
+            aria-label="Pantalla completa"
+          >
+            <i class="fa-solid fa-expand"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="p-8">
+    <h1 id="video-title" class="mb-4 md:text-xl font-bold leading-tight">
+      Video sin título
+    </h1>
+    <div
+      id="video-meta"
+      class="flex flex-wrap gap-4 text-[0.9rem] text-muted [&>span]:flex [&>span]:items-center [&>span]:gap-1.5"
+    >
+    </div>
+  </div>
+</div>
+
+<style>
+  /* Custom Styles for Video Player */
+  #player-container:hover #custom-controls,
+  #player-container:focus-within #custom-controls,
+  #custom-controls.controls-visible {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* Hide custom controls if overlay is visible */
+  #play-overlay:not(.play-overlay--hidden) ~ #custom-controls {
+    display: none !important;
+  }
+
+  /* Ensure timeline tooltip transitions are smooth */
+  #preview-tooltip {
+    transition:
+      opacity 0.2s ease,
+      left 0.05s linear;
+  }
+
+  /* Styling for Volume Slider Range input */
+  #volume-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    height: 4px;
+    outline: none;
+    transition:
+      width 0.3s ease,
+      background 0.3s ease;
+  }
+
+  #volume-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--color-accent);
+    cursor: pointer;
+    box-shadow: 0 0 6px var(--color-accent);
+    transition: transform 0.1s ease;
+  }
+
+  #volume-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.3);
+  }
+
+  #volume-slider::-moz-range-thumb {
+    width: 10px;
+    height: 10px;
+    border: none;
+    border-radius: 50%;
+    background: var(--color-accent);
+    cursor: pointer;
+    box-shadow: 0 0 6px var(--color-accent);
+    transition: transform 0.1s ease;
+  }
+
+  #volume-slider::-moz-range-thumb:hover {
+    transform: scale(1.3);
+  }
+</style>
+
+<script is:inline>
+  (function () {
+    const video = document.getElementById("main-video");
+    if (!video) return;
+
+    const overlay = document.getElementById("play-overlay");
+    const posterImg = document.getElementById("poster-img");
+    const titleEl = document.getElementById("video-title");
+    const metaEl = document.getElementById("video-meta");
+
+    const playerContainer = document.getElementById("player-container");
+    const qualityMenu = document.getElementById("quality-menu");
+    const qualityLabel = document.getElementById("quality-label");
+    const qualityBtn = document.getElementById("quality-btn");
+    const qualityWrap = document.getElementById("quality-wrap");
+    const customControls = document.getElementById("custom-controls");
+    const playBtn = document.getElementById("play-btn");
+    const muteBtn = document.getElementById("mute-btn");
+    const volumeSlider = document.getElementById("volume-slider");
+    const currentTimeEl = document.getElementById("current-time");
+    const durationTimeEl = document.getElementById("duration-time");
+    const fullscreenBtn = document.getElementById("fullscreen-btn");
+    const timelineContainer = document.getElementById("timeline-container");
+    const progressBar = document.getElementById("progress-bar");
+    const bufferedBar = document.getElementById("buffered-bar");
+    const scrubberHandle = document.getElementById("scrubber-handle");
+    const previewTooltip = document.getElementById("preview-tooltip");
+    const previewVideo = document.getElementById("preview-video");
+    const previewTime = document.getElementById("preview-time");
+    const previewCanvas = document.getElementById("preview-canvas");
+
+    const cleanSrc = (s) => (s ? String(s).replace(/&amp;/g, "&") : "");
+
+    let playerActive = false;
+    let idleTimer = null;
+    let isDragging = false;
+
+    function formatTime(seconds) {
+      if (isNaN(seconds) || !isFinite(seconds)) return "0:00";
+      const mins = Math.floor(seconds / 60);
+      const secs = Math.floor(seconds % 60);
+      return `${mins}:${secs < 10 ? "0" : ""}${secs}`;
+    }
+
+    // ── Play / Pause ────────────────────────────────────────────────────────
+    function startPlayback() {
+      const defaultSrc = video.getAttribute("data-default-src");
+      if (!defaultSrc) return;
+      video.src = defaultSrc;
+      video.load();
+      if (overlay) overlay.classList.add("play-overlay--hidden");
+      const onCanPlay = () => {
+        video.play().catch((err) => console.log("Auto-play prevented:", err));
+        video.removeEventListener("canplay", onCanPlay);
+      };
+      video.addEventListener("canplay", onCanPlay);
+    }
+
+    function togglePlay() {
+      if (overlay && !overlay.classList.contains("play-overlay--hidden")) {
+        startPlayback();
+        return;
+      }
+      if (video.paused) {
+        video.play().catch((err) => console.log("Playback error:", err));
+      } else {
+        video.pause();
+      }
+    }
+
+    video.addEventListener("click", togglePlay);
+    if (playBtn) playBtn.addEventListener("click", togglePlay);
+    if (overlay) overlay.addEventListener("click", startPlayback);
+
+    video.addEventListener("play", () => {
+      if (playBtn) {
+        const icon = playBtn.querySelector("i");
+        if (icon) icon.className = "fa-solid fa-pause";
+      }
+      resetIdleTimer();
+    });
+
+    video.addEventListener("pause", () => {
+      if (playBtn) {
+        const icon = playBtn.querySelector("i");
+        if (icon) icon.className = "fa-solid fa-play";
+      }
+      if (idleTimer) clearTimeout(idleTimer);
+      if (customControls) customControls.classList.add("controls-visible");
+      if (playerContainer) playerContainer.style.cursor = "default";
+    });
+
+    // ── Tiempo / duración / progreso ────────────────────────────────────────
+    video.addEventListener("loadedmetadata", () => {
+      if (durationTimeEl)
+        durationTimeEl.textContent = formatTime(video.duration);
+    });
+
+    video.addEventListener("timeupdate", () => {
+      if (!video.duration) return;
+      const percent = (video.currentTime / video.duration) * 100;
+      if (progressBar) progressBar.style.width = `${percent}%`;
+      if (scrubberHandle) scrubberHandle.style.left = `${percent}%`;
+      if (currentTimeEl)
+        currentTimeEl.textContent = formatTime(video.currentTime);
+    });
+
+    video.addEventListener("progress", () => {
+      if (!video.duration || video.buffered.length === 0) return;
+      const bufferedEnd = video.buffered.end(video.buffered.length - 1);
+      const percent = (bufferedEnd / video.duration) * 100;
+      if (bufferedBar) bufferedBar.style.width = `${percent}%`;
+    });
+
+    // ── Timeline seeking ────────────────────────────────────────────────────
+    function handleSeek(e) {
+      if (!video.duration || !timelineContainer) return;
+      const rect = timelineContainer.getBoundingClientRect();
+      let clientX = e.clientX;
+      if (e.touches && e.touches[0]) clientX = e.touches[0].clientX;
+      const pos = (clientX - rect.left) / rect.width;
+      const percentage = Math.max(0, Math.min(1, pos));
+      video.currentTime = percentage * video.duration;
+    }
+
+    if (timelineContainer) {
+      timelineContainer.addEventListener("mousedown", (e) => {
+        isDragging = true;
+        handleSeek(e);
+      });
+      timelineContainer.addEventListener(
+        "touchstart",
+        (e) => {
+          isDragging = true;
+          handleSeek(e);
+        },
+        { passive: true },
+      );
+    }
+    document.addEventListener("mousemove", (e) => {
+      if (isDragging) handleSeek(e);
+    });
+    document.addEventListener(
+      "touchmove",
+      (e) => {
+        if (isDragging) handleSeek(e);
+      },
+      { passive: true },
+    );
+    document.addEventListener("mouseup", () => {
+      isDragging = false;
+    });
+    document.addEventListener("touchend", () => {
+      isDragging = false;
+    });
+
+    // ── Preview thumbnail (canvas + video oculto) ───────────────────────────
+    let canvasCtx = previewCanvas ? previewCanvas.getContext("2d") : null;
+
+    function drawFrameToCanvas() {
+      if (!canvasCtx || !previewVideo || previewVideo.readyState < 2) return;
+      if (previewCanvas.width !== previewVideo.videoWidth) {
+        previewCanvas.width = previewVideo.videoWidth || 160;
+        previewCanvas.height = previewVideo.videoHeight || 90;
+      }
+      canvasCtx.drawImage(
+        previewVideo,
+        0,
+        0,
+        previewCanvas.width,
+        previewCanvas.height,
+      );
+    }
+
+    let rafPending = false;
+    let pendingPreviewTime = null;
+    function seekPreviewVideo(time) {
+      if (!previewVideo) return;
+      pendingPreviewTime = time;
+      if (rafPending) return;
+      rafPending = true;
+      requestAnimationFrame(() => {
+        rafPending = false;
+        if (pendingPreviewTime === null) return;
+        const t = pendingPreviewTime;
+        pendingPreviewTime = null;
+        if (typeof previewVideo.fastSeek === "function")
+          previewVideo.fastSeek(t);
+        else previewVideo.currentTime = t;
+      });
+    }
+
+    if (previewVideo) {
+      previewVideo.addEventListener("seeked", drawFrameToCanvas);
+      previewVideo.addEventListener("loadeddata", drawFrameToCanvas);
+    }
+
+    function handleTimelineHover(e) {
+      if (
+        !video.duration ||
+        !timelineContainer ||
+        !previewTooltip ||
+        !previewVideo ||
+        !previewTime
+      )
+        return;
+      const rect = timelineContainer.getBoundingClientRect();
+      let clientX = e.clientX;
+      if (e.touches && e.touches[0]) clientX = e.touches[0].clientX;
+      const pos = (clientX - rect.left) / rect.width;
+      const percentage = Math.max(0, Math.min(1, pos));
+      const targetTime = percentage * video.duration;
+
+      const previewSrcAttr =
+        video.getAttribute("data-preview-src") ||
+        video.getAttribute("data-default-src");
+      if (previewSrcAttr) {
+        const tempAnchor = document.createElement("a");
+        tempAnchor.href = previewSrcAttr;
+        const resolvedPreviewSrc = tempAnchor.href;
+        if (previewVideo.src !== resolvedPreviewSrc) {
+          previewVideo.src = previewSrcAttr;
+          previewVideo.load();
+        }
+      }
+
+      if (!isNaN(targetTime) && isFinite(targetTime)) {
+        seekPreviewVideo(targetTime);
+        previewTime.textContent = formatTime(targetTime);
+      }
+
+      const tooltipWidth = previewTooltip.offsetWidth || 160;
+      const xOffset = clientX - rect.left;
+      const minX = tooltipWidth / 2;
+      const maxX = rect.width - tooltipWidth / 2;
+      const clampedX = Math.max(minX, Math.min(maxX, xOffset));
+      previewTooltip.style.left = `${clampedX}px`;
+      previewTooltip.style.opacity = "1";
+    }
+    function hideTimelineHover() {
+      if (previewTooltip) previewTooltip.style.opacity = "0";
+    }
+    if (timelineContainer) {
+      timelineContainer.addEventListener("mouseenter", handleTimelineHover);
+      timelineContainer.addEventListener("mousemove", handleTimelineHover);
+      timelineContainer.addEventListener("mouseleave", hideTimelineHover);
+      timelineContainer.addEventListener("touchstart", handleTimelineHover, {
+        passive: true,
+      });
+      timelineContainer.addEventListener("touchmove", handleTimelineHover, {
+        passive: true,
+      });
+      timelineContainer.addEventListener("touchend", hideTimelineHover);
+    }
+
+    // ── Volumen / mute ──────────────────────────────────────────────────────
+    function updateVolumeIcon(vol, muted) {
+      if (!muteBtn) return;
+      const icon = muteBtn.querySelector("i");
+      if (!icon) return;
+      icon.className = "fa-solid";
+      if (muted || vol === 0) icon.classList.add("fa-volume-xmark");
+      else if (vol < 0.5) icon.classList.add("fa-volume-low");
+      else icon.classList.add("fa-volume-high");
+    }
+
+    if (volumeSlider) {
+      volumeSlider.addEventListener("input", (e) => {
+        const val = parseFloat(e.target.value);
+        video.volume = val;
+        video.muted = val === 0;
+        updateVolumeIcon(val, video.muted);
+      });
+    }
+    if (muteBtn) {
+      muteBtn.addEventListener("click", () => {
+        video.muted = !video.muted;
+        if (volumeSlider) volumeSlider.value = video.muted ? 0 : video.volume;
+        updateVolumeIcon(video.volume, video.muted);
+      });
+    }
+
+    // ── Pantalla completa ───────────────────────────────────────────────────
+    function toggleFullscreen() {
+      if (!playerContainer) return;
+      if (!document.fullscreenElement) {
+        playerContainer
+          .requestFullscreen()
+          .catch((err) => console.log(`Error fullscreen: ${err.message}`));
+      } else {
+        document.exitFullscreen();
+      }
+    }
+    if (fullscreenBtn)
+      fullscreenBtn.addEventListener("click", toggleFullscreen);
+    video.addEventListener("dblclick", toggleFullscreen);
+    document.addEventListener("fullscreenchange", () => {
+      if (!fullscreenBtn) return;
+      const icon = fullscreenBtn.querySelector("i");
+      if (!icon) return;
+      icon.className = document.fullscreenElement
+        ? "fa-solid fa-compress"
+        : "fa-solid fa-expand";
+    });
+
+    // ── Menú de calidad ─────────────────────────────────────────────────────
+    const openQualityMenu = () => {
+      if (!qualityMenu) return;
+      qualityMenu.classList.remove("hidden");
+      qualityMenu.classList.add("flex");
+    };
+    const closeQualityMenu = () => {
+      if (!qualityMenu) return;
+      qualityMenu.classList.add("hidden");
+      qualityMenu.classList.remove("flex");
+    };
+    if (qualityBtn && qualityMenu) {
+      qualityBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        qualityMenu.classList.contains("hidden")
+          ? openQualityMenu()
+          : closeQualityMenu();
+      });
+      document.addEventListener("click", (e) => {
+        if (qualityWrap && !qualityWrap.contains(e.target)) closeQualityMenu();
+      });
+    }
+
+    // Cablea los botones de calidad (recreados en cada carga de video).
+    function wireQualityButtons() {
+      if (!qualityMenu) return;
+      qualityMenu.querySelectorAll(".quality-item").forEach((button) => {
+        button.addEventListener("click", () => {
+          if (button.classList.contains("active")) {
+            closeQualityMenu();
+            return;
+          }
+
+          qualityMenu.querySelectorAll(".quality-item").forEach((btn) => {
+            btn.classList.remove("active", "text-accent");
+            btn.classList.add("text-ink");
+            const check = btn.querySelector("i");
+            if (check) check.classList.add("opacity-0");
+          });
+          button.classList.add("active", "text-accent");
+          button.classList.remove("text-ink");
+          const activeCheck = button.querySelector("i");
+          if (activeCheck) activeCheck.classList.remove("opacity-0");
+          if (qualityLabel)
+            qualityLabel.textContent =
+              button.getAttribute("data-size") || qualityLabel.textContent;
+          closeQualityMenu();
+
+          const videoUrl = button.getAttribute("data-url");
+          const currentTime = video.currentTime;
+          const isPlaying = !video.paused;
+
+          video.src = videoUrl;
+          video.load();
+          video.setAttribute("data-default-src", videoUrl);
+          if (overlay && !overlay.classList.contains("play-overlay--hidden")) {
+            overlay.classList.add("play-overlay--hidden");
+          }
+
+          video.addEventListener("loadedmetadata", function onMetadata() {
+            video.currentTime = currentTime;
+            if (durationTimeEl)
+              durationTimeEl.textContent = formatTime(video.duration);
+            video.removeEventListener("loadedmetadata", onMetadata);
+          });
+
+          if (isPlaying) {
+            video
+              .play()
+              .catch((err) =>
+                console.log("Auto-play prevented after switch:", err),
+              );
+          }
+        });
+      });
+    }
+
+    // ── Auto-ocultar controles ──────────────────────────────────────────────
+    function resetIdleTimer() {
+      if (!customControls || !playerContainer) return;
+      customControls.classList.add("controls-visible");
+      playerContainer.style.cursor = "default";
+      if (idleTimer) clearTimeout(idleTimer);
+      if (!video.paused) {
+        idleTimer = setTimeout(() => {
+          customControls.classList.remove("controls-visible");
+          playerContainer.style.cursor = "none";
+        }, 3000);
+      }
+    }
+    if (playerContainer)
+      playerContainer.addEventListener("mousemove", resetIdleTimer);
+
+    // ── Espacio = play/pausa (sólo con el player activo) ─────────────────────
+    document.addEventListener("keydown", (e) => {
+      if (!playerActive) return;
+      if (
+        e.code === "Space" &&
+        document.activeElement?.tagName !== "INPUT" &&
+        document.activeElement?.tagName !== "BUTTON"
+      ) {
+        e.preventDefault();
+        togglePlay();
+      }
+    });
+
+    // ── API pública ───────────────────────────────────────────────────────────
+    // Pobla la card con un video y, si opts.autoplay, arranca silenciado.
+    function loadVideo(videoData, opts) {
+      opts = opts || {};
+      playerActive = true;
+
+      // Reset de estado del player.
+      video.pause();
+      video.removeAttribute("src");
+      try {
+        video.load();
+      } catch (e) {}
+      if (overlay) overlay.classList.remove("play-overlay--hidden");
+      if (progressBar) progressBar.style.width = "0%";
+      if (bufferedBar) bufferedBar.style.width = "0%";
+      if (scrubberHandle) scrubberHandle.style.left = "0%";
+      if (currentTimeEl) currentTimeEl.textContent = "0:00";
+      if (durationTimeEl) durationTimeEl.textContent = "0:00";
+
+      const sources = [...(videoData.sources || [])].sort(
+        (a, b) => parseInt(b.size || "0", 10) - parseInt(a.size || "0", 10),
+      );
+      const defaultSource = sources[0] || null;
+      const previewSource = sources[sources.length - 1] || sources[0] || null;
+
+      if (titleEl) titleEl.textContent = videoData.title || "Video sin título";
+      if (posterImg) {
+        posterImg.src = videoData.poster || "";
+        posterImg.alt = videoData.title || "Vista previa";
+      }
+
+      video.setAttribute("data-default-src", cleanSrc(defaultSource?.src));
+      video.setAttribute("data-preview-src", cleanSrc(previewSource?.src));
+
+      // Precarga del video de preview (calidad más baja) para el seek.
+      const previewSrc =
+        video.getAttribute("data-preview-src") ||
+        video.getAttribute("data-default-src");
+      if (previewSrc && previewVideo) {
+        previewVideo.src = previewSrc;
+        previewVideo.load();
+      }
+
+      // Metadatos.
+      if (metaEl) {
+        metaEl.innerHTML = "";
+        const meta = [
+          { icon: "fa-hashtag", label: "Post ID", value: videoData.postId },
+          { icon: "fa-clock", label: "Duración", value: videoData.duration },
+          {
+            icon: "fa-circle-play",
+            label: "Video ID",
+            value: videoData.videoId,
+          },
+          {
+            icon: "fa-database",
+            label: "Content ID",
+            value: videoData.contentId,
+          },
+          { icon: "fa-user", label: "Alias", value: videoData.alias },
+        ];
+        meta.forEach((m) => {
+          if (!m.value) return;
+          const span = document.createElement("span");
+          const i = document.createElement("i");
+          i.className = `fa-solid ${m.icon}`;
+          span.appendChild(i);
+          span.appendChild(document.createTextNode(` ${m.label}: ${m.value}`));
+          metaEl.appendChild(span);
+        });
+      }
+
+      // Menú de calidad.
+      if (qualityLabel)
+        qualityLabel.textContent = sources[0]?.size
+          ? `${sources[0].size}p`
+          : "Auto";
+      if (qualityMenu) {
+        qualityMenu.innerHTML = "";
+        if (sources.length === 0) {
+          const p = document.createElement("p");
+          p.className = "px-3 py-2 text-[0.8rem] text-muted";
+          p.textContent = "Sin fuentes";
+          qualityMenu.appendChild(p);
+        } else {
+          sources.forEach((src, index) => {
+            const cleanUrl = cleanSrc(src.src);
+            const sizeLabel = src.size ? `${src.size}p` : "Desconocida";
+            const isBest = index === 0;
+            const bitrate = src.bitrate
+              ? (parseInt(src.bitrate, 10) / 1000000).toFixed(1)
+              : null;
+
+            const btn = document.createElement("button");
+            btn.className = `quality-item flex w-full items-center justify-between gap-4 rounded-lg px-3 py-2 text-left text-sm font-semibold transition-colors hover:bg-white/10 ${isBest ? "text-accent" : "text-ink"}`;
+            btn.setAttribute("data-url", cleanUrl);
+            btn.setAttribute("data-size", sizeLabel);
+            if (isBest) btn.classList.add("active");
+            btn.title = `Reproducir en ${sizeLabel}`;
+            btn.innerHTML = `
+              <span class="flex flex-col leading-tight">
+                <span>${sizeLabel}</span>
+                ${bitrate ? `<span class="text-[0.7rem] font-normal text-muted">${bitrate} Mbps</span>` : ""}
+              </span>
+              <i class="fa-solid fa-check text-[0.8rem] ${isBest ? "" : "opacity-0"}"></i>`;
+            qualityMenu.appendChild(btn);
+          });
+        }
+      }
+      wireQualityButtons();
+
+      // Volumen inicial + autoplay.
+      if (opts.autoplay) {
+        video.muted = true;
+        if (volumeSlider) volumeSlider.value = 0;
+        updateVolumeIcon(0, true);
+        startPlayback();
+      } else {
+        video.muted = false;
+        if (volumeSlider) volumeSlider.value = 1;
+        updateVolumeIcon(1, false);
+      }
+    }
+
+    // Detiene y resetea (al cerrar el modal).
+    function stop() {
+      playerActive = false;
+      video.pause();
+      video.removeAttribute("src");
+      try {
+        video.load();
+      } catch (e) {}
+      if (overlay) overlay.classList.remove("play-overlay--hidden");
+    }
+
+    window.sheerPlayerLoad = loadVideo;
+    window.sheerPlayerStop = stop;
+  })();
+</script>

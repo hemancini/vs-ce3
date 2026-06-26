@@ -1,0 +1,151 @@
+---
+// Scraper SSR de /subscriptions: en cada request scrapea la página de
+// suscripciones activas de Sheer (con la cookie de sesión) y renderiza una
+// tarjeta por creador suscrito con sus posts de vista previa. Los clips .mp4 de
+// preview se reproducen al hover; cada post enlaza al reproductor /sheer/play.
+import Layout from '../../layouts/Sheer.astro';
+import SheerHeader from '../../components/sheer/SheerHeader.astro';
+import { scrapeSheerSubscriptions } from '../../lib/sheer/scraper.js';
+
+export const prerender = false;
+
+const env = (Astro.locals as any)?.runtime?.env;
+
+let accounts: any[] = [];
+let error: string | null = null;
+const startedAt = Date.now();
+
+try {
+  const result = await scrapeSheerSubscriptions({ env });
+  accounts = result.accounts;
+} catch (e: any) {
+  error = e.message;
+}
+
+const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
+const totalPosts = accounts.reduce((n, a) => n + (a.posts?.length || 0), 0);
+---
+
+<Layout title="Suscripciones - Sheer">
+  <div class="mx-auto max-w-[1300px] px-4 py-6 sm:px-6 sm:py-8">
+    <SheerHeader title="Suscripciones" icon="fa-heart">
+      <a slot="nav" href="/sheer" class="inline-flex items-center gap-2 text-[0.95rem] text-muted transition-all duration-300 hover:-translate-x-1 hover:text-accent">
+        <i class="fa-solid fa-arrow-left"></i> Membresías
+      </a>
+      {error ? (
+        <span slot="stats" class="text-danger"><i class="fa-solid fa-triangle-exclamation"></i> Error</span>
+      ) : (
+        <span slot="stats"><i class="fa-solid fa-heart"></i> {accounts.length} creadores · {totalPosts} posts · {elapsed}s</span>
+      )}
+    </SheerHeader>
+
+    {error ? (
+      <div class="px-8 py-16 text-center text-[1.2rem] text-danger">
+        <i class="fa-solid fa-triangle-exclamation mb-4 block text-5xl"></i>
+        <p>{error}</p>
+      </div>
+    ) : accounts.length === 0 ? (
+      <div class="px-8 py-16 text-center text-[1.2rem] text-muted">
+        <i class="fa-solid fa-heart-crack mb-4 block text-5xl text-muted"></i>
+        <p>No tienes suscripciones activas.</p>
+      </div>
+    ) : (
+      <div class="flex flex-col gap-10 sm:gap-14">
+        {accounts.map((acc: any) => (
+          <section>
+            {/* Cabecera del creador */}
+            <div class="mb-5 flex items-center gap-4 rounded-2xl border border-line bg-card px-4 py-4 sm:px-5">
+              {acc.headshot ? (
+                <img src={acc.headshot} alt={acc.name} class="h-14 w-14 shrink-0 rounded-full object-cover sm:h-16 sm:w-16" loading="lazy" />
+              ) : (
+                <div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-[rgba(255,255,255,0.05)] text-muted sm:h-16 sm:w-16">
+                  <i class="fa-solid fa-user text-xl"></i>
+                </div>
+              )}
+              <div class="min-w-0 grow">
+                <a
+                  href={`/sheer/${acc.alias}`}
+                  class="block truncate text-[1.15rem] font-bold text-ink transition-colors hover:text-accent sm:text-[1.3rem]"
+                >
+                  {acc.name || acc.alias}
+                </a>
+                <div class="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.85rem] text-muted">
+                  <span class="truncate">@{acc.alias}</span>
+                  {acc.status && (
+                    <span class="inline-flex items-center gap-1.5 text-accent">
+                      <i class="fa-solid fa-circle-check"></i> {acc.status}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <span class="shrink-0 rounded-full border border-line bg-[rgba(8,5,15,0.6)] px-3 py-1.5 text-[0.8rem] text-muted">
+                {acc.posts.length} {acc.posts.length === 1 ? 'post' : 'posts'}
+              </span>
+            </div>
+
+            {/* Posts de vista previa */}
+            {acc.posts.length === 0 ? (
+              <p class="px-2 text-[0.95rem] italic text-muted">Sin vistas previas disponibles.</p>
+            ) : (
+              <div class="grid grid-cols-1 gap-5 sm:grid-cols-[repeat(auto-fill,minmax(310px,1fr))] sm:gap-8">
+                {acc.posts.map((post: any) => (
+                  <article
+                    class="sub-post group flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-line bg-card transition-all duration-300 hover:-translate-y-1 hover:border-line-hover hover:shadow-glow"
+                    onclick={`window.location.href='/sheer/play?postId=${post.postId}'`}
+                  >
+                    <div class="relative aspect-video w-full overflow-hidden bg-black">
+                      {post.poster && (
+                        <img
+                          src={post.poster}
+                          alt={post.title}
+                          class="absolute inset-0 h-full w-full object-cover transition-opacity duration-300 group-hover:opacity-0"
+                          loading="lazy"
+                        />
+                      )}
+                      {post.preview && (
+                        <video
+                          class="absolute inset-0 h-full w-full object-cover opacity-0 transition-opacity duration-300 group-hover:opacity-100"
+                          src={post.preview}
+                          muted
+                          loop
+                          playsinline
+                          preload="none"
+                          data-preview
+                        ></video>
+                      )}
+                      <div class="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-all duration-300 group-hover:opacity-100">
+                        <div class="flex h-[54px] w-[54px] scale-[0.8] items-center justify-center rounded-full text-[1.3rem] text-white shadow-[0_4px_15px_rgba(138,59,205,0.4)] transition-all duration-300 [background:var(--primary-gradient)] group-hover:scale-100">
+                          <i class="fa-solid fa-play"></i>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="flex grow flex-col p-5">
+                      <h2 class="line-clamp-2 text-base font-semibold leading-snug text-ink" title={post.title}>
+                        {post.title || 'Post sin título'}
+                      </h2>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+        ))}
+      </div>
+    )}
+  </div>
+</Layout>
+
+<script is:inline>
+  // Reproduce el clip de preview al hover y lo pausa/reinicia al salir.
+  document.querySelectorAll('.sub-post').forEach((card) => {
+    const video = card.querySelector('video[data-preview]');
+    if (!video) return;
+    card.addEventListener('mouseenter', () => {
+      video.play().catch(() => {});
+    });
+    card.addEventListener('mouseleave', () => {
+      video.pause();
+      video.currentTime = 0;
+    });
+  });
+</script>

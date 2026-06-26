@@ -1,20 +1,21 @@
 ---
-// Feed de membresías SSR en vivo: en cada request scrapea /memberships de
-// Sheer (?page=N vía fetch + cookie) — el feed agregado de todos los creadores a
-// los que estás suscrito — y renderiza la grilla con los mismos filtros/orden y
-// scroll infinito que el catálogo. El catálogo por creador vive en /sheer/[alias].
+// Catálogo SSR por creador: ruta dinámica /sheer/[alias]. En cada request
+// scrapea las páginas del creador (?page=N vía fetch + cookie) y renderiza la
+// grilla con los mismos filtros/orden. El alias viene del path; las páginas a
+// scrapear se controlan con ?paginas=N.
 import Layout from '../../layouts/Sheer.astro';
 import SheerVideoCard from '../../components/sheer/SheerVideoCard.astro';
 import SheerHeader from '../../components/sheer/SheerHeader.astro';
 import SheerScrapeControls from '../../components/sheer/SheerScrapeControls.astro';
 import SheerVideoModal from '../../components/sheer/SheerVideoModal.astro';
-import { scrapeSheerMemberships } from '../../lib/sheer/scraper.js';
+import { scrapeSheer, DEFAULT_ALIAS } from '../../lib/sheer/scraper.js';
 
 export const prerender = false;
 
 const env = (Astro.locals as any)?.runtime?.env;
 
 const params = Astro.url.searchParams;
+const alias = (Astro.params.alias || DEFAULT_ALIAS).trim() || DEFAULT_ALIAS;
 const pages = Math.min(Math.max(parseInt(params.get('paginas') || '1', 10) || 1, 1), 40);
 
 let videos: any[] = [];
@@ -23,7 +24,7 @@ let error: string | null = null;
 const startedAt = Date.now();
 
 try {
-  const result = await scrapeSheerMemberships({ maxPages: pages, env });
+  const result = await scrapeSheer({ alias, maxPages: pages, env });
   videos = result.videos;
   totalPages = result.totalPages;
 } catch (e: any) {
@@ -32,10 +33,9 @@ try {
 
 const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
 
-// Build filter lists (actrices, creadores y categorías) from the scraped data
+// Build filter lists (actrices y categorías) from the scraped data
 const actressMap = new Map<string, number>();
 const categoryMap = new Map<string, { name: string; count: number }>();
-const creatorMap = new Map<string, number>();
 
 videos.forEach((v) => {
   (v.models || []).forEach((m: any) => {
@@ -48,7 +48,6 @@ videos.forEach((v) => {
     cur.count += 1;
     categoryMap.set(key, cur);
   });
-  if (v.alias) creatorMap.set(v.alias, (creatorMap.get(v.alias) || 0) + 1);
 });
 
 const actresses = [...actressMap.entries()]
@@ -59,32 +58,28 @@ const categories = [...categoryMap.entries()]
   .map(([alias, o]) => ({ alias, name: o.name, count: o.count }))
   .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
 
-const creators = [...creatorMap.entries()]
-  .map(([alias, count]) => ({ alias, count }))
-  .sort((a, b) => b.count - a.count || a.alias.localeCompare(b.alias));
-
 const resolutionSet = new Set<number>();
 videos.forEach((v) => (v.sources || []).forEach((s: any) => s.size && resolutionSet.add(Number(s.size))));
 const resolutions = [...resolutionSet].sort((a, b) => b - a);
 
-const hasFilters = actresses.length > 0 || categories.length > 0 || creators.length > 0;
+const hasFilters = actresses.length > 0 || categories.length > 0;
 ---
 
-<Layout title="Membresías - Sheer">
+<Layout title={`${alias} - Sheer`}>
   <div class="mx-auto max-w-[1300px] px-4 py-6 sm:px-6 sm:py-8">
-    <SheerHeader title="Membresías" icon="fa-id-card">
-      <a slot="nav" href="/sheer/subscriptions" class="inline-flex items-center gap-2 text-[0.95rem] text-muted transition-all duration-300 hover:text-accent">
-        <i class="fa-solid fa-heart"></i> Suscripciones
+    <SheerHeader title={alias} icon="fa-user">
+      <a slot="nav" href="/sheer" class="inline-flex items-center gap-2 text-[0.95rem] text-muted transition-all duration-300 hover:-translate-x-1 hover:text-accent">
+        <i class="fa-solid fa-arrow-left"></i> Membresías
       </a>
       {error ? (
         <span slot="stats" class="text-danger"><i class="fa-solid fa-triangle-exclamation"></i> Error</span>
       ) : (
-        <span slot="stats"><i class="fa-solid fa-id-card"></i> {videos.length} videos · {elapsed}s · {totalPages} págs.</span>
+        <span slot="stats"><i class="fa-solid fa-bolt"></i> {videos.length} videos · {elapsed}s · {totalPages} págs.</span>
       )}
     </SheerHeader>
 
-    {/* Controles de scraping: recargan la página (SSR vuelve a scrapear). */}
-    <SheerScrapeControls pages={pages} membershipMode />
+    {/* Controles de scraping: navegan a /sheer/[alias]?paginas=N (SSR re-scrapea). */}
+    <SheerScrapeControls alias={alias} pages={pages} pathMode />
 
     {error ? (
       <div class="px-8 py-16 text-center text-[1.2rem] text-danger">
@@ -107,18 +102,6 @@ const hasFilters = actresses.length > 0 || categories.length > 0 || creators.len
 
         {hasFilters && (
           <div class="mb-8 grid grid-cols-2 items-end gap-3 sm:-mt-4 sm:mb-10 sm:flex sm:flex-wrap sm:gap-4">
-            {creators.length > 0 && (
-              <div class="flex flex-col gap-1.5">
-                <label class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.5px] text-muted"><i class="fa-solid fa-user-pen"></i> Creador</label>
-                <select id="filter-creator" class="w-full cursor-pointer rounded-[10px] border border-line bg-card px-3.5 py-2.5 text-[0.9rem] text-ink outline-none transition-all duration-300 hover:border-line-hover focus:border-line-hover sm:min-w-[180px]">
-                  <option value="">Todos ({creators.length})</option>
-                  {creators.map((c) => (
-                    <option value={c.alias.toLowerCase()}>{c.alias} ({c.count})</option>
-                  ))}
-                </select>
-              </div>
-            )}
-
             {actresses.length > 0 && (
               <div class="flex flex-col gap-1.5">
                 <label class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.5px] text-muted"><i class="fa-solid fa-user-tag"></i> Actriz</label>
@@ -181,13 +164,14 @@ const hasFilters = actresses.length > 0 || categories.length > 0 || creators.len
         {videos.length === 0 ? (
           <div class="px-8 py-16 text-center text-[1.2rem] text-muted">
             <i class="fa-solid fa-film mb-4 block text-5xl text-muted"></i>
-            <p>No se obtuvieron videos de tus membresías.</p>
+            <p>No se obtuvieron videos del scrape en vivo.</p>
           </div>
         ) : (
           <>
             <div
               class="grid grid-cols-1 gap-5 sm:grid-cols-[repeat(auto-fill,minmax(310px,1fr))] sm:gap-8"
               id="video-grid"
+              data-alias={alias}
               data-next-page={pages + 1}
               data-total-pages={totalPages}
             >
@@ -220,7 +204,6 @@ const hasFilters = actresses.length > 0 || categories.length > 0 || creators.len
   const grid = document.getElementById('video-grid');
   const noResults = document.getElementById('no-results');
 
-  const creatorSelect = document.getElementById('filter-creator');
   const actressSelect = document.getElementById('filter-actress');
   const categorySelect = document.getElementById('filter-category');
   const resolutionSelect = document.getElementById('filter-resolution');
@@ -274,7 +257,6 @@ const hasFilters = actresses.length > 0 || categories.length > 0 || creators.len
 
   const applyFilters = () => {
     const query = (searchInput?.value || '').toLowerCase().trim();
-    const creator = (creatorSelect?.value || '').toLowerCase();
     const actress = (actressSelect?.value || '').toLowerCase();
     const category = (categorySelect?.value || '').toLowerCase();
     const minRes = parseInt(resolutionSelect?.value || '0', 10) || 0;
@@ -284,18 +266,16 @@ const hasFilters = actresses.length > 0 || categories.length > 0 || creators.len
     cards.forEach((card) => {
       const blob = card.getAttribute('data-search') || card.getAttribute('data-title') || '';
       const id = (card.getAttribute('data-id') || '').toLowerCase();
-      const alias = (card.getAttribute('data-alias') || '').toLowerCase();
       const models = (card.getAttribute('data-models') || '').split('|').filter(Boolean);
       const tags = (card.getAttribute('data-tags') || '').split('|').filter(Boolean);
       const res = parseInt(card.getAttribute('data-res') || '0', 10) || 0;
 
       const matchesSearch = !query || blob.includes(query) || id.includes(query);
-      const matchesCreator = !creator || alias === creator;
       const matchesActress = !actress || models.includes(actress);
       const matchesCategory = !category || tags.includes(category);
       const matchesRes = !minRes || res >= minRes;
 
-      if (matchesSearch && matchesCreator && matchesActress && matchesCategory && matchesRes) {
+      if (matchesSearch && matchesActress && matchesCategory && matchesRes) {
         card.style.display = 'flex';
         visibleCount++;
       } else {
@@ -315,7 +295,6 @@ const hasFilters = actresses.length > 0 || categories.length > 0 || creators.len
   };
 
   searchInput?.addEventListener('input', applyFilters);
-  creatorSelect?.addEventListener('change', applyFilters);
   actressSelect?.addEventListener('change', applyFilters);
   categorySelect?.addEventListener('change', applyFilters);
   resolutionSelect?.addEventListener('change', applyFilters);
@@ -323,7 +302,6 @@ const hasFilters = actresses.length > 0 || categories.length > 0 || creators.len
 
   clearBtn?.addEventListener('click', () => {
     if (searchInput) searchInput.value = '';
-    if (creatorSelect) creatorSelect.value = '';
     if (actressSelect) actressSelect.value = '';
     if (categorySelect) categorySelect.value = '';
     if (resolutionSelect) resolutionSelect.value = '';
@@ -457,6 +435,7 @@ const hasFilters = actresses.length > 0 || categories.length > 0 || creators.len
   const loadingEl = document.getElementById('loading-more');
   const endEl = document.getElementById('end-of-list');
 
+  const gridAlias = grid?.dataset.alias || '';
   const totalPages = parseInt(grid?.dataset.totalPages || '1', 10) || 1;
   let nextPage = parseInt(grid?.dataset.nextPage || '2', 10) || 2;
   let hasMore = !!grid && nextPage <= totalPages;
@@ -466,7 +445,7 @@ const hasFilters = actresses.length > 0 || categories.length > 0 || creators.len
     hasMore = false;
     loadingEl?.classList.add('hidden');
     if (endEl) {
-      endEl.textContent = cards.length ? '— Fin de tus membresías —' : 'Sin resultados.';
+      endEl.textContent = cards.length ? '— Fin del catálogo —' : 'Sin resultados.';
       endEl.classList.remove('hidden');
     }
     observer?.disconnect();
@@ -478,7 +457,7 @@ const hasFilters = actresses.length > 0 || categories.length > 0 || creators.len
     loadingEl?.classList.remove('hidden');
 
     try {
-      const u = new URLSearchParams({ source: 'membership', page: String(nextPage) });
+      const u = new URLSearchParams({ alias: gridAlias, page: String(nextPage) });
       const res = await fetch(`/sheer/live-cards?${u}`);
       const html = await res.text();
       const tmp = document.createElement('div');

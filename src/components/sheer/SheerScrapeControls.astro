@@ -1,0 +1,65 @@
+---
+// Controles de scraping en vivo (creador + páginas). Reutilizado por:
+// - membershipMode=true: feed de membresías (/sheer), GET solo con ?paginas (sin creador).
+// - pathMode=true: ruta por creador (/sheer/[alias]), navega al path con ?paginas=N.
+// - por defecto: GET form normal a /sheer/live con ?alias.
+interface Props {
+  alias?: string;
+  pages: number;
+  pathMode?: boolean;
+  membershipMode?: boolean;
+}
+
+const { alias = '', pages, pathMode = false, membershipMode = false } = Astro.props;
+
+const formProps = membershipMode
+  ? { method: 'get', action: '/sheer' }
+  : pathMode
+  ? {
+      method: 'get',
+      onsubmit:
+        "event.preventDefault(); const a=this.alias.value.trim(); const p=this.paginas.value||'1'; if(a) window.location.href='/sheer/'+encodeURIComponent(a)+'?paginas='+p;",
+    }
+  : { method: 'get', action: '/sheer/live' };
+---
+
+<details class="group mb-8 rounded-2xl border border-line bg-card">
+  <summary class="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-sm font-semibold text-ink [&::-webkit-details-marker]:hidden">
+    <i class="fa-solid fa-sliders text-muted"></i> Scraping en vivo
+    <i class="fa-solid fa-chevron-down ml-auto text-xs text-muted transition-transform duration-300 group-open:rotate-180"></i>
+  </summary>
+  <form {...formProps} class="flex flex-wrap items-end gap-3 px-4 pb-4 sm:gap-4 sm:px-5">
+  {!membershipMode && (
+    <div class="flex flex-col gap-1.5">
+      <label for="alias" class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.5px] text-muted"><i class="fa-solid fa-user"></i> Creador</label>
+      <input
+        type="text"
+        id="alias"
+        name="alias"
+        value={alias}
+        class="w-full rounded-[10px] border border-line bg-[rgba(8,5,15,0.6)] px-3.5 py-2.5 text-[0.9rem] text-ink outline-none transition-all duration-300 hover:border-line-hover focus:border-line-hover sm:min-w-[180px]"
+      />
+    </div>
+  )}
+  <div class="flex w-full items-end gap-3 sm:w-auto">
+    <div class="flex w-20 flex-none flex-col gap-1.5 sm:w-auto">
+      <label for="paginas" class="flex items-center gap-1.5 whitespace-nowrap text-xs font-semibold uppercase tracking-[0.5px] text-muted"><i class="fa-solid fa-layer-group"></i> Páginas (1-40)</label>
+      <input
+        type="number"
+        id="paginas"
+        name="paginas"
+        min="1"
+        max="40"
+        value={pages}
+        class="w-full rounded-[10px] border border-line bg-[rgba(8,5,15,0.6)] px-3.5 py-2.5 text-[0.9rem] text-ink outline-none transition-all duration-300 hover:border-line-hover focus:border-line-hover sm:min-w-[140px]"
+      />
+    </div>
+    <button type="submit" class="btn btn--primary !mt-0 !w-auto !py-2.5 whitespace-nowrap">
+      <i class="fa-solid fa-rotate"></i> Scrapear en vivo
+    </button>
+  </div>
+  <p class="w-full text-[0.8rem] italic text-muted">
+    Cada página = ~10 videos. Más páginas = más tiempo. Los datos NO se guardan; solo se muestran.
+  </p>
+  </form>
+</details>

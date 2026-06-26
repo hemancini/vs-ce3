@@ -1,0 +1,99 @@
+---
+// Modal de reproducción de Sheer. Se incluye una vez por página de grilla.
+// La tarjeta (SheerVideoCard) guarda los datos del video en localStorage y llama
+// a window.openSheerModal(postId); aquí renderizamos la card del player DIRECTO
+// en el DOM (sin iframe), así se ve de inmediato, y la poblamos con
+// window.sheerPlayerLoad. El spinner de carga vive dentro del área del video.
+import SheerPlayer from './SheerPlayer.astro';
+---
+
+<div
+  id="sheer-modal"
+  class="fixed inset-0 z-[200] hidden items-center justify-center p-3 sm:p-6"
+  aria-hidden="true"
+>
+  <div class="absolute inset-0 bg-black/80 backdrop-blur-sm" data-close></div>
+
+  <div class="relative z-10 max-h-[92vh] w-full max-w-[1100px] overflow-y-auto">
+    {/* Botones flotantes sobre el reproductor */}
+    <div class="absolute right-2 top-2 z-20 flex gap-2 sm:right-3 sm:top-3">
+      <a
+        id="sheer-modal-newtab"
+        href="#"
+        target="_blank"
+        rel="noopener"
+        title="Abrir en una nueva pestaña"
+        class="flex items-center gap-2 rounded-full border border-line bg-[rgba(8,5,15,0.85)] px-3.5 py-2 text-[0.8rem] font-semibold text-ink backdrop-blur-md transition-all duration-300 hover:border-line-hover hover:text-accent"
+      >
+        <i class="fa-solid fa-up-right-from-square"></i>
+        <span class="hidden sm:inline">Nueva pestaña</span>
+      </a>
+      <button
+        type="button"
+        data-close
+        aria-label="Cerrar"
+        class="flex h-9 w-9 items-center justify-center rounded-full border border-line bg-[rgba(8,5,15,0.85)] text-ink backdrop-blur-md transition-all duration-300 hover:border-line-hover hover:text-accent"
+      >
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </div>
+
+    <SheerPlayer />
+  </div>
+</div>
+
+<script is:inline>
+  (function () {
+    const modal = document.getElementById('sheer-modal');
+    const newtab = document.getElementById('sheer-modal-newtab');
+    if (!modal || !newtab) return;
+
+    let lastFocus = null;
+
+    function open(postId) {
+      if (!postId) return;
+      let videoData = null;
+      try {
+        const raw =
+          localStorage.getItem('sheer:player:' + postId) ||
+          sessionStorage.getItem('sheer:player:' + postId);
+        if (raw) videoData = JSON.parse(raw);
+      } catch (e) {}
+      if (!videoData) {
+        // Sin datos cacheados, abrimos la página dedicada como fallback.
+        window.location.href = '/sheer/play?postId=' + encodeURIComponent(postId);
+        return;
+      }
+
+      newtab.href = '/sheer/play?postId=' + encodeURIComponent(postId);
+      lastFocus = document.activeElement;
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+      modal.setAttribute('aria-hidden', 'false');
+      document.body.style.overflow = 'hidden';
+
+      // Poblar y arrancar el player (autoplay silenciado).
+      if (window.sheerPlayerLoad) window.sheerPlayerLoad(videoData, { autoplay: true });
+    }
+
+    function close() {
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+      modal.setAttribute('aria-hidden', 'true');
+      document.body.style.overflow = '';
+      if (window.sheerPlayerStop) window.sheerPlayerStop();
+      if (lastFocus && typeof lastFocus.focus === 'function') lastFocus.focus();
+    }
+
+    // Expuesto para que la tarjeta lo invoque en su onclick.
+    window.openSheerModal = open;
+
+    modal.querySelectorAll('[data-close]').forEach((el) => {
+      el.addEventListener('click', close);
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !modal.classList.contains('hidden')) close();
+    });
+  })();
+</script>

@@ -1,0 +1,30 @@
+---
+// Header común de las páginas de Sheer. Compuesto por:
+//   · Fila superior (sticky): título enlazado a /sheer + avatar de autenticación
+//     (SheerAuth) arriba a la derecha.
+//   · Fila inferior: link de navegación a un extremo (slot "nav") y el badge de
+//     stats al extremo contrario (slot "stats").
+//
+// Cada página pasa su título/icono por props y el contenido de los slots.
+import SheerAuth from './SheerAuth.astro';
+
+interface Props {
+  title: string;
+  icon?: string;
+}
+const { title, icon = 'fa-id-card' } = Astro.props;
+---
+
+<header class="sticky top-0 z-[100] mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-line bg-[rgba(8,5,15,0.8)] pb-4 backdrop-blur-md sm:mb-8 sm:pb-6">
+  <a href="/sheer" class="text-gradient flex items-center gap-2 text-[1.35rem] font-extrabold tracking-[-0.5px] sm:text-[1.8rem]">
+    <i class={`fa-solid ${icon}`}></i> {title}
+  </a>
+  <SheerAuth />
+</header>
+
+<div class="mb-6 flex flex-wrap items-center justify-between gap-3 sm:mb-8">
+  <slot name="nav" />
+  <div class="shrink-0 whitespace-nowrap rounded-full border border-line bg-card px-3 py-1.5 text-[0.8rem] text-muted sm:px-4 sm:py-2 sm:text-[0.9rem]">
+    <slot name="stats" />
+  </div>
+</div>

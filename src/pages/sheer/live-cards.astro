@@ -4,15 +4,17 @@
 // resultante se inyecta en la grilla y se cablea con el mismo script.
 //
 // Parámetros (GET):
-//   ?alias=<creador>   creador (default: TheGrey)
-//   ?page=N            página de catálogo (default: 1)
+//   ?source=membership feed agregado de tus membresías (/memberships)
+//   ?alias=<creador>   catálogo de un creador (default: TheGrey)
+//   ?page=N            página (default: 1)
 import SheerVideoCard from '../../components/sheer/SheerVideoCard.astro';
-import { scrapeSheerPage, DEFAULT_ALIAS } from '../../lib/sheer/scraper.js';
+import { scrapeSheerPage, scrapeSheerMembershipsPage, DEFAULT_ALIAS } from '../../lib/sheer/scraper.js';
 
 export const partial = true;
 export const prerender = false;
 
 const params = Astro.url.searchParams;
+const source = (params.get('source') || '').trim();
 const alias = (params.get('alias') || DEFAULT_ALIAS).trim() || DEFAULT_ALIAS;
 const page = Math.min(Math.max(parseInt(params.get('page') || '1', 10) || 1, 1), 40);
 
@@ -20,7 +22,10 @@ const env = (Astro.locals as any)?.runtime?.env;
 
 let videos: any[] = [];
 try {
-  const result = await scrapeSheerPage({ alias, page, env });
+  const result =
+    source === 'membership'
+      ? await scrapeSheerMembershipsPage({ page, env })
+      : await scrapeSheerPage({ alias, page, env });
   videos = result.videos;
 } catch {
   videos = [];
