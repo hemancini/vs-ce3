@@ -1,21 +1,45 @@
 ---
+// Scraper SSR en vivo: en cada request scrapea Sheer (?page=N vía fetch + cookie)
+// y renderiza la grilla. Mismos filtros/orden que el catálogo, pero los datos se
+// obtienen frescos en el servidor en vez de leer videos.json. Los controles
+// (páginas) recargan la página con ?paginas=N.
 import Layout from '../../layouts/Sheer.astro';
-// El JSON generado por el scraper se empaqueta en build-time y actúa como API.
-import videos from '../api/sheer/videos.json';
+import SheerVideoCard from '../../components/sheer/SheerVideoCard.astro';
+import SheerAuth from '../../components/sheer/SheerAuth.astro';
+import { scrapeSheer, DEFAULT_ALIAS } from '../../lib/sheer/scraper.js';
 
-const errorMsg = (!videos || videos.length === 0)
-  ? 'No hay videos. Ejecuta el scraper en local y vuelve a desplegar.'
-  : null;
+export const prerender = false;
+
+const env = (Astro.locals as any)?.runtime?.env;
+
+const params = Astro.url.searchParams;
+const alias = (params.get('alias') || DEFAULT_ALIAS).trim() || DEFAULT_ALIAS;
+const pages = Math.min(Math.max(parseInt(params.get('paginas') || '1', 10) || 1, 1), 40);
+
+let videos: any[] = [];
+let totalPages = 0;
+let error: string | null = null;
+const startedAt = Date.now();
+
+try {
+  const result = await scrapeSheer({ alias, maxPages: pages, env });
+  videos = result.videos;
+  totalPages = result.totalPages;
+} catch (e: any) {
+  error = e.message;
+}
+
+const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
 
 // Build filter lists (actrices y categorías) from the scraped data
-const actressMap = new Map(); // name -> count
-const categoryMap = new Map(); // alias -> { name, count }
+const actressMap = new Map<string, number>();
+const categoryMap = new Map<string, { name: string; count: number }>();
 
 videos.forEach((v) => {
-  (v.models || []).forEach((m) => {
+  (v.models || []).forEach((m: any) => {
     if (m && m.name) actressMap.set(m.name, (actressMap.get(m.name) || 0) + 1);
   });
-  (v.tags || []).forEach((t) => {
+  (v.tags || []).forEach((t: any) => {
     const key = (t && (t.alias || t.name)) || '';
     if (!key) return;
     const cur = categoryMap.get(key) || { name: t.name || key, count: 0 };
@@ -32,44 +56,71 @@ const categories = [...categoryMap.entries()]
   .map(([alias, o]) => ({ alias, name: o.name, count: o.count }))
   .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
 
-// All resolutions present, for the resolution filter
-const resolutionSet = new Set();
-videos.forEach((v) => (v.sources || []).forEach((s) => s.size && resolutionSet.add(Number(s.size))));
+const resolutionSet = new Set<number>();
+videos.forEach((v) => (v.sources || []).forEach((s: any) => s.size && resolutionSet.add(Number(s.size))));
 const resolutions = [...resolutionSet].sort((a, b) => b - a);
 
 const hasFilters = actresses.length > 0 || categories.length > 0;
-
-// Clean title helper
-const cleanTitle = (title) => {
-  return title || 'Video sin título';
-};
 ---
 
-<Layout title="Catálogo de Videos - Sheer">
+<Layout title="Scraper en Vivo - Sheer">
   <div class="mx-auto max-w-[1300px] px-4 py-6 sm:px-6 sm:py-8">
     <header class="sticky top-0 z-[100] mb-8 flex flex-wrap items-center justify-between gap-3 border-b border-line bg-[rgba(8,5,15,0.8)] pb-4 backdrop-blur-md sm:mb-12 sm:pb-6">
       <a href="/sheer" class="text-gradient flex items-center gap-2 text-[1.35rem] font-extrabold tracking-[-0.5px] sm:text-[1.8rem]">
-        <i class="fa-solid fa-play-circle"></i> Sheer Player
+        <i class="fa-solid fa-bolt"></i> Sheer en Vivo
       </a>
-      <div class="flex flex-wrap items-center gap-2 sm:gap-4">
-        {import.meta.env.DEV && (
-          <a
-            href="/sheer/scraper"
-            class="flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full border border-line px-3 py-1.5 text-[0.8rem] font-bold shadow-[0_4px_10px_rgba(138,59,205,0.2)] transition-all duration-300 [background:var(--btn-gradient)] hover:-translate-y-0.5 hover:border-line-hover hover:shadow-[0_6px_15px_rgba(138,59,205,0.4)] sm:px-4 sm:py-2 sm:text-[0.9rem]"
-          >
-            <i class="fa-solid fa-spider"></i> <span class="hidden sm:inline">Consola </span>Scraper
-          </a>
+      <div class="shrink-0 whitespace-nowrap rounded-full border border-line bg-card px-3 py-1.5 text-[0.8rem] text-muted sm:px-4 sm:py-2 sm:text-[0.9rem]">
+        {error ? (
+          <span class="text-danger"><i class="fa-solid fa-triangle-exclamation"></i> Error</span>
+        ) : (
+          <span><i class="fa-solid fa-bolt"></i> {videos.length} videos · {elapsed}s · {totalPages} págs.</span>
         )}
-        <div class="shrink-0 whitespace-nowrap rounded-full border border-line bg-card px-3 py-1.5 text-[0.8rem] text-muted sm:px-4 sm:py-2 sm:text-[0.9rem]">
-          <i class="fa-solid fa-video"></i> {videos.length} <span class="hidden sm:inline">videos disponibles</span><span class="sm:hidden">videos</span>
-        </div>
       </div>
     </header>
 
-    {errorMsg ? (
+    <a href="/sheer" class="mb-6 inline-flex items-center gap-2 text-[0.95rem] text-muted transition-all duration-300 hover:-translate-x-1 hover:text-accent">
+      <i class="fa-solid fa-arrow-left"></i> Volver al Catálogo
+    </a>
+
+    {/* Autenticación: pegar cookies o login con email/contraseña + validación. */}
+    <SheerAuth />
+
+    {/* Controles de scraping: recargan la página (SSR vuelve a scrapear). */}
+    <form method="get" action="/sheer/live" class="mb-8 flex flex-wrap items-end gap-3 rounded-2xl border border-line bg-card px-4 py-4 sm:gap-4 sm:px-5">
+      <div class="flex flex-col gap-1.5">
+        <label for="alias" class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.5px] text-muted"><i class="fa-solid fa-user"></i> Creador</label>
+        <input
+          type="text"
+          id="alias"
+          name="alias"
+          value={alias}
+          class="w-full rounded-[10px] border border-line bg-[rgba(8,5,15,0.6)] px-3.5 py-2.5 text-[0.9rem] text-ink outline-none transition-all duration-300 hover:border-line-hover focus:border-line-hover sm:min-w-[180px]"
+        />
+      </div>
+      <div class="flex flex-col gap-1.5">
+        <label for="paginas" class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.5px] text-muted"><i class="fa-solid fa-layer-group"></i> Páginas (1-40)</label>
+        <input
+          type="number"
+          id="paginas"
+          name="paginas"
+          min="1"
+          max="40"
+          value={pages}
+          class="w-full rounded-[10px] border border-line bg-[rgba(8,5,15,0.6)] px-3.5 py-2.5 text-[0.9rem] text-ink outline-none transition-all duration-300 hover:border-line-hover focus:border-line-hover sm:min-w-[140px]"
+        />
+      </div>
+      <button type="submit" class="btn btn--primary !mt-0">
+        <i class="fa-solid fa-rotate"></i> Scrapear en vivo
+      </button>
+      <p class="w-full text-[0.8rem] italic text-muted sm:w-auto sm:self-center">
+        Cada página = ~10 videos. Más páginas = más tiempo. Los datos NO se guardan; solo se muestran.
+      </p>
+    </form>
+
+    {error ? (
       <div class="px-8 py-16 text-center text-[1.2rem] text-danger">
         <i class="fa-solid fa-triangle-exclamation mb-4 block text-5xl"></i>
-        <p>{errorMsg}</p>
+        <p>{error}</p>
       </div>
     ) : (
       <>
@@ -149,138 +200,33 @@ const cleanTitle = (title) => {
         {videos.length === 0 ? (
           <div class="px-8 py-16 text-center text-[1.2rem] text-muted">
             <i class="fa-solid fa-film mb-4 block text-5xl text-muted"></i>
-            <p>No hay videos disponibles en el catálogo.</p>
+            <p>No se obtuvieron videos del scrape en vivo.</p>
           </div>
         ) : (
-          <div class="grid grid-cols-1 gap-5 sm:grid-cols-[repeat(auto-fill,minmax(310px,1fr))] sm:gap-8" id="video-grid">
-            {videos.map((video) => {
-              // Find resolutions
-              const sizes = video.sources?.map(s => s.size).filter(Boolean) || [];
-              // Sort descending
-              const sortedSizes = sizes.map(Number).sort((a,b) => b-a);
-              const maxRes = sortedSizes[0] ? sortedSizes[0] + 'p' : 'SD';
-              const maxResNum = sortedSizes[0] || 0;
+          <>
+            <div
+              class="grid grid-cols-1 gap-5 sm:grid-cols-[repeat(auto-fill,minmax(310px,1fr))] sm:gap-8"
+              id="video-grid"
+              data-alias={alias}
+              data-next-page={pages + 1}
+              data-total-pages={totalPages}
+            >
+              {videos.map((video) => <SheerVideoCard video={video} />)}
+            </div>
 
-              // Filter metadata
-              const modelNames = (video.models || []).map((m) => m.name).filter(Boolean);
-              const tagAliases = (video.tags || []).map((t) => t.alias || t.name).filter(Boolean);
-              const tagNames = (video.tags || []).map((t) => t.name).filter(Boolean);
-              const tagList = (video.tags || [])
-                .map((t) => ({ name: t.name, alias: t.alias || t.name }))
-                .filter((t) => t.name);
-              const searchBlob = [video.title, ...modelNames, ...tagNames].join(' ').toLowerCase();
+            <div id="no-results" class="hidden px-8 py-16 text-center text-[1.2rem] text-muted">
+              <i class="fa-solid fa-ban mb-4 block text-5xl text-muted"></i>
+              <p>No se encontraron videos que coincidan con la búsqueda.</p>
+            </div>
 
-              // Views, publish date & duration
-              const views = video.views == null ? null : Number(video.views);
-              const dateStr = video.date || '';
-              const duration = video.duration || '';
-              const dateMs = dateStr ? Date.parse(dateStr) || 0 : 0;
-
-              return (
-                <div
-                  class="video-card group"
-                  data-title={video.title}
-                  data-id={video.postId}
-                  data-search={searchBlob}
-                  data-models={modelNames.join('|').toLowerCase()}
-                  data-tags={tagAliases.join('|').toLowerCase()}
-                  data-res={maxResNum}
-                  data-views={views ?? 0}
-                  data-date={dateMs}
-                  onclick={`window.location.href='/sheer/play?postId=${video.postId}'`}
-                >
-                  <div class="relative aspect-video w-full overflow-hidden bg-black">
-                    <div class="absolute right-3 top-3 rounded-md border border-line bg-[rgba(8,5,15,0.75)] px-2.5 py-1 text-xs font-bold uppercase tracking-[0.5px] text-accent backdrop-blur-md">{maxRes}</div>
-
-                    {duration && (
-                      <div class="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-md border border-line bg-[rgba(8,5,15,0.75)] px-2.5 py-1 text-xs font-bold tracking-[0.5px] text-ink backdrop-blur-md">
-                        <i class="fa-solid fa-clock"></i> {duration}
-                      </div>
-                    )}
-
-                    {video.poster ? (
-                      <img
-                        src={video.poster}
-                        alt={cleanTitle(video.title)}
-                        class="h-full w-full object-cover transition-all duration-300 group-hover:scale-105"
-                        loading="lazy"
-                      />
-                    ) : (
-                      <div class="flex h-full w-full flex-col items-center justify-center gap-2 [background:linear-gradient(135deg,#18122B_0%,#0c0817_100%)]">
-                        <i class="fa-solid fa-clapperboard text-[2.5rem] text-white/10"></i>
-                        <span class="text-[0.75rem] font-bold tracking-[1px] text-muted">SHEER CONTENT</span>
-                      </div>
-                    )}
-
-                    <div class="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-all duration-300 group-hover:opacity-100">
-                      <div class="flex h-[54px] w-[54px] scale-[0.8] items-center justify-center rounded-full text-[1.3rem] text-white shadow-[0_4px_15px_rgba(138,59,205,0.4)] transition-all duration-300 [background:var(--primary-gradient)] group-hover:scale-100">
-                        <i class="fa-solid fa-play"></i>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div class="flex grow flex-col p-5">
-                    <h2 class="mb-3 line-clamp-2 h-[2.8rem] text-base font-semibold leading-snug text-ink" title={video.title}>{cleanTitle(video.title)}</h2>
-
-                    {modelNames.length > 0 && (
-                      <div class="mb-2.5 flex items-center gap-1.5 truncate text-[0.8rem] font-semibold text-accent" title={modelNames.join(', ')}>
-                        <i class="fa-solid fa-user-tag"></i>
-                        <span class="truncate">
-                          {modelNames.map((name, i) => (
-                            <>
-                              {i > 0 && ', '}
-                              <span
-                                class="actress-link cursor-pointer hover:underline"
-                                data-actress={name.toLowerCase()}
-                                title={`Filtrar por ${name}`}
-                              >{name}</span>
-                            </>
-                          ))}
-                        </span>
-                      </div>
-                    )}
-
-                    {tagList.length > 0 && (
-                      <div class="mb-3.5 flex flex-wrap gap-1.5">
-                        {tagList.slice(0, 3).map((t) => (
-                          <span class="cat-tag cursor-pointer transition-colors hover:border-line-hover hover:text-accent" data-cat={t.alias} title={`Filtrar por ${t.name}`}>{t.name}</span>
-                        ))}
-                        {tagList.length > 3 && <span class="cat-tag cat-tag--more">+{tagList.length - 3}</span>}
-                      </div>
-                    )}
-
-                    <div class="mt-auto">
-                      {(dateStr || views != null) && (
-                        <div class="mb-2 flex items-center gap-3 text-[0.75rem] text-muted">
-                          {dateStr && (
-                            <span class="flex items-center gap-1.5"><i class="fa-solid fa-calendar-day"></i> {dateStr}</span>
-                          )}
-                          {views != null && (
-                            <span class="flex items-center gap-1.5"><i class="fa-solid fa-eye"></i> {views.toLocaleString('es')} views</span>
-                          )}
-                        </div>
-                      )}
-
-                      <div class="flex items-center justify-between text-[0.8rem] text-muted">
-                        <span>ID: {video.postId}</span>
-                        <div class="flex gap-1.5">
-                          {sortedSizes.slice(0, 3).map((size) => (
-                            <span class={`res-tag ${size === sortedSizes[0] ? 'res-tag--highlight' : ''}`}>{size}p</span>
-                          ))}
-                          {sortedSizes.length > 3 && <span class="res-tag">+{sortedSizes.length - 3}</span>}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          <div id="no-results" class="hidden px-8 py-16 text-center text-[1.2rem] text-muted">
-            <i class="fa-solid fa-ban mb-4 block text-5xl text-muted"></i>
-            <p>No se encontraron videos que coincidan con la búsqueda.</p>
-          </div>
+            {/* Scroll infinito: sentinel + indicadores de carga / fin. */}
+            <div id="scroll-sentinel" class="h-px w-full"></div>
+            <div id="loading-more" class="hidden px-8 py-10 text-center text-[1rem] text-muted">
+              <i class="fa-solid fa-spinner fa-spin mb-2 block text-3xl text-accent"></i>
+              <p>Cargando más videos...</p>
+            </div>
+            <div id="end-of-list" class="hidden px-8 py-10 text-center text-[0.95rem] text-muted"></div>
+          </>
         )}
       </>
     )}
@@ -289,9 +235,8 @@ const cleanTitle = (title) => {
 
 <script is:inline>
   const searchInput = document.getElementById('search');
-  const cards = Array.from(document.querySelectorAll('.video-card'));
-  const noResults = document.getElementById('no-results');
   const grid = document.getElementById('video-grid');
+  const noResults = document.getElementById('no-results');
 
   const actressSelect = document.getElementById('filter-actress');
   const categorySelect = document.getElementById('filter-category');
@@ -300,62 +245,20 @@ const cleanTitle = (title) => {
   const clearBtn = document.getElementById('filter-clear');
   const filterCount = document.getElementById('filter-count');
 
-  // Remember the original order so "Por defecto" can restore it
-  cards.forEach((card, i) => card.setAttribute('data-order', String(i)));
-
-  // --- URL state sync ------------------------------------------------------
-  // Map each control to a short query-param key.
-  const urlParamMap = {
-    q: searchInput,
-    actress: actressSelect,
-    category: categorySelect,
-    res: resolutionSelect,
-    sort: sortSelect,
-  };
-
-  const defaultFor = (el) => (el === sortSelect ? 'default' : '');
-
-  // Write the current control values to the URL without adding history entries.
-  const syncUrl = () => {
-    const params = new URLSearchParams(window.location.search);
-    Object.entries(urlParamMap).forEach(([key, el]) => {
-      const value = (el?.value || '').trim();
-      if (value && value !== defaultFor(el)) {
-        params.set(key, value);
-      } else {
-        params.delete(key);
-      }
-    });
-    const qs = params.toString();
-    const newUrl = window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash;
-    window.history.replaceState(null, '', newUrl);
-  };
-
-  // Read the URL params into the controls on load.
-  const restoreFromUrl = () => {
-    const params = new URLSearchParams(window.location.search);
-    Object.entries(urlParamMap).forEach(([key, el]) => {
-      if (!el || !params.has(key)) return;
-      const value = params.get(key) || '';
-      // For selects, fall back to a case-insensitive option match.
-      if (el.tagName === 'SELECT') {
-        el.value = value;
-        if (el.value !== value) {
-          const opt = Array.from(el.options).find(
-            (o) => o.value.toLowerCase() === value.toLowerCase()
-          );
-          if (opt) el.value = opt.value;
-        }
-      } else {
-        el.value = value;
-      }
-    });
-  };
+  // `cards` crece con el scroll infinito, así que es mutable. `seen` deduplica
+  // por postId; `orderCounter` mantiene el orden de llegada para "Por defecto".
+  let cards = Array.from(document.querySelectorAll('.video-card'));
+  const seen = new Set();
+  let orderCounter = 0;
+  cards.forEach((card) => {
+    card.setAttribute('data-order', String(orderCounter++));
+    const id = card.getAttribute('data-id');
+    if (id) seen.add(id);
+  });
 
   const applySort = () => {
     if (!grid) return;
     const mode = sortSelect?.value || 'default';
-
     const num = (el, attr) => parseInt(el.getAttribute(attr) || '0', 10) || 0;
 
     const sorted = [...cards].sort((a, b) => {
@@ -414,9 +317,7 @@ const cleanTitle = (title) => {
       }
     });
 
-    if (filterCount) {
-      filterCount.textContent = `${visibleCount} de ${cards.length}`;
-    }
+    if (filterCount) filterCount.textContent = `${visibleCount} de ${cards.length}`;
 
     if (visibleCount === 0) {
       if (noResults) noResults.classList.remove('hidden');
@@ -427,15 +328,11 @@ const cleanTitle = (title) => {
     }
   };
 
-  // Wrap the handlers so any change also persists to the URL.
-  const onFilterChange = () => { applyFilters(); syncUrl(); };
-  const onSortChange = () => { applySort(); syncUrl(); };
-
-  searchInput?.addEventListener('input', onFilterChange);
-  actressSelect?.addEventListener('change', onFilterChange);
-  categorySelect?.addEventListener('change', onFilterChange);
-  resolutionSelect?.addEventListener('change', onFilterChange);
-  sortSelect?.addEventListener('change', onSortChange);
+  searchInput?.addEventListener('input', applyFilters);
+  actressSelect?.addEventListener('change', applyFilters);
+  categorySelect?.addEventListener('change', applyFilters);
+  resolutionSelect?.addEventListener('change', applyFilters);
+  sortSelect?.addEventListener('change', applySort);
 
   clearBtn?.addEventListener('click', () => {
     if (searchInput) searchInput.value = '';
@@ -445,55 +342,122 @@ const cleanTitle = (title) => {
     if (sortSelect) sortSelect.value = 'default';
     applySort();
     applyFilters();
-    syncUrl();
   });
 
-  // Click on a card category tag -> apply that category filter
-  document.querySelectorAll('.cat-tag[data-cat]').forEach((tag) => {
-    tag.addEventListener('click', (e) => {
-      e.stopPropagation(); // don't trigger the card navigation
-      if (!categorySelect) return;
-
-      const cat = tag.getAttribute('data-cat') || '';
-      categorySelect.value = cat;
-      // Fallback to a case-insensitive match if the exact value wasn't an option
-      if (categorySelect.value !== cat) {
-        const opt = Array.from(categorySelect.options).find(
-          (o) => o.value.toLowerCase() === cat.toLowerCase()
-        );
-        if (opt) categorySelect.value = opt.value;
-      }
-
-      applyFilters();
-      syncUrl();
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+  // Cablea los clics de categoría/actriz dentro de `container` (toda la página al
+  // inicio, o solo las tarjetas nuevas tras un scroll). Marca los nodos ya
+  // cableados con data-wired para no duplicar listeners.
+  const wireCards = (container) => {
+    container.querySelectorAll('.cat-tag[data-cat]:not([data-wired])').forEach((tag) => {
+      tag.setAttribute('data-wired', '1');
+      tag.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!categorySelect) return;
+        const cat = tag.getAttribute('data-cat') || '';
+        categorySelect.value = cat;
+        if (categorySelect.value !== cat) {
+          const opt = Array.from(categorySelect.options).find((o) => o.value.toLowerCase() === cat.toLowerCase());
+          if (opt) categorySelect.value = opt.value;
+        }
+        applyFilters();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      });
     });
-  });
 
-  // Click on an actress name -> apply that actress filter
-  document.querySelectorAll('.actress-link[data-actress]').forEach((link) => {
-    link.addEventListener('click', (e) => {
-      e.stopPropagation(); // don't trigger the card navigation
-      if (!actressSelect) return;
-
-      const actress = link.getAttribute('data-actress') || '';
-      actressSelect.value = actress;
-      // Fallback to a case-insensitive match if the exact value wasn't an option
-      if (actressSelect.value !== actress) {
-        const opt = Array.from(actressSelect.options).find(
-          (o) => o.value.toLowerCase() === actress.toLowerCase()
-        );
-        if (opt) actressSelect.value = opt.value;
-      }
-
-      applyFilters();
-      syncUrl();
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+    container.querySelectorAll('.actress-link[data-actress]:not([data-wired])').forEach((link) => {
+      link.setAttribute('data-wired', '1');
+      link.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!actressSelect) return;
+        const actress = link.getAttribute('data-actress') || '';
+        actressSelect.value = actress;
+        if (actressSelect.value !== actress) {
+          const opt = Array.from(actressSelect.options).find((o) => o.value.toLowerCase() === actress.toLowerCase());
+          if (opt) actressSelect.value = opt.value;
+        }
+        applyFilters();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      });
     });
-  });
+  };
 
-  // Restore state from the URL, then apply sort + filters.
-  restoreFromUrl();
+  // ── Scroll infinito ─────────────────────────────────────────────────────────
+  const sentinel = document.getElementById('scroll-sentinel');
+  const loadingEl = document.getElementById('loading-more');
+  const endEl = document.getElementById('end-of-list');
+
+  const gridAlias = grid?.dataset.alias || '';
+  const totalPages = parseInt(grid?.dataset.totalPages || '1', 10) || 1;
+  let nextPage = parseInt(grid?.dataset.nextPage || '2', 10) || 2;
+  let hasMore = !!grid && nextPage <= totalPages;
+  let loading = false;
+
+  const finishList = () => {
+    hasMore = false;
+    loadingEl?.classList.add('hidden');
+    if (endEl) {
+      endEl.textContent = cards.length ? '— Fin del catálogo —' : 'Sin resultados.';
+      endEl.classList.remove('hidden');
+    }
+    observer?.disconnect();
+  };
+
+  const loadMore = async () => {
+    if (loading || !hasMore || !grid) return;
+    loading = true;
+    loadingEl?.classList.remove('hidden');
+
+    try {
+      const u = new URLSearchParams({ alias: gridAlias, page: String(nextPage) });
+      const res = await fetch(`/sheer/live-cards?${u}`);
+      const html = await res.text();
+      const tmp = document.createElement('div');
+      tmp.innerHTML = html;
+
+      const newCards = [];
+      tmp.querySelectorAll('.video-card').forEach((card) => {
+        const id = card.getAttribute('data-id');
+        if (id && seen.has(id)) return;
+        if (id) seen.add(id);
+        card.setAttribute('data-order', String(orderCounter++));
+        grid.appendChild(card);
+        cards.push(card);
+        newCards.push(card);
+      });
+
+      newCards.forEach((c) => wireCards(c));
+      applySort();
+      applyFilters();
+
+      nextPage++;
+      hasMore = nextPage <= totalPages;
+      loading = false;
+
+      if (!hasMore) { finishList(); return; }
+      loadingEl?.classList.add('hidden');
+      // Si el sentinel sigue visible (pantallas altas), encadena otra carga.
+      if (isSentinelVisible()) loadMore();
+    } catch {
+      loading = false;
+      loadingEl?.classList.add('hidden');
+    }
+  };
+
+  const isSentinelVisible = () => {
+    if (!sentinel) return false;
+    const r = sentinel.getBoundingClientRect();
+    return r.top < window.innerHeight + 400;
+  };
+
+  const observer = new IntersectionObserver(
+    (entries) => { if (entries.some((e) => e.isIntersecting)) loadMore(); },
+    { rootMargin: '400px' },
+  );
+
+  // Init
+  wireCards(document);
   applySort();
   applyFilters();
+  if (hasMore && sentinel) observer.observe(sentinel);
+  else if (!hasMore) finishList();
 </script>
