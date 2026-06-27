@@ -1,0 +1,210 @@
+---
+// Scraper de catálogo de vodscene: toma un SNAPSHOT en vivo del catálogo de
+// Firestore (videos + playlists) y lo guarda cifrado en KV (`vs:library`)
+// para poder leerlo después sin autenticación de Firebase (modo «guardado»).
+//
+// El snapshot se dispara con ?run=1 (un GET SSR que llama al endpoint de
+// Firestore con refresh). Sin ese parámetro, la página solo muestra el estado de
+// la biblioteca ya guardada en KV y el modo de lectura activo.
+import Layout from "@/layouts/Layout.astro";
+import VodsceneAuth from "@/components/vodscene/VodsceneAuth.astro";
+import {
+  buildLibrary,
+  saveLibrary,
+  loadLibrary,
+  loadMode,
+} from "@/lib/vodscene/library";
+
+export const prerender = false;
+
+const env = (Astro.locals as any)?.runtime?.env;
+const origin = Astro.url.origin;
+const cookie = Astro.request.headers.get("cookie") ?? "";
+
+const params = Astro.url.searchParams;
+const run = params.get("run") === "1";
+
+let library: any = null;
+let error: string | null = null;
+let saved = false;
+let justRan = false;
+const startedAt = Date.now();
+
+if (run) {
+  justRan = true;
+  try {
+    const fresh = await buildLibrary({ origin, cookie });
+    const result = await saveLibrary(fresh, env);
+    saved = !!result;
+    library = result ?? fresh;
+  } catch (e: any) {
+    error = e?.message ?? "Error al generar la biblioteca";
+  }
+} else {
+  try {
+    library = await loadLibrary(env);
+  } catch (e: any) {
+    error = e?.message ?? "Error al leer la biblioteca";
+  }
+}
+
+const mode = await loadMode(env);
+const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
+
+const totalVideos: number = library?.totalVideos ?? 0;
+const totalPlaylists: number = library?.totalPlaylists ?? 0;
+const generatedAt: number | null = library?.generatedAt ?? null;
+
+const fmtDate = (ts: number | null) =>
+  ts
+    ? new Date(ts).toLocaleString("es-ES", { dateStyle: "medium", timeStyle: "short" })
+    : "—";
+
+// Lista de playlists del snapshot (para mostrar el desglose).
+const rawPlaylists = library?.response?.data?.playlists ?? {};
+const videosByPlaylist: Record<string, number> = {};
+const rawVideos = library?.response?.data?.videos ?? {};
+for (const v of Object.values(rawVideos) as Record<string, unknown>[]) {
+  const pid = (v?.playlistId as string) || "__none__";
+  videosByPlaylist[pid] = (videosByPlaylist[pid] || 0) + 1;
+}
+const playlistRows = Object.entries(rawPlaylists as Record<string, any>)
+  .map(([id, p]) => ({
+    id,
+    title: p?.title ?? p?.name ?? id,
+    count: videosByPlaylist[id] ?? 0,
+  }))
+  .sort((a, b) => b.count - a.count);
+const noneCount = videosByPlaylist["__none__"] ?? 0;
+---
+
+<Layout title="Scraper de catálogo — vodscene">
+  <div class="mx-auto max-w-[1100px]">
+    <header class="mb-8">
+      <nav
+        class="mb-3 flex items-center justify-between gap-4"
+        aria-label="Navegación"
+      >
+        <a
+          href="/vodscene/"
+          class="text-blue-400 hover:text-blue-300 hover:underline text-sm"
+          >← Videos</a
+        >
+        <VodsceneAuth />
+      </nav>
+      <div class="flex items-end justify-between gap-4 flex-wrap">
+        <div>
+          <h1 class="text-3xl font-bold text-white">Scraper de catálogo</h1>
+          <p class="text-gray-500 text-sm mt-1">
+            Guarda un snapshot del catálogo en KV para leerlo sin Firebase.
+          </p>
+        </div>
+        <div class="flex items-center gap-2 text-sm">
+          <span
+            class={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 font-semibold ${
+              mode === "saved"
+                ? "border-green-500/40 text-green-400"
+                : "border-blue-400/40 text-blue-300"
+            }`}
+          >
+            Modo: {mode === "saved" ? "Guardado" : "Live"}
+          </span>
+          {
+            !error && (
+              <span
+                class="inline-flex items-center gap-1.5 rounded-full border border-vs-border bg-vs-surface px-3 py-1.5 text-gray-400"
+              >
+                {totalVideos} videos · {totalPlaylists} playlists
+                {justRan ? ` · ${elapsed}s` : ""}
+              </span>
+            )
+          }
+        </div>
+      </div>
+    </header>
+
+    {/* Controles: dispara el snapshot (SSR vuelve a leer Firestore en vivo). */}
+    <div class="mb-8 rounded-lg border border-vs-border bg-vs-surface p-4 sm:p-5">
+      <form
+        method="get"
+        action="/vodscene/scraper"
+        class="flex flex-wrap items-center gap-3"
+      >
+        <input type="hidden" name="run" value="1" />
+        <button
+          type="submit"
+          class="inline-flex items-center justify-center gap-2 rounded-md bg-blue-400 px-4 py-2.5 text-sm font-semibold text-black transition-colors hover:bg-blue-300"
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-9-9"></path><polyline points="21 3 21 9 15 9"></polyline></svg>
+          Generar snapshot
+        </button>
+        <p class="text-[.8rem] italic text-gray-500">
+          Lee el catálogo en vivo desde Firestore (requiere la cuenta activa) y
+          <strong>reemplaza</strong> la biblioteca guardada en
+          <code class="text-blue-400">VS_C3_KV[vs:library]</code>.
+        </p>
+      </form>
+    </div>
+
+    {
+      justRan && !error && (
+        <div
+          class="mb-8 flex items-center gap-3 rounded-lg border border-vs-border bg-vs-surface px-4 py-3 text-[.9rem] sm:px-5"
+        >
+          <span class={saved ? "text-green-400" : "text-red-400"}>●</span>
+          <span class="text-gray-200">
+            {saved
+              ? `Snapshot guardado en ${elapsed}s: ${totalVideos} videos · ${totalPlaylists} playlists.`
+              : "El snapshot se generó pero no se pudo guardar en KV (¿binding VS_C3_KV disponible?)."}
+          </span>
+        </div>
+      )
+    }
+
+    {
+      error ? (
+        <div
+          class="bg-red-950 border border-red-900 rounded-lg px-5 py-4 text-red-400"
+          role="alert"
+        >
+          <strong>Error:</strong> {error}
+        </div>
+      ) : !library ? (
+        <div class="text-center py-16 text-gray-500" role="status">
+          <p>
+            No hay biblioteca guardada todavía. Pulsa «Generar snapshot» para
+            crearla.
+          </p>
+        </div>
+      ) : (
+        <>
+          <p class="mb-4 text-[.85rem] text-gray-500">
+            Última actualización: {fmtDate(generatedAt)}
+          </p>
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {playlistRows.map((p) => (
+              <div class="flex items-center justify-between gap-3 rounded-lg border border-vs-border bg-vs-surface px-4 py-3">
+                <span class="min-w-0 truncate text-[.92rem] font-semibold text-white">
+                  {p.title}
+                </span>
+                <span class="shrink-0 rounded-full border border-vs-border bg-vs-bg px-2.5 py-1 text-[.78rem] text-gray-400">
+                  {p.count} {p.count === 1 ? "video" : "videos"}
+                </span>
+              </div>
+            ))}
+            {noneCount > 0 && (
+              <div class="flex items-center justify-between gap-3 rounded-lg border border-vs-border bg-vs-surface px-4 py-3">
+                <span class="min-w-0 truncate text-[.92rem] font-semibold text-gray-400">
+                  Sin categoría
+                </span>
+                <span class="shrink-0 rounded-full border border-vs-border bg-vs-bg px-2.5 py-1 text-[.78rem] text-gray-400">
+                  {noneCount} {noneCount === 1 ? "video" : "videos"}
+                </span>
+              </div>
+            )}
+          </div>
+        </>
+      )
+    }
+  </div>
+</Layout>

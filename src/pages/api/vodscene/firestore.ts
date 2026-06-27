@@ -1,5 +1,6 @@
 import type { APIRoute } from "astro";
 import { getFirebaseToken, invalidateFirebaseToken } from "@/lib/vodscene/firebase-auth";
+import { resolveCredentials } from "@/lib/vodscene/accounts";
 
 // ─── Caché en memoria ─────────────────────────────────────────────────────────
 const CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2 horas
@@ -52,15 +53,17 @@ export const GET: APIRoute = async ({ locals, url }) => {
 
   const FIREBASE_API_KEY = env?.FIREBASE_API_KEY ?? import.meta.env.FIREBASE_API_KEY;
   const FIREBASE_PROJECT = env?.FIREBASE_PROJECT ?? import.meta.env.FIREBASE_PROJECT;
-  const EMAIL            = env?.VODSCENE_EMAIL    ?? import.meta.env.VODSCENE_EMAIL;
-  const PASSWORD         = env?.VODSCENE_PASSWORD ?? import.meta.env.VODSCENE_PASSWORD;
 
-  if (!FIREBASE_API_KEY || !EMAIL || !PASSWORD) {
-    return new Response(JSON.stringify({ error: "Missing env vars" }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
-    });
+  // Credenciales: cuenta activa en KV (multicuenta) o respaldo en secrets.
+  const creds = await resolveCredentials(env);
+  if (!FIREBASE_API_KEY || !creds) {
+    return new Response(
+      JSON.stringify({ error: "No vodscene account configured", detail: "Añade una cuenta desde el avatar de /vodscene/." }),
+      { status: 500, headers: { "Content-Type": "application/json" } },
+    );
   }
+  const EMAIL = creds.email;
+  const PASSWORD = creds.password;
 
   // Filtro de colección opcional: ?collection=videos  o  ?collections=videos,playlists
   const filterCol      = url.searchParams.get("collection")  ?? null;
@@ -72,8 +75,9 @@ export const GET: APIRoute = async ({ locals, url }) => {
       ? CANDIDATE_COLLECTIONS.filter((c) => c === filterCol)
       : CANDIDATE_COLLECTIONS;
 
-  // Revisar caché antes de llamar a la API
-  const cacheKey = filterCols ?? filterCol ?? "__all__";
+  // Revisar caché antes de llamar a la API. Se incluye el email para que cada
+  // cuenta tenga su propio caché (los datos pueden diferir entre cuentas).
+  const cacheKey = `${EMAIL}::${filterCols ?? filterCol ?? "__all__"}`;
   if (!forceRefresh) {
     const cached = cache.get(cacheKey);
     if (cached && Date.now() < cached.expiresAt) {

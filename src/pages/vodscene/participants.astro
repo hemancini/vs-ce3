@@ -1,5 +1,6 @@
 ---
-import Layout from '@/layouts/Layout.astro';
+import Layout from "@/layouts/Layout.astro";
+import VodsceneAuth from "@/components/vodscene/VodsceneAuth.astro";
 export const prerender = false;
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
@@ -29,7 +30,10 @@ interface ApiResponse {
   meta: {
     totalCollections: number;
     totalDocuments: number;
-    collections: Record<string, { count: number; accessible: boolean; error?: string }>;
+    collections: Record<
+      string,
+      { count: number; accessible: boolean; error?: string }
+    >;
   };
   data: Record<string, Record<string, Record<string, unknown>>>;
 }
@@ -37,30 +41,57 @@ interface ApiResponse {
 // ─── Fetch server-side ────────────────────────────────────────────────────────
 let participants: ParticipantDoc[] = [];
 let error: string | null = null;
+let noAccount = false;
 let totalCount = 0;
 
 try {
   const origin = Astro.url.origin;
-  const cookie = Astro.request.headers.get('cookie') ?? '';
-  const res = await fetch(`${origin}/api/vodscene/firestore?collection=participants`, {
-    headers: { cookie },
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const json: ApiResponse = await res.json();
+  const cookie = Astro.request.headers.get("cookie") ?? "";
+  const res = await fetch(
+    `${origin}/api/vodscene/firestore?collection=participants`,
+    {
+      headers: { cookie },
+    },
+  );
 
-  const colMeta = json.meta?.collections?.participants;
-  if (!colMeta?.accessible) {
-    error = colMeta?.error ?? "Colección no accesible";
+  // Parsear el cuerpo aunque la respuesta no sea OK, para recuperar el detalle.
+  let json: (ApiResponse & { error?: string; detail?: string }) | null = null;
+  try {
+    json = await res.json();
+  } catch {
+    json = null;
+  }
+
+  if (!res.ok) {
+    // Caso especial: no hay ninguna cuenta de vodscene configurada.
+    if (json?.error === "No vodscene account configured") {
+      noAccount = true;
+    } else {
+      error = json?.detail ?? json?.error ?? `HTTP ${res.status}`;
+    }
+  } else if (!json) {
+    error = "Respuesta vacía del servidor";
   } else {
-    const raw = json.data?.participants ?? {};
-    totalCount = colMeta.count;
-    participants = Object.entries(raw).map(([id, fields]) => ({ id, ...fields } as ParticipantDoc));
-    // Ordenar por nombre si está disponible
-    participants.sort((a, b) => {
-      const na = (a.name ?? a.displayName ?? a.id ?? "").toString().toLowerCase();
-      const nb = (b.name ?? b.displayName ?? b.id ?? "").toString().toLowerCase();
-      return na.localeCompare(nb, "es");
-    });
+    const colMeta = json.meta?.collections?.participants;
+    if (!colMeta?.accessible) {
+      error = colMeta?.error ?? "Colección no accesible";
+    } else {
+      const raw = json.data?.participants ?? {};
+      totalCount = colMeta.count;
+      participants = Object.entries(raw).map(
+        ([id, fields]) => ({ id, ...fields }) as ParticipantDoc,
+      );
+      // Ordenar por nombre si está disponible
+      participants.sort((a, b) => {
+        const na = (a.name ?? a.displayName ?? a.id ?? "")
+          .toString()
+          .toLowerCase();
+        const nb = (b.name ?? b.displayName ?? b.id ?? "")
+          .toString()
+          .toLowerCase();
+        return na.localeCompare(nb, "es");
+      });
+    }
   }
 } catch (e) {
   error = e instanceof Error ? e.message : "Error desconocido";
@@ -77,7 +108,11 @@ function formatDate(val: unknown): string {
 
 function getInitials(p: ParticipantDoc): string {
   const full = (p.name ?? p.displayName ?? "?").toString().trim();
-  return full.split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("");
+  return full
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() ?? "")
+    .join("");
 }
 
 function getDisplayName(p: ParticipantDoc): string {
@@ -105,27 +140,48 @@ function formatCurrency(val: unknown): string {
   return new Intl.NumberFormat("es", { maximumFractionDigits: 0 }).format(n);
 }
 
-interface StatusInfo { label: string; cls: string }
+interface StatusInfo {
+  label: string;
+  cls: string;
+}
 function getStatusInfo(p: ParticipantDoc): StatusInfo | null {
-  if (p.status) return { label: String(p.status), cls: statusClasses[p.status as string] ?? defaultBadge };
+  if (p.status)
+    return {
+      label: String(p.status),
+      cls: statusClasses[p.status as string] ?? defaultBadge,
+    };
   if (typeof p.isActive === "boolean") {
     return p.isActive
-      ? { label: "activo",   cls: "text-green-400 border-green-800 bg-green-950" }
+      ? { label: "activo", cls: "text-green-400 border-green-800 bg-green-950" }
       : { label: "inactivo", cls: "text-red-400 border-red-900 bg-red-950" };
   }
   return null;
 }
 
 const KNOWN = new Set([
-  "id","name","displayName","email","authEmail","photoURL",
-  "role","status","isActive","isSystem","hasAccount",
-  "slug","videoCount","totalEarnings","subscriptionEarnings",
-  "lastLogin","createdAt","accountCreatedAt",
+  "id",
+  "name",
+  "displayName",
+  "email",
+  "authEmail",
+  "photoURL",
+  "role",
+  "status",
+  "isActive",
+  "isSystem",
+  "hasAccount",
+  "slug",
+  "videoCount",
+  "totalEarnings",
+  "subscriptionEarnings",
+  "lastLogin",
+  "createdAt",
+  "accountCreatedAt",
 ]);
 
 // Clases dinámicas definidas completas para que Tailwind las detecte
 const statusClasses: Record<string, string> = {
-  active:   "text-green-400 border-green-800 bg-green-950",
+  active: "text-green-400 border-green-800 bg-green-950",
   inactive: "text-red-400 border-red-900 bg-red-950",
   disabled: "text-red-400 border-red-900 bg-red-950",
 };
@@ -137,138 +193,286 @@ const defaultBadge = "text-gray-500 border-vs-border bg-[#2a2a2a]";
 
 <Layout title="Participantes — vodscene">
   <header class="mb-8">
-    <nav class="mb-3" aria-label="Navegación principal">
-      <a href="/" class="text-blue-400 hover:text-blue-300 hover:underline text-sm">← Inicio</a>
+    <nav
+      class="mb-3 flex items-center justify-between gap-4"
+      aria-label="Navegación principal"
+    >
+      <a
+        href="/vodscene"
+        class="text-blue-400 hover:text-blue-300 hover:underline text-sm"
+        >← Volver</a
+      >
+      <VodsceneAuth />
     </nav>
     <h1 class="text-3xl font-bold text-white">Participantes</h1>
-    {!error && (
-      <p class="text-gray-500 text-sm mt-1 tabular-nums">
-        {totalCount === 0
-          ? "Sin participantes"
-          : `${new Intl.NumberFormat("es").format(totalCount)} ${totalCount === 1 ? "participante" : "participantes"} en la colección`}
-      </p>
-    )}
+    {
+      !error && !noAccount && (
+        <p class="text-gray-500 text-sm mt-1 tabular-nums">
+          {totalCount === 0
+            ? "Sin participantes"
+            : `${new Intl.NumberFormat("es").format(totalCount)} ${totalCount === 1 ? "participante" : "participantes"} en la colección`}
+        </p>
+      )
+    }
   </header>
 
   <main id="main-content">
-    {error && (
-      <div class="bg-red-950 border border-red-900 rounded-lg px-5 py-4 text-red-400 mb-6" role="alert" aria-live="polite">
-        <strong>Error al cargar los participantes:</strong> {error}
-      </div>
-    )}
+    {
+      noAccount && (
+        <div class="max-w-lg mx-auto text-center py-16 px-4" role="status">
+          <div
+            class="w-14 h-14 mx-auto mb-5 rounded-full bg-[#2a2a2a] flex items-center justify-center text-2xl"
+            aria-hidden="true"
+          >
+            👤
+          </div>
+          <h2 class="text-lg font-semibold text-white mb-2">
+            No hay ninguna cuenta configurada
+          </h2>
+          <p class="text-gray-500 text-sm mb-6">
+            Para ver los participantes primero debés conectar una cuenta de
+            vodscene. Añadila desde el menú del avatar en la página de videos.
+          </p>
+          <a
+            href="/vodscene/"
+            class="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg px-4 py-2.5 transition-colors focus-visible:outline-2 focus-visible:outline-blue-400 focus-visible:outline-offset-2"
+          >
+            Ir a videos para añadir una cuenta →
+          </a>
+        </div>
+      )
+    }
 
-    {!error && participants.length === 0 && (
-      <div class="text-center py-16 text-gray-500" role="status">
-        <p>No se encontraron participantes en la colección.</p>
-      </div>
-    )}
+    {
+      error && (
+        <div
+          class="bg-red-950 border border-red-900 rounded-lg px-5 py-4 text-red-400 mb-6"
+          role="alert"
+          aria-live="polite"
+        >
+          <strong>Error al cargar los participantes:</strong> {error}
+        </div>
+      )
+    }
 
-    {participants.length > 0 && (
-      <div class="overflow-x-auto border border-vs-border rounded-lg">
-        <table id="participants-table" class="w-full border-collapse text-sm" aria-label="Lista de participantes">
-          <thead class="bg-vs-thead">
-            <tr>
-              <th scope="col" class="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500 border-b border-vs-border whitespace-nowrap">Participante</th>
-              <th scope="col" class="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500 border-b border-vs-border whitespace-nowrap">Email</th>
-              <th scope="col" class="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500 border-b border-vs-border whitespace-nowrap">Estado</th>
-              <th scope="col" data-sort-col="videos" class="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500 border-b border-vs-border whitespace-nowrap sm:table-cell hidden">
-                <button class="sort-btn inline-flex items-center gap-1 cursor-pointer hover:text-gray-300 transition-colors" data-col="videos" aria-label="Ordenar por videos">
-                  Videos <span class="sort-icon text-gray-700" aria-hidden="true">↕</span>
-                </button>
-              </th>
-              <th scope="col" data-sort-col="earnings" class="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500 border-b border-vs-border whitespace-nowrap md:table-cell hidden">
-                <button class="sort-btn inline-flex items-center gap-1 cursor-pointer hover:text-gray-300 transition-colors" data-col="earnings" aria-label="Ordenar por ganancias">
-                  Ganancias <span class="sort-icon text-gray-700" aria-hidden="true">↕</span>
-                </button>
-              </th>
-              <th scope="col" class="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500 border-b border-vs-border whitespace-nowrap lg:table-cell hidden">Último acceso</th>
-              <th scope="col" class="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500 border-b border-vs-border sm:table-cell hidden">
-                <span class="sr-only">Acciones</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {participants.map((p) => {
-              const extraKeys = Object.keys(p).filter((k) => !KNOWN.has(k));
-              const statusInfo = getStatusInfo(p);
-              const displayEmail = getDisplayEmail(p);
-              const isAuthEmail = !!(p.authEmail && (!p.email || !String(p.email).trim()));
-              const detailId  = `detail-${p.id}`;
-              return (
-                <>
-                  <tr class="border-b border-vs-border last:border-b-0 hover:bg-vs-hover transition-colors" data-videos={p.videoCount ?? -1} data-earnings={p.totalEarnings ?? -1} aria-label={`Participante: ${getDisplayName(p)}`}>
-                    <td class="px-4 py-3 align-middle">
-                      <div class="flex items-center gap-3 min-w-0">
-                        <div class="w-9 h-9 rounded-full flex-shrink-0 bg-[#2a2a2a] flex items-center justify-content-center overflow-hidden text-[.8rem] font-semibold text-blue-400" aria-hidden="true">
-                          {p.photoURL
-                            ? <img src={String(p.photoURL)} alt="" width="36" height="36" loading="lazy" class="w-full h-full object-cover rounded-full" />
-                            : <span class="flex items-center justify-center w-full h-full">{getInitials(p)}</span>
-                          }
-                        </div>
-                        <div class="min-w-0">
-                          <div class="font-medium text-white truncate">{getDisplayName(p)}</div>
-                          <div class="text-[.7rem] text-gray-600 font-mono truncate">
-                            {p.slug ? String(p.slug) : p.id}
-                          </div>
-                        </div>
-                      </div>
-                    </td>
-                    <td class="px-4 py-3 align-middle">
-                      {displayEmail
-                        ? (
-                          <div class="min-w-0">
-                            <a href={`mailto:${displayEmail}`} class="text-gray-500 text-[.825rem] whitespace-nowrap hover:text-gray-300 hover:underline" aria-label={`Enviar correo a ${displayEmail}`}>{displayEmail}</a>
-                            {isAuthEmail && <div class="text-[.65rem] text-gray-700 mt-0.5">auth</div>}
-                          </div>
-                        )
-                        : <span class="text-gray-700">—</span>
-                      }
-                    </td>
-                    <td class="px-4 py-3 align-middle">
-                      <div class="flex flex-col gap-1">
-                        {statusInfo
-                          ? <span class={`inline-block text-xs rounded px-2 py-[2px] border whitespace-nowrap w-fit ${statusInfo.cls}`}>{statusInfo.label}</span>
-                          : <span class="text-gray-700">—</span>
-                        }
-                        {p.isSystem === true && (
-                          <span class="inline-block text-xs rounded px-2 py-[2px] border whitespace-nowrap w-fit text-violet-400 border-violet-800 bg-violet-950">sistema</span>
-                        )}
-                        {p.role && (
-                          <span class={`inline-block text-xs rounded px-2 py-[2px] border whitespace-nowrap w-fit ${roleClasses[p.role as string] ?? defaultBadge}`}>{String(p.role)}</span>
-                        )}
-                      </div>
-                    </td>
-                    <td class="px-4 py-3 align-middle text-right tabular-nums sm:table-cell hidden">
-                      {p.videoCount != null
-                        ? <span class="text-gray-300 text-[.85rem]">{formatNumber(p.videoCount)}</span>
-                        : <span class="text-gray-700">—</span>
-                      }
-                    </td>
-                    <td class="px-4 py-3 align-middle text-right tabular-nums md:table-cell hidden">
-                      {p.totalEarnings != null
-                        ? (
-                          <div>
-                            <span class="text-gray-300 text-[.85rem]">{formatCurrency(p.totalEarnings)}</span>
-                            {p.subscriptionEarnings != null && p.totalEarnings !== p.subscriptionEarnings && (
-                              <div class="text-[.65rem] text-gray-700 mt-0.5">sub: {formatCurrency(p.subscriptionEarnings)}</div>
+    {
+      !error && !noAccount && participants.length === 0 && (
+        <div class="text-center py-16 text-gray-500" role="status">
+          <p>No se encontraron participantes en la colección.</p>
+        </div>
+      )
+    }
+
+    {
+      participants.length > 0 && (
+        <div class="overflow-x-auto border border-vs-border rounded-lg">
+          <table
+            id="participants-table"
+            class="w-full border-collapse text-sm"
+            aria-label="Lista de participantes"
+          >
+            <thead class="bg-vs-thead">
+              <tr>
+                <th
+                  scope="col"
+                  class="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500 border-b border-vs-border whitespace-nowrap"
+                >
+                  Participante
+                </th>
+                <th
+                  scope="col"
+                  class="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500 border-b border-vs-border whitespace-nowrap"
+                >
+                  Email
+                </th>
+                <th
+                  scope="col"
+                  class="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500 border-b border-vs-border whitespace-nowrap"
+                >
+                  Estado
+                </th>
+                <th
+                  scope="col"
+                  data-sort-col="videos"
+                  class="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500 border-b border-vs-border whitespace-nowrap sm:table-cell hidden"
+                >
+                  <button
+                    class="sort-btn inline-flex items-center gap-1 cursor-pointer hover:text-gray-300 transition-colors"
+                    data-col="videos"
+                    aria-label="Ordenar por videos"
+                  >
+                    Videos{" "}
+                    <span class="sort-icon text-gray-700" aria-hidden="true">
+                      ↕
+                    </span>
+                  </button>
+                </th>
+                <th
+                  scope="col"
+                  data-sort-col="earnings"
+                  class="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500 border-b border-vs-border whitespace-nowrap md:table-cell hidden"
+                >
+                  <button
+                    class="sort-btn inline-flex items-center gap-1 cursor-pointer hover:text-gray-300 transition-colors"
+                    data-col="earnings"
+                    aria-label="Ordenar por ganancias"
+                  >
+                    Ganancias{" "}
+                    <span class="sort-icon text-gray-700" aria-hidden="true">
+                      ↕
+                    </span>
+                  </button>
+                </th>
+                <th
+                  scope="col"
+                  class="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500 border-b border-vs-border whitespace-nowrap lg:table-cell hidden"
+                >
+                  Último acceso
+                </th>
+                <th
+                  scope="col"
+                  class="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500 border-b border-vs-border sm:table-cell hidden"
+                >
+                  <span class="sr-only">Acciones</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {participants.map((p) => {
+                const extraKeys = Object.keys(p).filter((k) => !KNOWN.has(k));
+                const statusInfo = getStatusInfo(p);
+                const displayEmail = getDisplayEmail(p);
+                const isAuthEmail = !!(
+                  p.authEmail &&
+                  (!p.email || !String(p.email).trim())
+                );
+                const detailId = `detail-${p.id}`;
+                return (
+                  <>
+                    <tr
+                      class="border-b border-vs-border last:border-b-0 hover:bg-vs-hover transition-colors"
+                      data-videos={p.videoCount ?? -1}
+                      data-earnings={p.totalEarnings ?? -1}
+                      aria-label={`Participante: ${getDisplayName(p)}`}
+                    >
+                      <td class="px-4 py-3 align-middle">
+                        <div class="flex items-center gap-3 min-w-0">
+                          <div
+                            class="w-9 h-9 rounded-full flex-shrink-0 bg-[#2a2a2a] flex items-center justify-content-center overflow-hidden text-[.8rem] font-semibold text-blue-400"
+                            aria-hidden="true"
+                          >
+                            {p.photoURL ? (
+                              <img
+                                src={String(p.photoURL)}
+                                alt=""
+                                width="36"
+                                height="36"
+                                loading="lazy"
+                                class="w-full h-full object-cover rounded-full"
+                              />
+                            ) : (
+                              <span class="flex items-center justify-center w-full h-full">
+                                {getInitials(p)}
+                              </span>
                             )}
                           </div>
-                        )
-                        : <span class="text-gray-700">—</span>
-                      }
-                    </td>
-                    <td class="px-4 py-3 align-middle text-gray-500 text-[.8rem] whitespace-nowrap tabular-nums lg:table-cell hidden">
-                      {p.lastLogin ? formatDate(p.lastLogin) : <span class="text-gray-700">—</span>}
-                    </td>
-                    <td class="px-4 py-3 align-middle sm:table-cell hidden">
-                      {extraKeys.length > 0 && (
-                        <button
-                          class="bg-transparent border border-vs-border rounded px-2 py-1 text-xs text-gray-500 cursor-pointer hover:border-blue-400 hover:text-blue-400 focus-visible:outline-2 focus-visible:outline-blue-400 transition-colors"
-                          aria-expanded="false"
-                          aria-controls={detailId}
-                          aria-label={`Ver más datos de ${getDisplayName(p)}`}
-                          data-detail-id={detailId}
-                          onclick={`
+                          <div class="min-w-0">
+                            <div class="font-medium text-white truncate">
+                              {getDisplayName(p)}
+                            </div>
+                            <div class="text-[.7rem] text-gray-600 font-mono truncate">
+                              {p.slug ? String(p.slug) : p.id}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td class="px-4 py-3 align-middle">
+                        {displayEmail ? (
+                          <div class="min-w-0">
+                            <a
+                              href={`mailto:${displayEmail}`}
+                              class="text-gray-500 text-[.825rem] whitespace-nowrap hover:text-gray-300 hover:underline"
+                              aria-label={`Enviar correo a ${displayEmail}`}
+                            >
+                              {displayEmail}
+                            </a>
+                            {isAuthEmail && (
+                              <div class="text-[.65rem] text-gray-700 mt-0.5">
+                                auth
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <span class="text-gray-700">—</span>
+                        )}
+                      </td>
+                      <td class="px-4 py-3 align-middle">
+                        <div class="flex flex-col gap-1">
+                          {statusInfo ? (
+                            <span
+                              class={`inline-block text-xs rounded px-2 py-[2px] border whitespace-nowrap w-fit ${statusInfo.cls}`}
+                            >
+                              {statusInfo.label}
+                            </span>
+                          ) : (
+                            <span class="text-gray-700">—</span>
+                          )}
+                          {p.isSystem === true && (
+                            <span class="inline-block text-xs rounded px-2 py-[2px] border whitespace-nowrap w-fit text-violet-400 border-violet-800 bg-violet-950">
+                              sistema
+                            </span>
+                          )}
+                          {p.role && (
+                            <span
+                              class={`inline-block text-xs rounded px-2 py-[2px] border whitespace-nowrap w-fit ${roleClasses[p.role as string] ?? defaultBadge}`}
+                            >
+                              {String(p.role)}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td class="px-4 py-3 align-middle text-right tabular-nums sm:table-cell hidden">
+                        {p.videoCount != null ? (
+                          <span class="text-gray-300 text-[.85rem]">
+                            {formatNumber(p.videoCount)}
+                          </span>
+                        ) : (
+                          <span class="text-gray-700">—</span>
+                        )}
+                      </td>
+                      <td class="px-4 py-3 align-middle text-right tabular-nums md:table-cell hidden">
+                        {p.totalEarnings != null ? (
+                          <div>
+                            <span class="text-gray-300 text-[.85rem]">
+                              {formatCurrency(p.totalEarnings)}
+                            </span>
+                            {p.subscriptionEarnings != null &&
+                              p.totalEarnings !== p.subscriptionEarnings && (
+                                <div class="text-[.65rem] text-gray-700 mt-0.5">
+                                  sub: {formatCurrency(p.subscriptionEarnings)}
+                                </div>
+                              )}
+                          </div>
+                        ) : (
+                          <span class="text-gray-700">—</span>
+                        )}
+                      </td>
+                      <td class="px-4 py-3 align-middle text-gray-500 text-[.8rem] whitespace-nowrap tabular-nums lg:table-cell hidden">
+                        {p.lastLogin ? (
+                          formatDate(p.lastLogin)
+                        ) : (
+                          <span class="text-gray-700">—</span>
+                        )}
+                      </td>
+                      <td class="px-4 py-3 align-middle sm:table-cell hidden">
+                        {extraKeys.length > 0 && (
+                          <button
+                            class="bg-transparent border border-vs-border rounded px-2 py-1 text-xs text-gray-500 cursor-pointer hover:border-blue-400 hover:text-blue-400 focus-visible:outline-2 focus-visible:outline-blue-400 transition-colors"
+                            aria-expanded="false"
+                            aria-controls={detailId}
+                            aria-label={`Ver más datos de ${getDisplayName(p)}`}
+                            data-detail-id={detailId}
+                            onclick={`
                             var btn = this;
                             var row = document.getElementById('${detailId}');
                             var open = btn.getAttribute('aria-expanded') === 'true';
@@ -276,102 +480,128 @@ const defaultBadge = "text-gray-500 border-vs-border bg-[#2a2a2a]";
                             row.hidden = open;
                             btn.textContent = open ? '+ Más' : '− Menos';
                           `}
-                        >
-                          + Más
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                  {extraKeys.length > 0 && (
-                    <tr id={detailId} hidden aria-label={`Datos adicionales de ${getDisplayName(p)}`}>
-                      <td colspan="7" class="p-0 bg-vs-detail">
-                        <div class="px-4 py-3 border-t border-vs-border">
-                          <table class="w-full border-collapse text-[.8rem]" aria-label="Campos adicionales">
-                            <tbody>
-                              {extraKeys.map((k) => (
-                                <tr class="border-b border-[#222] last:border-b-0">
-                                  <td class="py-1 pr-3 text-gray-300 whitespace-nowrap align-top w-[30%]">{k}</td>
-                                  <td class="py-1 text-gray-500 break-all align-top">{JSON.stringify(p[k])}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
+                          >
+                            + Más
+                          </button>
+                        )}
                       </td>
                     </tr>
-                  )}
-                </>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    )}
+                    {extraKeys.length > 0 && (
+                      <tr
+                        id={detailId}
+                        hidden
+                        aria-label={`Datos adicionales de ${getDisplayName(p)}`}
+                      >
+                        <td colspan="7" class="p-0 bg-vs-detail">
+                          <div class="px-4 py-3 border-t border-vs-border">
+                            <table
+                              class="w-full border-collapse text-[.8rem]"
+                              aria-label="Campos adicionales"
+                            >
+                              <tbody>
+                                {extraKeys.map((k) => (
+                                  <tr class="border-b border-[#222] last:border-b-0">
+                                    <td class="py-1 pr-3 text-gray-300 whitespace-nowrap align-top w-[30%]">
+                                      {k}
+                                    </td>
+                                    <td class="py-1 text-gray-500 break-all align-top">
+                                      {JSON.stringify(p[k])}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )
+    }
   </main>
 </Layout>
 
 <script>
-  const table = document.getElementById('participants-table') as HTMLTableElement | null;
+  const table = document.getElementById(
+    "participants-table",
+  ) as HTMLTableElement | null;
   if (table) {
-    const tbody = table.querySelector('tbody') as HTMLTableSectionElement;
+    const tbody = table.querySelector("tbody") as HTMLTableSectionElement;
     let currentCol: string | null = null;
-    let currentDir: 'asc' | 'desc' = 'desc';
+    let currentDir: "asc" | "desc" = "desc";
 
     function sortTable(col: string) {
       if (currentCol === col) {
-        currentDir = currentDir === 'desc' ? 'asc' : 'desc';
+        currentDir = currentDir === "desc" ? "asc" : "desc";
       } else {
         currentCol = col;
-        currentDir = 'desc';
+        currentDir = "desc";
       }
 
-      const attr = col === 'videos' ? 'data-videos' : 'data-earnings';
+      const attr = col === "videos" ? "data-videos" : "data-earnings";
       // only sort main rows (those that have the data attribute)
-      const rows = Array.from(tbody.querySelectorAll<HTMLTableRowElement>('tr[' + attr + ']'));
+      const rows = Array.from(
+        tbody.querySelectorAll<HTMLTableRowElement>("tr[" + attr + "]"),
+      );
 
       rows.sort((a, b) => {
-        const va = parseFloat(a.getAttribute(attr) ?? '-1');
-        const vb = parseFloat(b.getAttribute(attr) ?? '-1');
-        return currentDir === 'desc' ? vb - va : va - vb;
+        const va = parseFloat(a.getAttribute(attr) ?? "-1");
+        const vb = parseFloat(b.getAttribute(attr) ?? "-1");
+        return currentDir === "desc" ? vb - va : va - vb;
       });
 
       // Re-insert rows with their optional detail siblings
-      rows.forEach(row => {
+      rows.forEach((row) => {
         tbody.appendChild(row);
-        const detailId = row.querySelector('[aria-controls]')?.getAttribute('aria-controls');
+        const detailId = row
+          .querySelector("[aria-controls]")
+          ?.getAttribute("aria-controls");
         if (detailId) {
           const detail = document.getElementById(detailId);
           if (detail) tbody.appendChild(detail);
         }
         // fallback: next sibling that is a detail row
         const next = row.nextElementSibling as HTMLTableRowElement | null;
-        if (next && next.id?.startsWith('detail-')) tbody.appendChild(next);
+        if (next && next.id?.startsWith("detail-")) tbody.appendChild(next);
       });
 
       // Update icons
-      table.querySelectorAll<HTMLElement>('.sort-icon').forEach(icon => {
-        icon.textContent = '↕';
-        icon.classList.remove('text-blue-400');
-        icon.classList.add('text-gray-700');
+      table.querySelectorAll<HTMLElement>(".sort-icon").forEach((icon) => {
+        icon.textContent = "↕";
+        icon.classList.remove("text-blue-400");
+        icon.classList.add("text-gray-700");
       });
-      const activeBtn = table.querySelector<HTMLElement>(`.sort-btn[data-col="${col}"] .sort-icon`);
+      const activeBtn = table.querySelector<HTMLElement>(
+        `.sort-btn[data-col="${col}"] .sort-icon`,
+      );
       if (activeBtn) {
-        activeBtn.textContent = currentDir === 'desc' ? '↓' : '↑';
-        activeBtn.classList.remove('text-gray-700');
-        activeBtn.classList.add('text-blue-400');
+        activeBtn.textContent = currentDir === "desc" ? "↓" : "↑";
+        activeBtn.classList.remove("text-gray-700");
+        activeBtn.classList.add("text-blue-400");
       }
 
       // Update aria-sort on th
-      table.querySelectorAll<HTMLElement>('th[data-sort-col]').forEach(th => {
-        th.removeAttribute('aria-sort');
+      table.querySelectorAll<HTMLElement>("th[data-sort-col]").forEach((th) => {
+        th.removeAttribute("aria-sort");
       });
-      const activeTh = table.querySelector<HTMLElement>(`th[data-sort-col="${col}"]`);
-      if (activeTh) activeTh.setAttribute('aria-sort', currentDir === 'desc' ? 'descending' : 'ascending');
+      const activeTh = table.querySelector<HTMLElement>(
+        `th[data-sort-col="${col}"]`,
+      );
+      if (activeTh)
+        activeTh.setAttribute(
+          "aria-sort",
+          currentDir === "desc" ? "descending" : "ascending",
+        );
     }
 
-    table.querySelectorAll<HTMLButtonElement>('.sort-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const col = btn.getAttribute('data-col');
+    table.querySelectorAll<HTMLButtonElement>(".sort-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const col = btn.getAttribute("data-col");
         if (col) sortTable(col);
       });
     });

@@ -1,6 +1,8 @@
 ---
 export const prerender = false;
 
+import { loadMode, loadLibrary } from "@/lib/vodscene/library";
+
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 interface DrmConfig {
   enabled?: boolean;
@@ -52,13 +54,32 @@ let fetchError: string | null = null;
 
 if (videoId) {
   try {
-    const origin = Astro.url.origin;
-    const cookie = Astro.request.headers.get('cookie') ?? '';
-    const res = await fetch(`${origin}/api/vodscene/firestore?collection=videos`, {
-      headers: { cookie },
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const json: ApiResponse = await res.json();
+    const env = (Astro.locals as any)?.runtime?.env;
+    let json: ApiResponse;
+
+    if ((await loadMode(env)) === "saved") {
+      // Modo guardado: leemos el snapshot cifrado de KV (sin Firebase).
+      const lib = await loadLibrary(env);
+      if (!lib) {
+        throw new Error(
+          "No hay snapshot guardado. Genéralo en el scraper o cambia a modo Live.",
+        );
+      }
+      json = lib.response as unknown as ApiResponse;
+    } else {
+      // Modo live: leemos el catálogo en vivo desde Firestore.
+      const origin = Astro.url.origin;
+      const cookie = Astro.request.headers.get("cookie") ?? "";
+      const res = await fetch(`${origin}/api/vodscene/firestore?collection=videos`, {
+        headers: { cookie },
+      });
+      if (!res.ok) {
+        const errJson = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(errJson?.error ?? `HTTP ${res.status}`);
+      }
+      json = await res.json();
+    }
+
     const colMeta = json.meta?.collections?.videos;
     if (!colMeta?.accessible) throw new Error(colMeta?.error ?? "Colección no accesible");
     const doc = json.data?.videos?.[videoId] as Record<string, unknown> | undefined;

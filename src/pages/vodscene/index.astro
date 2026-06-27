@@ -1,5 +1,7 @@
 ---
 import Layout from "@/layouts/Layout.astro";
+import VodsceneAuth from "@/components/vodscene/VodsceneAuth.astro";
+import { loadMode, loadLibrary } from "@/lib/vodscene/library";
 export const prerender = false;
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
@@ -76,19 +78,57 @@ interface ApiResponse {
 let videos: VideoDoc[] = [];
 let playlists: PlaylistDoc[] = [];
 let error: string | null = null;
+let needsAccount = false;
+let needsLibrary = false;
 let totalCount = 0;
 
+const env = (Astro.locals as any)?.runtime?.env;
+const readMode = await loadMode(env);
+
 try {
-  const origin = Astro.url.origin;
-  const cookie = Astro.request.headers.get("cookie") ?? "";
-  const res = await fetch(
-    `${origin}/api/vodscene/firestore?collections=videos,playlists`,
-    {
-      headers: { cookie },
-    },
-  );
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const json: ApiResponse = await res.json();
+  let json: ApiResponse;
+
+  if (readMode === "saved") {
+    // Modo guardado: leemos el snapshot cifrado de KV (sin Firebase).
+    const lib = await loadLibrary(env);
+    if (!lib) {
+      needsLibrary = true;
+      throw new Error(
+        "No hay un snapshot guardado todavía. Genéralo en el scraper o cambia a modo Live.",
+      );
+    }
+    json = lib.response as ApiResponse;
+  } else {
+    // Modo live: leemos el catálogo en vivo desde Firestore.
+    const origin = Astro.url.origin;
+    const cookie = Astro.request.headers.get("cookie") ?? "";
+    const res = await fetch(
+      `${origin}/api/vodscene/firestore?collections=videos,playlists`,
+      {
+        headers: { cookie },
+      },
+    );
+    if (!res.ok) {
+      // Intentar leer el detalle JSON del endpoint para un mensaje claro.
+      const errJson = (await res.json().catch(() => null)) as {
+        error?: string;
+        detail?: string;
+      } | null;
+      // Caso típico tras quitar las credenciales en duro: no hay cuenta activa.
+      if (
+        res.status === 500 &&
+        errJson?.error === "No vodscene account configured"
+      ) {
+        needsAccount = true;
+        throw new Error(
+          errJson.detail ??
+            "No hay ninguna cuenta de vodscene configurada. Añade una desde el avatar de arriba a la derecha.",
+        );
+      }
+      throw new Error(errJson?.error ?? `HTTP ${res.status}`);
+    }
+    json = await res.json();
+  }
 
   const colMeta = json.meta?.collections?.videos;
   if (!colMeta?.accessible) {
@@ -322,16 +362,20 @@ const hashtagsJson = JSON.stringify(sortedHashtags);
   </Fragment>
 
   <header class="mb-8">
-    <nav class="mb-3" aria-label="Navegación principal">
+    <nav
+      class="mb-3 flex items-center justify-between gap-4"
+      aria-label="Navegación principal"
+    >
       <a
         href="/"
         class="focusable text-blue-400 hover:text-blue-300 hover:underline text-sm"
         >← Inicio</a
       >
+      <VodsceneAuth />
     </nav>
     <div class="flex items-end justify-between gap-4 flex-wrap">
       <div>
-        <h1 class="text-3xl font-bold text-white">Videos</h1>
+        <h1 class="text-3xl font-bold text-white">Vodscene</h1>
         {
           !error && (
             <p class="text-gray-500 text-sm mt-1 tabular-nums" id="video-count">
@@ -525,7 +569,48 @@ const hashtagsJson = JSON.stringify(sortedHashtags);
       </div>
     </div>
     {
-      error && (
+      error && needsAccount && (
+        <div
+          class="bg-vs-surface border border-vs-border rounded-lg px-5 py-6 text-center mb-6"
+          role="status"
+          aria-live="polite"
+        >
+          <p class="text-gray-200 font-semibold mb-1">
+            No hay ninguna cuenta de vodscene configurada
+          </p>
+          <p class="text-gray-500 text-sm">
+            Abre el avatar de la esquina superior derecha →{" "}
+            <strong>Cuentas</strong> →<strong>Añadir cuenta</strong> e inicia
+            sesión con tu email y contraseña.
+          </p>
+        </div>
+      )
+    }
+    {
+      error && needsLibrary && (
+        <div
+          class="bg-vs-surface border border-vs-border rounded-lg px-5 py-6 text-center mb-6"
+          role="status"
+          aria-live="polite"
+        >
+          <p class="text-gray-200 font-semibold mb-1">
+            No hay un snapshot guardado todavía
+          </p>
+          <p class="text-gray-500 text-sm">
+            Estás en modo <strong>Guardado</strong>. Genera el snapshot en el{" "}
+            <a
+              href="/vodscene/scraper"
+              class="text-blue-400 hover:text-blue-300 hover:underline"
+            >
+              scraper
+            </a>{" "}
+            o cambia a modo <strong>Live</strong> desde el avatar.
+          </p>
+        </div>
+      )
+    }
+    {
+      error && !needsAccount && !needsLibrary && (
         <div
           class="bg-red-950 border border-red-900 rounded-lg px-5 py-4 text-red-400 mb-6"
           role="alert"
@@ -687,7 +772,7 @@ const hashtagsJson = JSON.stringify(sortedHashtags);
                               </div>
                             )}
                             <span
-                              class={`absolute top-1.5 right-1.5 text-[.65rem] font-bold tracking-[.04em] px-1.5 py-[2px] rounded-[3px] pointer-events-none ${badgeCls}`}
+                              class={`absolute top-1.5 left-1.5 text-[.65rem] font-bold tracking-[.04em] px-1.5 py-[2px] rounded-[3px] pointer-events-none ${badgeCls}`}
                               aria-hidden="true"
                             >
                               {badgeLabel}
@@ -716,40 +801,19 @@ const hashtagsJson = JSON.stringify(sortedHashtags);
                                     </svg>
                                   </span>
                                 </button>
-                                <div class="absolute bottom-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                                <div class="absolute top-2 right-2 flex gap-1.5 z-10">
                                   <button
-                                    class="focusable inline-flex items-center gap-1 text-[.68rem] font-semibold px-2 py-1 rounded bg-black/70 border border-white/20 text-white/80 hover:border-blue-400 hover:text-blue-400 cursor-pointer"
-                                    data-video-id={v.id}
-                                    aria-label={`Reproducir en modal: ${v.title ?? v.id}`}
-                                    title="Reproducir en ventana modal"
-                                  >
-                                    <svg
-                                      width="10"
-                                      height="10"
-                                      viewBox="0 0 24 24"
-                                      fill="none"
-                                      stroke="currentColor"
-                                      stroke-width="2.5"
-                                      stroke-linecap="round"
-                                      stroke-linejoin="round"
-                                      aria-hidden="true"
-                                    >
-                                      <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
-                                    </svg>
-                                    Modal
-                                  </button>
-                                  <button
-                                    class="focusable inline-flex items-center gap-1 text-[.68rem] font-semibold px-2 py-1 rounded bg-black/70 border border-white/20 text-white/80 hover:border-blue-400 hover:text-blue-400 cursor-pointer"
-                                    data-popup-id={v.id}
-                                    data-popup-trailer={
+                                    class="focusable inline-flex items-center justify-center p-1.5 rounded bg-black/70 border border-white/20 text-white/80 hover:border-blue-400 hover:text-blue-400 cursor-pointer"
+                                    data-newtab-id={v.id}
+                                    data-newtab-trailer={
                                       mode === "trailer" ? "1" : "0"
                                     }
-                                    aria-label={`Abrir popup: ${v.title ?? v.id}`}
-                                    title="Abrir en ventana flotante"
+                                    aria-label={`Abrir en nueva pestaña: ${v.title ?? v.id}`}
+                                    title="Abrir en una nueva pestaña"
                                   >
                                     <svg
-                                      width="10"
-                                      height="10"
+                                      width="14"
+                                      height="14"
                                       viewBox="0 0 24 24"
                                       fill="none"
                                       stroke="currentColor"
@@ -758,16 +822,9 @@ const hashtagsJson = JSON.stringify(sortedHashtags);
                                       stroke-linejoin="round"
                                       aria-hidden="true"
                                     >
-                                      <rect
-                                        x="3"
-                                        y="3"
-                                        width="18"
-                                        height="18"
-                                        rx="2"
-                                      />
-                                      <path d="M9 3v18M3 9h6" />
+                                      <path d="M15 3h6v6M10 14L21 3" />
+                                      <path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" />
                                     </svg>
-                                    Popup
                                   </button>
                                 </div>
                               </div>
@@ -818,105 +875,99 @@ const hashtagsJson = JSON.stringify(sortedHashtags);
                               </p>
                             )}
 
-                            <ul
-                              class="flex flex-wrap gap-y-1 gap-x-2.5 list-none p-0 mt-auto pt-2"
-                              aria-label="Metadatos"
-                            >
-                              {v.views !== undefined && (
-                                <li>
-                                  <span
-                                    class="text-[.72rem] bg-[#2a2a2a] border border-vs-border rounded px-1.5 py-[2px] text-gray-500 whitespace-nowrap tabular-nums"
-                                    aria-label={`Vistas: ${formatViews(v.views)}`}
+                            <div class="flex items-end justify-between gap-2 mt-auto pt-2">
+                              <ul
+                                class="flex flex-wrap gap-y-1 gap-x-2.5 list-none p-0 min-w-0"
+                                aria-label="Metadatos"
+                              >
+                                {v.views !== undefined && (
+                                  <li>
+                                    <span
+                                      class="text-[.72rem] bg-[#2a2a2a] border border-vs-border rounded px-1.5 py-[2px] text-gray-500 whitespace-nowrap tabular-nums"
+                                      aria-label={`Vistas: ${formatViews(v.views)}`}
+                                    >
+                                      👁 {formatViews(v.views)}
+                                    </span>
+                                  </li>
+                                )}
+                                {v.likes !== undefined &&
+                                  Number(v.likes) > 0 && (
+                                    <li>
+                                      <span class="text-[.72rem] bg-[#2a2a2a] border border-vs-border rounded px-1.5 py-[2px] text-gray-500 whitespace-nowrap">
+                                        ♥ {formatViews(v.likes)}
+                                      </span>
+                                    </li>
+                                  )}
+                                {v.cost !== undefined && (
+                                  <li>
+                                    <span class="text-[.72rem] bg-[#2a2a2a] border border-vs-border rounded px-1.5 py-[2px] text-gray-500 whitespace-nowrap">
+                                      {formatCost(v.cost)}
+                                    </span>
+                                  </li>
+                                )}
+                                {v.createdAt && (
+                                  <li>
+                                    <span class="text-[.72rem] bg-[#2a2a2a] border border-vs-border rounded px-1.5 py-[2px] text-gray-500 whitespace-nowrap">
+                                      📅 {formatDate(v.createdAt)}
+                                    </span>
+                                  </li>
+                                )}
+                              </ul>
+
+                              {/* Menú de acciones */}
+                              <details class="actions-menu relative shrink-0">
+                                <summary
+                                  class="focusable list-none [&::-webkit-details-marker]:hidden text-gray-500 hover:text-blue-400 cursor-pointer flex items-center justify-center w-7 h-7 rounded-[5px] hover:bg-white/5 transition-colors"
+                                  aria-label={`Acciones para ${v.title ?? v.id}`}
+                                >
+                                  <svg
+                                    width="16"
+                                    height="16"
+                                    viewBox="0 0 24 24"
+                                    fill="currentColor"
+                                    aria-hidden="true"
                                   >
-                                    👁 {formatViews(v.views)}
-                                  </span>
-                                </li>
-                              )}
-                              {v.likes !== undefined && Number(v.likes) > 0 && (
-                                <li>
-                                  <span class="text-[.72rem] bg-[#2a2a2a] border border-vs-border rounded px-1.5 py-[2px] text-gray-500 whitespace-nowrap">
-                                    ♥ {formatViews(v.likes)}
-                                  </span>
-                                </li>
-                              )}
-                              {v.cost !== undefined && (
-                                <li>
-                                  <span class="text-[.72rem] bg-[#2a2a2a] border border-vs-border rounded px-1.5 py-[2px] text-gray-500 whitespace-nowrap">
-                                    {formatCost(v.cost)}
-                                  </span>
-                                </li>
-                              )}
-                              {v.createdAt && (
-                                <li>
-                                  <span class="text-[.72rem] bg-[#2a2a2a] border border-vs-border rounded px-1.5 py-[2px] text-gray-500 whitespace-nowrap">
-                                    📅 {formatDate(v.createdAt)}
-                                  </span>
-                                </li>
-                              )}
-                            </ul>
+                                    <circle cx="12" cy="5" r="2" />
+                                    <circle cx="12" cy="12" r="2" />
+                                    <circle cx="12" cy="19" r="2" />
+                                  </svg>
+                                </summary>
+                                <div class="absolute right-0 bottom-full z-20 mb-1 min-w-[140px] rounded-md border border-vs-border bg-vs-surface py-1 shadow-lg shadow-black/40">
+                                  {canPlay &&
+                                    mode !== "trailer" &&
+                                    v.publicUrls?.trailerManifest && (
+                                      <button
+                                        class="focusable w-full text-left text-[.78rem] text-gray-300 hover:text-blue-400 hover:bg-white/5 cursor-pointer bg-transparent border-0 px-3 py-1.5 flex items-center gap-2 transition-colors"
+                                        data-video-id={v.id}
+                                        data-force-trailer="true"
+                                        data-inline-play="true"
+                                        aria-label={`Ver tráiler de: ${v.title ?? v.id}`}
+                                      >
+                                        <svg
+                                          width="11"
+                                          height="11"
+                                          viewBox="0 0 24 24"
+                                          fill="currentColor"
+                                          aria-hidden="true"
+                                        >
+                                          <polygon points="5,3 19,12 5,21" />
+                                        </svg>
+                                        Tráiler
+                                      </button>
+                                    )}
+                                  <button
+                                    class="focusable w-full text-left text-[.78rem] text-gray-300 hover:text-blue-400 hover:bg-white/5 cursor-pointer bg-transparent border-0 px-3 py-1.5 flex items-center gap-2 transition-colors"
+                                    data-extra-id={v.id}
+                                    data-extra-json={JSON.stringify(v)}
+                                    aria-label={`Ver detalles de ${v.title ?? v.id}`}
+                                  >
+                                    <span class="text-[.55rem]">&#9656;</span>
+                                    Detalle
+                                  </button>
+                                </div>
+                              </details>
+                            </div>
                           </div>
-
-                          {/* Botones */}
-                          <div class="px-4 pb-3.5 flex gap-2 flex-wrap">
-                            {canPlay ? (
-                              <button
-                                class="focusable inline-flex items-center gap-1.5 text-[.8rem] font-semibold px-3 py-1.5 rounded-[5px] cursor-pointer border-0 font-sans bg-blue-400 text-black hover:bg-blue-300 focus-visible:outline-2 focus-visible:outline-blue-300 focus-visible:outline-offset-2 transition-colors"
-                                data-video-id={v.id}
-                                data-inline-play="true"
-                                aria-label={`Reproducir: ${v.title ?? v.id}`}
-                              >
-                                <svg
-                                  width="11"
-                                  height="11"
-                                  viewBox="0 0 24 24"
-                                  fill="currentColor"
-                                  aria-hidden="true"
-                                >
-                                  <polygon points="5,3 19,12 5,21" />
-                                </svg>
-                                {mode === "trailer"
-                                  ? "Ver tráiler"
-                                  : "Reproducir"}
-                              </button>
-                            ) : (
-                              <button
-                                class="inline-flex items-center gap-1.5 text-[.8rem] font-semibold px-3 py-1.5 rounded-[5px] cursor-not-allowed border border-vs-border bg-transparent text-gray-500 opacity-40 font-sans"
-                                disabled
-                              >
-                                No disponible
-                              </button>
-                            )}
-                            {canPlay &&
-                              mode !== "trailer" &&
-                              v.publicUrls?.trailerManifest && (
-                                <button
-                                  class="focusable inline-flex items-center gap-1.5 text-[.8rem] font-semibold px-3 py-1.5 rounded-[5px] cursor-pointer border border-vs-border bg-transparent text-gray-500 hover:border-blue-400 hover:text-blue-400 focus-visible:outline-2 focus-visible:outline-blue-300 focus-visible:outline-offset-2 transition-colors font-sans"
-                                  data-video-id={v.id}
-                                  data-force-trailer="true"
-                                  data-inline-play="true"
-                                  aria-label={`Ver tráiler de: ${v.title ?? v.id}`}
-                                >
-                                  Tráiler
-                                </button>
-                              )}
-                          </div>
-
-                          {/* Detalles */}
-                          <div class="px-4 pb-3.5">
-                            <button
-                              class="focusable text-[.73rem] text-gray-500 hover:text-blue-400 cursor-pointer bg-transparent border-0 p-0 flex items-center gap-1.5 transition-colors"
-                              data-extra-id={v.id}
-                              data-extra-json={JSON.stringify(v)}
-                              aria-label={`Ver detalles de ${v.title ?? v.id}`}
-                            >
-                              <span class="text-[.55rem]">&#9656;</span>
-                              Detalles
-                            </button>
-                          </div>
-
-                          <p class="text-[.68rem] text-gray-700 font-mono px-4 pb-3">
-                            ID: {v.id}
-                          </p>
                         </article>
                       </li>
                     );
@@ -937,8 +988,12 @@ const hashtagsJson = JSON.stringify(sortedHashtags);
     id="extra-data-modal"
     aria-label="Detalles del video"
     aria-modal="true"
-    class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 m-0 bg-vs-bg border border-vs-border rounded-[10px] p-0 max-w-[min(720px,95vw)] w-[min(680px,92vw)] shadow-[0_24px_64px_rgba(0,0,0,.8)] [&::backdrop]:bg-black/60 [&::backdrop]:backdrop-blur-sm"
+    class="fixed m-0 bg-vs-bg border border-vs-border p-0 shadow-[0_24px_64px_rgba(0,0,0,.8)] [&::backdrop]:bg-black/60 [&::backdrop]:backdrop-blur-sm bottom-0 left-0 right-0 top-auto translate-x-0 translate-y-0 w-full max-w-full rounded-t-2xl rounded-b-none sm:top-1/2 sm:left-1/2 sm:right-auto sm:bottom-auto sm:-translate-x-1/2 sm:-translate-y-1/2 sm:w-[min(680px,92vw)] sm:max-w-[min(720px,95vw)] sm:rounded-[10px]"
   >
+    <!-- Drag handle (solo mobile) -->
+    <div class="sm:hidden flex justify-center pt-2.5 pb-1">
+      <div class="h-1 w-9 rounded-full bg-vs-border"></div>
+    </div>
     <!-- Barra de tabs -->
     <div class="flex items-center border-b border-vs-border bg-vs-modal px-4">
       <button
@@ -961,9 +1016,16 @@ const hashtagsJson = JSON.stringify(sortedHashtags);
       >
     </div>
     <!-- Panel: Details -->
-    <div id="extra-panel-details" class="overflow-auto max-h-[72vh]"></div>
+    <div
+      id="extra-panel-details"
+      class="overflow-auto overscroll-contain max-h-[70vh] sm:max-h-[72vh]"
+    >
+    </div>
     <!-- Panel: Raw JSON -->
-    <div id="extra-panel-raw" class="overflow-auto max-h-[72vh] p-4 hidden">
+    <div
+      id="extra-panel-raw"
+      class="overflow-auto overscroll-contain max-h-[70vh] sm:max-h-[72vh] p-4 hidden"
+    >
       <pre
         id="extra-modal-content"
         class="text-[.78rem] text-gray-300 font-mono whitespace-pre-wrap break-all m-0">
@@ -1301,6 +1363,42 @@ const hashtagsJson = JSON.stringify(sortedHashtags);
       border-color: rgba(239, 68, 68, 0.5);
       color: #f87171;
     }
+
+    /* Evitar el menú nativo (guardar imagen) y la selección al hacer long-press
+       sobre la miniatura en móvil; el long-press dispara la previsualización. */
+    .poster-thumb-wrap {
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+
+    /* Reproductor inline: al abrir un menú de Shaka, liberamos el recorte de la
+       tarjeta y la elevamos para que el menú se vea por encima de las vecinas. */
+    .poster-thumb-wrap.shaka-menu-open,
+    article.shaka-menu-open {
+      overflow: visible;
+      position: relative;
+      z-index: 60;
+    }
+
+    /* En móvil el menú de Shaka se muestra como bottom-sheet fijo, así no se
+       corta por el overflow del contenedor ni por el tamaño de la tarjeta. */
+    @media (max-width: 640px) {
+      .shaka-overflow-menu,
+      .shaka-settings-menu {
+        position: fixed !important;
+        left: 0 !important;
+        right: 0 !important;
+        bottom: 0 !important;
+        top: auto !important;
+        width: 100% !important;
+        min-width: 0 !important;
+        max-width: 100% !important;
+        max-height: 70vh !important;
+        border-radius: 14px 14px 0 0 !important;
+        padding-bottom: env(safe-area-inset-bottom) !important;
+      }
+    }
   </style>
 
   <script is:inline>
@@ -1581,6 +1679,62 @@ const hashtagsJson = JSON.stringify(sortedHashtags);
     let shakaPlayer = null;
     let shakaUi = null;
     let currentVideoLi = null;
+    let shakaMenuObserver = null;
+
+    // Mientras un menú de Shaka esté abierto, desactivar los overlays de seek:
+    // sus z-index (125) interceptan los clics del menú, que vive dentro del
+    // stacking context (z-index 1) de .shaka-controls-container.
+    function watchShakaMenus(wrapper) {
+      if (shakaMenuObserver) shakaMenuObserver.disconnect();
+      const overlays = [
+        document.getElementById("seek-backward-overlay"),
+        document.getElementById("seek-forward-overlay"),
+      ];
+      const sync = () => {
+        const open = wrapper.querySelector(
+          ".shaka-overflow-menu:not(.shaka-hidden), .shaka-settings-menu:not(.shaka-hidden)",
+        );
+        for (const ov of overlays)
+          if (ov) ov.style.pointerEvents = open ? "none" : "";
+      };
+      shakaMenuObserver = new MutationObserver(sync);
+      shakaMenuObserver.observe(wrapper, {
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["class"],
+      });
+      sync();
+    }
+
+    // Reproductor inline: al abrir un menú de Shaka, liberamos el recorte de la
+    // tarjeta (clase shaka-menu-open) para que el menú no quede cortado.
+    let inlineMenuObserver = null;
+    function watchInlineShakaMenus(thumbWrap) {
+      if (inlineMenuObserver) inlineMenuObserver.disconnect();
+      const article = thumbWrap.closest("article");
+      const sync = () => {
+        const open = !!thumbWrap.querySelector(
+          ".shaka-overflow-menu:not(.shaka-hidden), .shaka-settings-menu:not(.shaka-hidden)",
+        );
+        thumbWrap.classList.toggle("shaka-menu-open", open);
+        article?.classList.toggle("shaka-menu-open", open);
+      };
+      inlineMenuObserver = new MutationObserver(sync);
+      inlineMenuObserver.observe(thumbWrap, {
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["class"],
+      });
+      sync();
+    }
+    function stopInlineShakaMenus(thumbWrap) {
+      if (inlineMenuObserver) {
+        inlineMenuObserver.disconnect();
+        inlineMenuObserver = null;
+      }
+      thumbWrap?.classList.remove("shaka-menu-open");
+      thumbWrap?.closest("article")?.classList.remove("shaka-menu-open");
+    }
 
     // Autoplay Countdown State
     let autoplayInterval = null;
@@ -1742,6 +1896,7 @@ const hashtagsJson = JSON.stringify(sortedHashtags);
               "overflow_menu",
             ],
           });
+          watchShakaMenus(videoWrapper);
         }
 
         shakaPlayer.addEventListener("error", (event) => {
@@ -1853,6 +2008,10 @@ const hashtagsJson = JSON.stringify(sortedHashtags);
         await shakaPlayer.destroy();
         shakaPlayer = null;
       }
+      if (shakaMenuObserver) {
+        shakaMenuObserver.disconnect();
+        shakaMenuObserver = null;
+      }
       videoEl.removeAttribute("src");
       videoEl.poster = "";
       clearError();
@@ -1959,10 +2118,17 @@ const hashtagsJson = JSON.stringify(sortedHashtags);
 
     // ─── Reproductor inline ────────────────────────────────────────────────────
     let inlineShakaPlayer = null;
+    let inlineShakaUi = null;
     let inlineVideoEl = null;
     let inlineThumbWrap = null;
 
     async function closeInlinePlayer() {
+      if (inlineShakaUi) {
+        try {
+          await inlineShakaUi.destroy();
+        } catch (_) {}
+        inlineShakaUi = null;
+      }
       if (inlineShakaPlayer) {
         try {
           await inlineShakaPlayer.destroy();
@@ -1976,6 +2142,7 @@ const hashtagsJson = JSON.stringify(sortedHashtags);
         inlineVideoEl = null;
       }
       if (inlineThumbWrap) {
+        stopInlineShakaMenus(inlineThumbWrap);
         const img = inlineThumbWrap.querySelector("img");
         if (img) img.style.display = "";
         inlineThumbWrap
@@ -2004,9 +2171,9 @@ const hashtagsJson = JSON.stringify(sortedHashtags);
       const img = thumbWrap.querySelector("img");
       if (img) img.style.display = "none";
 
-      // Crear elemento video
+      // Crear elemento video (los controles los aporta la UI de Shaka)
       const video = document.createElement("video");
-      video.controls = true;
+      video.controls = false;
       video.autoplay = true;
       video.setAttribute("playsinline", "");
       video.className =
@@ -2052,6 +2219,29 @@ const hashtagsJson = JSON.stringify(sortedHashtags);
         streaming: { bufferingGoal: 30, rebufferingGoal: 2, bufferBehind: 60 },
       });
 
+      // UI de Shaka con selector de calidad/resolución
+      if (shaka.ui && shaka.ui.Overlay) {
+        inlineShakaUi = new shaka.ui.Overlay(
+          inlineShakaPlayer,
+          thumbWrap,
+          video,
+        );
+        inlineShakaUi.configure({
+          controlPanelElements: [
+            "play_pause",
+            "time_and_duration",
+            "spacer",
+            "mute",
+            "volume",
+            "overflow_menu",
+            "fullscreen",
+          ],
+        });
+        watchInlineShakaMenus(thumbWrap);
+      } else {
+        video.controls = true;
+      }
+
       if (Object.keys(drmServers).length > 0) {
         inlineShakaPlayer.configure({ drm: { servers: drmServers } });
         inlineShakaPlayer
@@ -2087,6 +2277,12 @@ const hashtagsJson = JSON.stringify(sortedHashtags);
     document.addEventListener("click", (e) => {
       const btn = e.target.closest("[data-video-id]");
       if (!btn) return;
+      // Si venimos de un long-press (preview en móvil), no reproducir.
+      if (Date.now() < suppressClickUntil) {
+        suppressClickUntil = 0;
+        return;
+      }
+      btn.closest("details[open]")?.removeAttribute("open");
       if (btn.dataset.inlinePlay === "true") {
         openInlinePlayer(
           btn,
@@ -2184,10 +2380,14 @@ const hashtagsJson = JSON.stringify(sortedHashtags);
       const keyId = data.drm?.keyId;
       const fpIv = data.fairplay?.ivHex;
 
-      let html = '<div class="p-5 space-y-5 text-sm">';
+      let html = '<div class="p-4 sm:p-5 space-y-5 text-sm">';
 
       // ─ Grid 2 columnas ─
       const gridCells = [];
+      if (data.id)
+        gridCells.push(
+          `<div class="col-span-2">${lbl("ID")}<div class="bg-[#111] border border-[#2d2d2d] rounded px-3 py-2 text-[.78rem] font-mono text-gray-300 whitespace-nowrap overflow-x-auto">${esc(data.id)}</div></div>`,
+        );
       if (participants) gridCells.push(field("Participants", participants));
       if (data.cost !== undefined)
         gridCells.push(
@@ -2208,7 +2408,7 @@ const hashtagsJson = JSON.stringify(sortedHashtags);
         gridCells.push(field("Uploaded By", data.uploadedBy));
 
       if (gridCells.length) {
-        html += `<div class="grid grid-cols-2 gap-x-8 gap-y-4 border-b border-[#2d2d2d] pb-5">${gridCells.join("")}</div>`;
+        html += `<div class="grid grid-cols-2 gap-x-5 gap-y-4 sm:gap-x-8 border-b border-[#2d2d2d] pb-5">${gridCells.join("")}</div>`;
       }
 
       // ─ Descripción ─
@@ -2241,22 +2441,26 @@ const hashtagsJson = JSON.stringify(sortedHashtags);
       const rawJson = btn.dataset.extraJson;
       if (!rawJson) return;
       const data = JSON.parse(rawJson);
+      btn.closest("details[open]")?.removeAttribute("open");
       switchTab("details");
       extraPanelDet.innerHTML = buildDetails(data);
       extraModalPre.textContent = JSON.stringify(data, null, 2);
       extraModal.showModal();
     });
 
+    // Cerrar menús de acciones al hacer clic fuera
     document.addEventListener("click", (e) => {
-      const btn = e.target.closest("[data-popup-id]");
+      document.querySelectorAll("details.actions-menu[open]").forEach((d) => {
+        if (!d.contains(e.target)) d.removeAttribute("open");
+      });
+    });
+
+    document.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-newtab-id]");
       if (!btn) return;
-      const id = btn.dataset.popupId;
-      const trailer = btn.dataset.popupTrailer === "1" ? "&trailer=1" : "";
-      window.open(
-        `/vodscene/player?id=${id}${trailer}`,
-        `player-${id}`,
-        "popup,width=960,height=560,resizable=yes",
-      );
+      const id = btn.dataset.newtabId;
+      const trailer = btn.dataset.newtabTrailer === "1" ? "&trailer=1" : "";
+      window.open(`/vodscene/play?id=${id}${trailer}`, "_blank", "noopener");
     });
 
     // ─── GIF preview on hover ──────────────────────────────────────────────────
@@ -2375,6 +2579,81 @@ const hashtagsJson = JSON.stringify(sortedHashtags);
         img.src = original;
       });
     });
+
+    // ─── Long-press en móvil: previsualizar (equivalente al hover) ─────────────
+    let suppressClickUntil = 0;
+    let lpTimer = null;
+    let lpThumb = null;
+    let lpStart = null;
+    const LP_DELAY_MS = 350;
+    const LP_MOVE_CANCEL_PX = 12;
+
+    function lpCancelTimer() {
+      if (lpTimer) {
+        clearTimeout(lpTimer);
+        lpTimer = null;
+      }
+    }
+
+    function lpEnd() {
+      lpCancelTimer();
+      lpStart = null;
+      if (!lpThumb) return;
+      const thumb = lpThumb;
+      lpThumb = null;
+      const img = thumb.querySelector("img");
+      const original = img?.dataset.originalSrc;
+      if (img && original) img.src = original;
+      closePreview();
+      // Bloquear el click sintético que dispara el touchend.
+      suppressClickUntil = Date.now() + 600;
+    }
+
+    document.addEventListener(
+      "touchstart",
+      (e) => {
+        const thumb = e.target.closest(".poster-thumb-wrap");
+        if (!thumb) return;
+        const btn = thumb.querySelector("[data-video-id]");
+        const videoId = btn?.dataset.videoId;
+        if (!videoId) return;
+        const t = e.touches[0];
+        lpStart = { x: t.clientX, y: t.clientY };
+        lpCancelTimer();
+        lpTimer = setTimeout(() => {
+          lpTimer = null;
+          lpThumb = thumb;
+          const img = thumb.querySelector("img");
+          const gif =
+            thumb.dataset.gif || thumb.closest("li")?.dataset.trailerGif;
+          if (img && gif) {
+            if (!img.dataset.originalSrc) img.dataset.originalSrc = img.src;
+            img.src = gif;
+          }
+          openPreview(videoId, thumb);
+        }, LP_DELAY_MS);
+      },
+      { passive: true },
+    );
+
+    document.addEventListener(
+      "touchmove",
+      (e) => {
+        if (!lpStart) return;
+        const t = e.touches[0];
+        if (
+          Math.abs(t.clientX - lpStart.x) > LP_MOVE_CANCEL_PX ||
+          Math.abs(t.clientY - lpStart.y) > LP_MOVE_CANCEL_PX
+        ) {
+          lpCancelTimer();
+          if (lpThumb) lpEnd();
+        }
+      },
+      { passive: true },
+    );
+
+    document.addEventListener("touchend", lpEnd);
+    document.addEventListener("touchcancel", lpEnd);
 
     // ─── Duración: fetch lazy del manifiesto DASH al hacer hover ──────────────
     const durationCache = new Map(); // videoId -> segundos | null

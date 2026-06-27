@@ -3,9 +3,6 @@ compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
 pages_build_output_dir = "dist"
 
-# KV para almacenar cookies de Pornhub editables desde la UI.
-# Crear namespace: wrangler kv namespace create VS_C3_KV
-# Luego reemplazar el id con el que devuelva el comando anterior.
 [[kv_namespaces]]
 binding = "VS_C3_KV"
 id = "70fe3a1138d94643b68aaabb138c81b5"
@@ -13,19 +10,3 @@ id = "70fe3a1138d94643b68aaabb138c81b5"
 [vars]
 FIREBASE_API_KEY = "AIzaSyAUPv7dU2kEk1rdC__6z8aGlPYPfQh_ogA"
 FIREBASE_PROJECT = "payperview-7c21f"
-VODSCENE_EMAIL   = "m45942076@gmail.com"
-# VODSCENE_PASSWORD se recomienda poner como secret:
-#   wrangler pages secret put VODSCENE_PASSWORD
-VODSCENE_PASSWORD = "minasricas00"
-# API_KEY: contraseña de acceso a la app.
-# Para producción usa secrets (nunca en vars):
-#   wrangler pages secret put API_KEY
-API_KEY = "changeme"
-# SHEER_KV_SECRET: clave AES-256 (base64 de 32 bytes) para cifrar la biblioteca
-# de Sheer guardada en KV (sheer:library) y las cookies/cuentas de Pornhub
-# (ph:cookies, ph:accounts). En dev local vive en .dev.vars.
-# En producción NO la pongas aquí; usa un secret:
-#   wrangler pages secret put SHEER_KV_SECRET
-# Generar una nueva: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
-# Opcional: PH_KV_SECRET para usar una clave distinta solo para Pornhub; si no
-# existe, se usa SHEER_KV_SECRET.

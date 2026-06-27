@@ -1,0 +1,84 @@
+---
+import Layout from '@/layouts/Layout.astro';
+import VideoPlayer from '@/components/buymyvids/VideoPlayer.astro';
+import rawVideos from '@/pages/api/buymyvids/_videos.json';
+export const prerender = false;
+
+// ─── Tipos ────────────────────────────────────────────────────────────────────
+interface BmvVideo {
+  uid: string;
+  id: string;
+  url: string;
+  filename: string;
+  description?: string;
+  duration?: number;
+}
+
+// Mismo mapeo de UID que en la grilla (índice del JSON original, estable).
+const videos: BmvVideo[] = (rawVideos as Omit<BmvVideo, 'uid'>[]).map((v, i) => ({
+  ...v,
+  uid: `bmv-${i}`,
+}));
+
+// ─── Resolución del video ──────────────────────────────────────────────────────
+const uid      = Astro.url.searchParams.get("uid") ?? "";
+const urlParam = Astro.url.searchParams.get("url");
+
+let video: BmvVideo | null = uid ? (videos.find((v) => v.uid === uid) ?? null) : null;
+if (!video && urlParam) {
+  video = videos.find((v) => v.url === urlParam)
+    ?? { uid: "", id: "", url: urlParam, filename: "", description: "" };
+}
+
+const playUrl = video?.url ?? "";
+const title   = video?.description?.slice(0, 80) || video?.filename || "Reproductor";
+---
+
+<Layout title={`${title} — BuyMyVids`}>
+  <div class="fixed inset-0 bg-black flex items-center justify-center z-[200]">
+    {!playUrl && (
+      <p class="text-gray-500 text-center px-6">Video no encontrado.</p>
+    )}
+
+    {playUrl && (
+      <>
+        <VideoPlayer
+          id="bmv-play-page"
+          rootClass="w-full h-full flex items-center justify-center"
+          videoClass="max-w-[100vw] max-h-[100vh]"
+        />
+
+        {/* Barra superior (se muestra al pasar el cursor / enfocar) */}
+        <div class="group/bar absolute top-0 left-0 right-0 flex items-center gap-2 px-3 py-2.5 bg-gradient-to-b from-black/70 to-transparent opacity-0 hover:opacity-100 focus-within:opacity-100 transition-opacity">
+          <a
+            href="/buymyvids/videos"
+            class="focusable inline-flex items-center gap-1.5 text-sm text-gray-200 bg-black/50 border border-white/20 rounded-md px-3 py-1.5 hover:border-blue-400 hover:text-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-400 transition-colors no-underline"
+            aria-label="Volver a la lista de videos"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+            Volver
+          </a>
+
+          <span class="text-sm text-gray-300 truncate min-w-0 flex-1">{title}</span>
+
+          <a
+            href={playUrl}
+            download={video?.filename || true}
+            class="focusable inline-flex items-center gap-1.5 text-sm text-gray-200 bg-black/50 border border-white/20 rounded-md px-3 py-1.5 hover:border-blue-400 hover:text-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-400 transition-colors no-underline"
+            aria-label="Descargar video"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Descargar
+          </a>
+        </div>
+      </>
+    )}
+  </div>
+
+  {playUrl && (
+    <script is:inline define:vars={{ playUrl }}>
+      const api = window.bmvPlayer("#bmv-play-page");
+      if (api) api.load(playUrl);
+    </script>
+  )}
+</Layout>

@@ -1,0 +1,733 @@
+---
+// Autenticación de vodscene como avatar con menú desplegable y modal.
+//
+//  ┌── Avatar circular con indicador flotante de estado (verde/rojo/cargando).
+//  │   Al hacer clic se despliega un menú con las opciones de sesión.
+//  └── El menú tiene dos entradas:
+//        · Cuentas         → elegir/eliminar la cuenta activa (multicuenta) y,
+//                            desde ahí, añadir una nueva por email + contraseña.
+//        · Validar sesión  → comprueba la cuenta activa contra Firebase.
+//
+// Multicuenta: cada cuenta guarda email + contraseña (cifrados) en KV
+// (vodscene:accounts). La cuenta ACTIVA es la que usa /api/vodscene/firestore
+// para autenticarse. Todo el trabajo vive en /api/vodscene/auth; aquí solo está
+// la UI + el fetch del cliente.
+---
+
+<div id="vsa-root" class="relative inline-block">
+  {/* ── Avatar + indicador flotante de estado ───────────────────────────── */}
+  <button
+    type="button"
+    id="vsa-avatar"
+    class="group relative flex h-10 w-10 items-center justify-center rounded-full border border-vs-border bg-vs-surface text-gray-300 transition-colors hover:border-blue-400 hover:text-white"
+    aria-haspopup="true"
+    aria-expanded="false"
+    title="Cuenta vodscene"
+  >
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+      <circle cx="12" cy="7" r="4"></circle>
+    </svg>
+    {/* Punto de estado flotante */}
+    <span
+      id="vsa-dot"
+      class="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-vs-bg bg-gray-500"
+      title="Comprobando…"></span>
+  </button>
+
+  {
+    /* ── Menú desplegable ─────────────────────────────────────────────────── */
+  }
+  <div
+    id="vsa-menu"
+    class="absolute right-0 top-[calc(100%+0.5rem)] z-50 hidden w-60 max-w-[calc(100vw-2rem)] origin-top-right overflow-hidden rounded-lg border border-vs-border bg-vs-modal shadow-[0_12px_40px_rgba(0,0,0,0.6)]"
+    role="menu"
+  >
+    <div class="border-b border-vs-border px-4 py-3">
+      <p
+        id="vsa-menu-account"
+        class="truncate text-sm font-semibold text-white"
+      >
+        Sesión vodscene
+      </p>
+      <p
+        id="vsa-menu-status"
+        class="mt-0.5 truncate text-[.8rem] font-medium text-gray-500"
+      >
+        Comprobando…
+      </p>
+    </div>
+    <div class="p-1.5">
+      <button
+        type="button"
+        data-open="accounts"
+        class="vsa-menu-item flex w-full items-center gap-2.5 rounded-md px-3 py-2.5 text-left text-[.88rem] text-gray-200 transition-colors hover:bg-vs-surface"
+        role="menuitem"
+      >
+        <svg
+          width="15"
+          height="15"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          class="text-blue-400"
+          aria-hidden="true"
+        >
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+          <circle cx="9" cy="7" r="4"></circle>
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"></path>
+        </svg>
+        Cuentas
+      </button>
+      <button
+        type="button"
+        data-open="validate"
+        class="vsa-menu-item flex w-full items-center gap-2.5 rounded-md px-3 py-2.5 text-left text-[.88rem] text-gray-200 transition-colors hover:bg-vs-surface"
+        role="menuitem"
+      >
+        <svg
+          width="15"
+          height="15"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          class="text-blue-400"
+          aria-hidden="true"
+        >
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+        </svg>
+        Validar sesión
+      </button>
+      <div class="my-1.5 border-t border-vs-border"></div>
+      <a
+        href="/vodscene/participants"
+        class="flex w-full items-center gap-2.5 rounded-md px-3 py-2.5 text-left text-[.88rem] text-gray-200 no-underline transition-colors hover:bg-vs-surface"
+        role="menuitem"
+      >
+        <svg
+          width="15"
+          height="15"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          class="text-blue-400"
+          aria-hidden="true"
+        >
+          <line x1="8" y1="6" x2="21" y2="6"></line>
+          <line x1="8" y1="12" x2="21" y2="12"></line>
+          <line x1="8" y1="18" x2="21" y2="18"></line>
+          <line x1="3" y1="6" x2="3.01" y2="6"></line>
+          <line x1="3" y1="12" x2="3.01" y2="12"></line>
+          <line x1="3" y1="18" x2="3.01" y2="18"></line>
+        </svg>
+        Participantes
+      </a>
+    </div>
+
+    {/* Modo de lectura: live (Firestore en vivo) ↔ guardado (lee KV) */}
+    <div class="border-t border-vs-border px-3 py-3">
+      <div class="mb-2 flex items-center justify-between gap-2">
+        <p
+          class="text-[.7rem] font-semibold uppercase tracking-[.5px] text-gray-500"
+        >
+          Modo de lectura
+        </p>
+        <a
+          href="/vodscene/scraper"
+          class="hidden text-[.7rem] font-semibold text-blue-400 hover:text-blue-300 hover:underline"
+          >Scraper →</a
+        >
+      </div>
+      <div class="flex rounded-md border border-vs-border bg-vs-bg p-0.5">
+        <button
+          type="button"
+          data-mode="live"
+          class="vsa-mode-btn flex-1 rounded px-2 py-1.5 text-[.78rem] font-semibold text-gray-500 transition-colors"
+        >
+          Live
+        </button>
+        <button
+          type="button"
+          data-mode="saved"
+          class="vsa-mode-btn flex-1 rounded px-2 py-1.5 text-[.78rem] font-semibold text-gray-500 transition-colors"
+        >
+          Guardado
+        </button>
+      </div>
+      <p
+        id="vsa-mode-hint"
+        class="mt-1.5 text-[.72rem] leading-snug text-gray-500"
+      >
+      </p>
+    </div>
+  </div>
+</div>
+
+{
+  /* ── Modal ──────────────────────────────────────────────────────────────── */
+}
+<div
+  id="vsa-modal"
+  class="fixed inset-0 z-[200] hidden items-center justify-center p-3 sm:p-6"
+  aria-hidden="true"
+>
+  <div class="absolute inset-0 bg-black/70 backdrop-blur-sm" data-close></div>
+
+  <div
+    class="relative z-10 flex max-h-[calc(100dvh-1.5rem)] w-full max-w-[480px] flex-col overflow-hidden rounded-xl border border-vs-border bg-vs-modal shadow-[0_20px_60px_rgba(0,0,0,0.7)] sm:max-h-[calc(100dvh-3rem)]"
+  >
+    {/* Cabecera */}
+    <div
+      class="flex shrink-0 items-center justify-between gap-3 border-b border-vs-border px-5 py-4"
+    >
+      <h2 id="vsa-modal-title" class="text-[1rem] font-semibold text-white">
+        Cuenta vodscene
+      </h2>
+      <button
+        type="button"
+        data-close
+        aria-label="Cerrar"
+        class="flex h-8 w-8 items-center justify-center rounded-full border border-vs-border text-gray-400 transition-colors hover:border-red-400 hover:text-red-400"
+      >
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.5"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+          ><line x1="18" y1="6" x2="6" y2="18"></line><line
+            x1="6"
+            y1="6"
+            x2="18"
+            y2="18"></line></svg
+        >
+      </button>
+    </div>
+
+    <div class="overflow-y-auto px-5 py-5">
+      {/* Gestión de cuentas (multicuenta) */}
+      <div data-view="accounts" class="vsa-view hidden flex-col gap-3">
+        <p class="text-[.88rem] text-gray-500">
+          Elige la cuenta activa o elimina las que no uses. La activa es la que
+          usa la app para cargar el catálogo.
+        </p>
+        <div id="vsa-accounts-list" class="flex flex-col gap-2">
+          <p class="text-[.85rem] text-gray-500">Cargando cuentas…</p>
+        </div>
+        <button
+          type="button"
+          data-goto="login"
+          class="vsa-goto inline-flex items-center justify-center gap-2 rounded-md border border-vs-border bg-transparent px-4 py-2.5 text-sm font-semibold text-gray-200 transition-colors hover:border-blue-400 hover:text-blue-400"
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+            ><line x1="12" y1="5" x2="12" y2="19"></line><line
+              x1="5"
+              y1="12"
+              x2="19"
+              y2="12"></line></svg
+          >
+          Añadir cuenta
+        </button>
+      </div>
+
+      {/* Login email + contraseña */}
+      <div data-view="login" class="vsa-view hidden flex-col gap-3">
+        <div class="flex flex-col gap-1.5">
+          <label
+            for="vsa-email"
+            class="text-xs font-semibold uppercase tracking-[.5px] text-gray-500"
+          >
+            Email
+          </label>
+          <input
+            type="email"
+            id="vsa-email"
+            autocomplete="username"
+            placeholder="tu@email.com"
+            class="w-full rounded-md border border-vs-border bg-vs-bg px-3.5 py-2.5 text-[.9rem] text-gray-200 placeholder-gray-600 outline-none transition-colors focus:border-blue-400"
+          />
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <label
+            for="vsa-password"
+            class="text-xs font-semibold uppercase tracking-[.5px] text-gray-500"
+          >
+            Contraseña
+          </label>
+          <input
+            type="password"
+            id="vsa-password"
+            autocomplete="current-password"
+            placeholder="••••••••"
+            class="w-full rounded-md border border-vs-border bg-vs-bg px-3.5 py-2.5 text-[.9rem] text-gray-200 placeholder-gray-600 outline-none transition-colors focus:border-blue-400"
+          />
+        </div>
+        <button
+          type="button"
+          id="vsa-login"
+          class="inline-flex items-center justify-center gap-2 rounded-md bg-blue-400 px-4 py-2.5 text-sm font-semibold text-black transition-colors hover:bg-blue-300"
+        >
+          Iniciar sesión y guardar
+        </button>
+        <p class="text-[.78rem] italic text-gray-600">
+          Las credenciales se validan contra Firebase y se guardan cifradas en
+          KV.
+        </p>
+      </div>
+
+      {/* Validar sesión guardada */}
+      <div data-view="validate" class="vsa-view hidden flex-col gap-3">
+        <p class="text-[.88rem] text-gray-500">
+          Comprueba si la cuenta activa sigue autenticándose correctamente.
+        </p>
+        <button
+          type="button"
+          id="vsa-validate"
+          class="inline-flex items-center justify-center gap-2 rounded-md bg-blue-400 px-4 py-2.5 text-sm font-semibold text-black transition-colors hover:bg-blue-300"
+        >
+          Validar cuenta activa
+        </button>
+      </div>
+
+      {/* Resultado común (oculto mientras no tenga texto) */}
+      <p id="vsa-result" class="mt-4 text-[.85rem] text-gray-500 empty:hidden">
+      </p>
+    </div>
+  </div>
+</div>
+
+<script is:inline>
+  (() => {
+    const root = document.getElementById("vsa-root");
+    if (!root) return;
+
+    const avatar = document.getElementById("vsa-avatar");
+    const menu = document.getElementById("vsa-menu");
+    const menuStatus = document.getElementById("vsa-menu-status");
+    const menuAccount = document.getElementById("vsa-menu-account");
+    const dot = document.getElementById("vsa-dot");
+    const modal = document.getElementById("vsa-modal");
+    const modalTitle = document.getElementById("vsa-modal-title");
+    const result = document.getElementById("vsa-result");
+    const accountsList = document.getElementById("vsa-accounts-list");
+    const views = modal.querySelectorAll(".vsa-view");
+
+    // Portal al <body> por si un ancestro con backdrop-filter recorta el fixed.
+    if (modal.parentElement !== document.body) document.body.appendChild(modal);
+
+    let lastFocus = null;
+    let accountsCache = [];
+    let currentMode = "live";
+    let libraryInfo = { hasLibrary: false, totalVideos: 0, totalPlaylists: 0 };
+
+    // ── Menú ─────────────────────────────────────────────────────────────────
+    const openMenu = () => {
+      menu.classList.remove("hidden");
+      avatar.setAttribute("aria-expanded", "true");
+    };
+    const closeMenu = () => {
+      menu.classList.add("hidden");
+      avatar.setAttribute("aria-expanded", "false");
+    };
+    avatar?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      menu.classList.contains("hidden") ? openMenu() : closeMenu();
+    });
+    document.addEventListener("click", (e) => {
+      if (!root.contains(e.target)) closeMenu();
+    });
+
+    // ── Modal ────────────────────────────────────────────────────────────────
+    const VIEW_TITLES = {
+      accounts: "Cuentas",
+      login: "Añadir cuenta",
+      validate: "Validar sesión",
+    };
+
+    const showView = (view) => {
+      views.forEach((v) => {
+        const active = v.getAttribute("data-view") === view;
+        v.classList.toggle("hidden", !active);
+        v.classList.toggle("flex", active);
+      });
+      if (modalTitle)
+        modalTitle.textContent = VIEW_TITLES[view] || "Cuenta vodscene";
+      setResult("loading", "");
+      if (view === "validate") document.getElementById("vsa-validate")?.click();
+      if (view === "accounts") renderAccounts();
+    };
+
+    const openModal = (view) => {
+      showView(view);
+      lastFocus = document.activeElement;
+      modal.classList.remove("hidden");
+      modal.classList.add("flex");
+      modal.setAttribute("aria-hidden", "false");
+      document.body.style.overflow = "hidden";
+    };
+
+    const closeModal = () => {
+      modal.classList.add("hidden");
+      modal.classList.remove("flex");
+      modal.setAttribute("aria-hidden", "true");
+      document.body.style.overflow = "";
+      if (lastFocus && lastFocus.focus) lastFocus.focus();
+    };
+
+    root.querySelectorAll(".vsa-menu-item").forEach((item) => {
+      item.addEventListener("click", () => {
+        closeMenu();
+        openModal(item.getAttribute("data-open"));
+      });
+    });
+
+    modal
+      .querySelectorAll("[data-goto]")
+      .forEach((el) =>
+        el.addEventListener("click", () =>
+          showView(el.getAttribute("data-goto")),
+        ),
+      );
+    modal
+      .querySelectorAll("[data-close]")
+      .forEach((el) => el.addEventListener("click", closeModal));
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !modal.classList.contains("hidden"))
+        closeModal();
+    });
+
+    // ── Indicadores de estado ────────────────────────────────────────────────
+    const setStatus = (state, text) => {
+      const map = {
+        loading: { dot: "bg-gray-500", txt: "text-gray-500" },
+        ok: { dot: "bg-green-500", txt: "text-green-400" },
+        bad: { dot: "bg-red-500", txt: "text-red-400" },
+      };
+      const s = map[state] || map.loading;
+      if (dot) {
+        dot.className = `absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-vs-bg ${s.dot}`;
+        dot.title = text;
+      }
+      if (menuStatus) {
+        menuStatus.className = `mt-0.5 truncate text-[.8rem] font-medium ${s.txt}`;
+        menuStatus.textContent = text;
+      }
+    };
+
+    const setResult = (state, text) => {
+      if (!result) return;
+      const cls =
+        state === "ok"
+          ? "text-green-400"
+          : state === "bad"
+            ? "text-red-400"
+            : "text-gray-500";
+      result.className = `mt-4 text-[.85rem] empty:hidden ${cls}`;
+      result.textContent = text;
+    };
+
+    const busy = (btn, on, busyLabel) => {
+      if (!btn) return;
+      if (on) {
+        btn.dataset._html = btn.innerHTML;
+        btn.disabled = true;
+        btn.style.opacity = "0.6";
+        btn.textContent = busyLabel;
+      } else {
+        btn.disabled = false;
+        btn.style.opacity = "";
+        if (btn.dataset._html) btn.innerHTML = btn.dataset._html;
+      }
+    };
+
+    const api = async (method, payload) => {
+      const opts = { method };
+      if (payload) {
+        opts.headers = { "content-type": "application/json" };
+        opts.body = JSON.stringify(payload);
+      }
+      const res = await fetch("/api/vodscene/auth", opts);
+      return res.json();
+    };
+
+    // ── Modo de lectura (live ↔ guardado en KV) ──────────────────────────────
+    const modeBtns = root.querySelectorAll(".vsa-mode-btn");
+    const modeHint = document.getElementById("vsa-mode-hint");
+
+    const renderMode = () => {
+      modeBtns.forEach((b) => {
+        const active = b.getAttribute("data-mode") === currentMode;
+        b.classList.toggle("bg-blue-400", active);
+        b.classList.toggle("text-black", active);
+        b.classList.toggle("text-gray-500", !active);
+      });
+      if (!modeHint) return;
+      if (currentMode === "saved") {
+        modeHint.textContent = libraryInfo.hasLibrary
+          ? `Lee ${libraryInfo.totalVideos} videos guardados.`
+          : "Sin snapshot guardado. Genéralo en el scraper.";
+        modeHint.className = `mt-1.5 text-[.72rem] leading-snug ${libraryInfo.hasLibrary ? "text-gray-500" : "text-red-400"}`;
+      } else {
+        modeHint.textContent =
+          "Lee el catálogo en vivo desde Firestore (usa la cuenta activa).";
+        modeHint.className = "mt-1.5 text-[.72rem] leading-snug text-gray-500";
+      }
+    };
+
+    const setMode = async (mode) => {
+      if (!mode || mode === currentMode) return;
+      const prev = currentMode;
+      currentMode = mode;
+      renderMode();
+      try {
+        const data = await api("POST", { action: "mode", mode });
+        currentMode = data.mode || mode;
+        if (data.library) libraryInfo = data.library;
+        renderMode();
+        // El modo afecta el render SSR del catálogo: recargar para releer.
+        location.reload();
+      } catch {
+        currentMode = prev; // revertir si falla la petición
+        renderMode();
+      }
+    };
+
+    modeBtns.forEach((b) =>
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        setMode(b.getAttribute("data-mode"));
+      }),
+    );
+
+    // ── Cuentas ──────────────────────────────────────────────────────────────
+    const esc = (s) =>
+      String(s).replace(
+        /[&<>"']/g,
+        (c) =>
+          ({
+            "&": "&amp;",
+            "<": "&lt;",
+            ">": "&gt;",
+            '"': "&quot;",
+            "'": "&#39;",
+          })[c],
+      );
+
+    const renderActiveLabel = () => {
+      const active = accountsCache.find((a) => a.active);
+      if (menuAccount)
+        menuAccount.textContent = active ? active.label : "Sesión vodscene";
+    };
+
+    const drawAccounts = () => {
+      if (!accountsList) return;
+      if (!accountsCache.length) {
+        accountsList.innerHTML =
+          '<p class="text-[.85rem] text-gray-500">No hay cuentas guardadas todavía. Añade una con email y contraseña.</p>';
+        return;
+      }
+      accountsList.innerHTML = accountsCache
+        .map((a) => {
+          const dotCls = a.active ? "bg-green-500" : "bg-gray-600";
+          const useBtn = a.active
+            ? '<span class="rounded-full border border-green-500/40 px-2.5 py-1 text-[.72rem] font-semibold text-green-400">Activa</span>'
+            : `<button type="button" data-select="${esc(a.id)}" class="rounded-md border border-vs-border px-2.5 py-1.5 text-[.78rem] text-gray-200 transition-colors hover:border-blue-400 hover:text-blue-400">Usar</button>`;
+          return `
+            <div class="flex items-center gap-2.5 rounded-md border border-vs-border bg-vs-bg px-3 py-2.5">
+              <span class="h-2 w-2 flex-shrink-0 rounded-full ${dotCls}"></span>
+              <div class="min-w-0 flex-1">
+                <p class="truncate text-[.88rem] font-semibold text-white">${esc(a.label)}</p>
+                <p class="truncate text-[.72rem] text-gray-500">${esc(a.email)}</p>
+              </div>
+              ${useBtn}
+              <button type="button" data-remove="${esc(a.id)}" aria-label="Eliminar" class="flex h-8 w-8 items-center justify-center rounded-md border border-vs-border text-gray-500 transition-colors hover:border-red-400 hover:text-red-400">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+              </button>
+            </div>`;
+        })
+        .join("");
+
+      accountsList
+        .querySelectorAll("[data-select]")
+        .forEach((b) =>
+          b.addEventListener("click", () =>
+            selectAccount(b.getAttribute("data-select")),
+          ),
+        );
+      accountsList
+        .querySelectorAll("[data-remove]")
+        .forEach((b) =>
+          b.addEventListener("click", () =>
+            deleteAccount(b.getAttribute("data-remove")),
+          ),
+        );
+    };
+
+    const setAccounts = (accounts) => {
+      if (Array.isArray(accounts)) {
+        accountsCache = accounts;
+        drawAccounts();
+        renderActiveLabel();
+      }
+    };
+
+    const renderAccounts = async () => {
+      if (accountsList)
+        accountsList.innerHTML =
+          '<p class="text-[.85rem] text-gray-500">Cargando cuentas…</p>';
+      try {
+        const data = await api("POST", { action: "list" });
+        setAccounts(data.accounts);
+      } catch {
+        if (accountsList)
+          accountsList.innerHTML =
+            '<p class="text-[.85rem] text-red-400">Error al cargar las cuentas.</p>';
+      }
+    };
+
+    const selectAccount = async (id) => {
+      setResult("loading", "Cambiando de cuenta…");
+      try {
+        const data = await api("POST", { action: "select", id });
+        setAccounts(data.accounts);
+        setStatus(
+          data.valid ? "ok" : "bad",
+          data.valid ? "Sesión activa" : "Sesión inactiva",
+        );
+        setResult(
+          data.valid ? "ok" : "bad",
+          data.valid
+            ? "Cuenta activa ✓"
+            : `Cambiada — ${data.reason || "sesión inactiva"}`,
+        );
+        // El catálogo SSR depende de la cuenta: recargar para releer.
+        if (data.valid) setTimeout(() => location.reload(), 600);
+      } catch {
+        setResult("bad", "Error al cambiar de cuenta.");
+      }
+    };
+
+    const deleteAccount = async (id) => {
+      const acc = accountsCache.find((a) => a.id === id);
+      if (acc && !confirm(`¿Eliminar la cuenta «${acc.label}»?`)) return;
+      setResult("loading", "Eliminando…");
+      try {
+        const data = await api("POST", { action: "remove", id });
+        setAccounts(data.accounts);
+        setResult("ok", "Cuenta eliminada.");
+        refreshStatus();
+      } catch {
+        setResult("bad", "Error al eliminar la cuenta.");
+      }
+    };
+
+    // ── Validación ───────────────────────────────────────────────────────────
+    const refreshStatus = async () => {
+      setStatus("loading", "Comprobando…");
+      try {
+        const data = await api("GET");
+        setAccounts(data.accounts);
+        if (typeof data.mode === "string") currentMode = data.mode;
+        if (data.library) libraryInfo = data.library;
+        renderMode();
+        if (data.valid) setStatus("ok", "Sesión activa");
+        else
+          setStatus(
+            "bad",
+            data.accounts && data.accounts.length
+              ? "Sesión inactiva"
+              : "Sin cuenta",
+          );
+        return data;
+      } catch {
+        setStatus("bad", "Error");
+        return { valid: false };
+      }
+    };
+
+    document
+      .getElementById("vsa-validate")
+      ?.addEventListener("click", async (e) => {
+        const btn = e.currentTarget;
+        busy(btn, true, "Validando…");
+        setResult("loading", "");
+        const data = await refreshStatus();
+        setResult(
+          data.valid ? "ok" : "bad",
+          data.valid
+            ? "Sesión activa ✓"
+            : `Sesión inactiva — ${data.reason || "sin sesión"}`,
+        );
+        busy(btn, false);
+      });
+
+    // ── Login ────────────────────────────────────────────────────────────────
+    document
+      .getElementById("vsa-login")
+      ?.addEventListener("click", async (e) => {
+        const btn = e.currentTarget;
+        const email = document.getElementById("vsa-email")?.value.trim();
+        const password = document.getElementById("vsa-password")?.value;
+        if (!email || !password)
+          return setResult("bad", "Email y contraseña son requeridos.");
+        busy(btn, true, "Validando…");
+        setResult("loading", "");
+        try {
+          const data = await api("POST", { action: "login", email, password });
+          if (data.ok && data.valid) {
+            setAccounts(data.accounts);
+            setStatus("ok", "Sesión activa");
+            setResult("ok", "Cuenta guardada y activada ✓");
+            const pw = document.getElementById("vsa-password");
+            if (pw) pw.value = "";
+            // Recargar para que el catálogo SSR use la cuenta nueva.
+            setTimeout(() => location.reload(), 800);
+          } else {
+            setStatus("bad", "Sesión inactiva");
+            setResult(
+              "bad",
+              data.error || data.reason || "No se pudo iniciar sesión.",
+            );
+          }
+        } catch {
+          setResult("bad", "Error de red en el login.");
+        }
+        busy(btn, false);
+      });
+
+    // Comprobación inicial.
+    refreshStatus();
+  })();
+</script>

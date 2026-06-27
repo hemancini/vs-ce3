@@ -1,0 +1,800 @@
+---
+import Layout from '@/layouts/Layout.astro';
+import VideoPlayer from '@/components/buymyvids/VideoPlayer.astro';
+import rawVideos from '@/pages/api/buymyvids/_videos.json';
+export const prerender = false;
+
+// ─── Tipos ────────────────────────────────────────────────────────────────────
+interface BmvVideo {
+  uid: string;          // índice único generado
+  id: string;
+  url: string;
+  filename: string;
+  description?: string;
+  timestamp?: string;
+  likes?: string;
+  comments?: string;
+  duration?: number;
+}
+
+// Asignar UID único por índice (los IDs del JSON se repiten)
+const videos: BmvVideo[] = (rawVideos as Omit<BmvVideo, 'uid'>[]).map((v, i) => ({
+  ...v,
+  uid: `bmv-${i}`,
+}));
+
+// Ordenar por timestamp desc (más reciente primero)
+videos.sort((a, b) => {
+  const da = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+  const db = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+  return db - da;
+});
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function formatDate(val: unknown): string {
+  if (!val) return "—";
+  const d = new Date(val as string);
+  return isNaN(d.getTime()) ? String(val)
+    : new Intl.DateTimeFormat("es", { dateStyle: "medium" }).format(d);
+}
+function formatNum(val: unknown): string {
+  if (val === undefined || val === null) return "—";
+  const n = Number(val);
+  return isNaN(n) ? String(val) : new Intl.NumberFormat("es").format(n);
+}
+function formatDuration(secs?: number): string {
+  if (!secs) return "";
+  const s = Math.round(secs);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
+  return `${m}:${String(ss).padStart(2, "0")}`;
+}
+function getExt(filename: string): string {
+  return filename.split(".").pop()?.toUpperCase() ?? "";
+}
+
+// Datos serializados para el player client-side
+interface PlayerData {
+  uid: string;
+  url: string;
+  description: string;
+  duration?: number;
+}
+const playerMap: Record<string, PlayerData> = {};
+for (const v of videos) {
+  playerMap[v.uid] = {
+    uid: v.uid,
+    url: v.url,
+    description: v.description ?? "",
+    duration: v.duration,
+  };
+}
+const playerDataJson = JSON.stringify(playerMap);
+---
+
+<Layout title="Videos — BuyMyVids">
+  <header class="mb-8">
+    <nav class="mb-3" aria-label="Navegación principal">
+      <a href="/" class="focusable text-blue-400 hover:text-blue-300 hover:underline text-sm focus:ring-1 focus:ring-blue-400 rounded">← Inicio</a>
+    </nav>
+    <div class="flex items-end justify-between gap-4 flex-wrap">
+      <div>
+        <h1 class="text-3xl font-bold text-white">BuyMyVids</h1>
+        <p class="text-gray-500 text-sm mt-1 tabular-nums" id="video-count">
+          {videos.length === 0 ? "Sin videos"
+            : `${new Intl.NumberFormat("es").format(videos.length)} ${videos.length === 1 ? "video" : "videos"}`}
+        </p>
+      </div>
+
+      {videos.length > 0 && (
+        <div class="flex gap-2 flex-wrap items-center">
+          <div class="relative flex-1 min-w-[180px] sm:w-72">
+            <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+              <input
+                id="video-search"
+                type="search"
+                placeholder="Buscar por descripción o archivo…"
+                autocomplete="off"
+                class="focusable w-full bg-vs-surface border border-vs-border rounded-[6px] pl-8 pr-3 py-1.5 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-blue-400 transition-colors"
+                aria-label="Buscar videos"
+              />
+          </div>
+          <select
+            id="video-sort"
+            aria-label="Ordenar videos"
+            class="focusable flex-1 sm:flex-none bg-vs-surface border border-vs-border rounded-[6px] px-2 py-1.5 text-sm text-gray-300 focus:outline-none focus:border-blue-400 transition-colors cursor-pointer"
+          >
+            <option value="date-desc">Más reciente</option>
+            <option value="date-asc">Más antiguo</option>
+            <option value="likes-desc">Más likes</option>
+            <option value="likes-asc">Menos likes</option>
+            <option value="comments-desc">Más comentarios</option>
+            <option value="duration-desc">Mayor duración</option>
+            <option value="duration-asc">Menor duración</option>
+          </select>
+          <label
+            id="thumb-toggle-label"
+            tabindex="0"
+            title="Cargar una vista previa (fotograma) de cada video"
+            class="focusable flex-1 sm:flex-none flex items-center justify-center sm:justify-start gap-1.5 bg-vs-surface border border-vs-border rounded-[6px] px-2.5 py-1.5 text-sm text-gray-300 cursor-pointer hover:border-blue-400 focus:outline-none focus:border-blue-400 transition-colors select-none whitespace-nowrap"
+          >
+            <input id="thumb-toggle" type="checkbox" class="accent-blue-400 cursor-pointer pointer-events-none" tabindex="-1" />
+            Miniaturas
+          </label>
+          <button
+            id="thumb-clear"
+            type="button"
+            title="Limpiar caché de miniaturas"
+            aria-label="Limpiar caché de miniaturas"
+            class="focusable self-stretch flex items-center gap-1.5 bg-vs-surface border border-vs-border rounded-[6px] px-2.5 py-1.5 text-sm text-gray-400 cursor-pointer hover:border-red-400 hover:text-red-400 focus:outline-none focus:border-red-400 transition-colors"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            <span class="hidden sm:inline">Limpiar</span>
+          </button>
+        </div>
+      )}
+    </div>
+  </header>
+
+  <main id="main-content">
+    {videos.length === 0 && (
+      <div class="text-center py-16 text-gray-500" role="status"><p>No se encontraron videos.</p></div>
+    )}
+
+    <div id="search-empty" class="text-center py-16 text-gray-500 hidden" role="status">No hay videos que coincidan con la búsqueda.</div>
+
+    {videos.length > 0 && (
+      <ol
+        class="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-5 list-none p-0"
+        aria-label="Lista de videos BuyMyVids"
+        id="videos-grid"
+      >
+        {videos.map((v) => {
+          const ext  = getExt(v.filename);
+          const dur  = formatDuration(v.duration);
+          const searchText = [v.description, v.filename, v.id].filter(Boolean).join(" ").toLowerCase();
+          return (
+            <li
+              data-search={searchText}
+              data-date={String(v.timestamp ? new Date(v.timestamp).getTime() : 0)}
+              data-likes={String(Number(v.likes ?? 0))}
+              data-comments={String(Number(v.comments ?? 0))}
+              data-duration={String(v.duration ?? 0)}
+            >
+              <article
+                class="bg-vs-surface border border-vs-border rounded-lg overflow-hidden flex flex-col hover:border-blue-400 motion-safe:hover:-translate-y-0.5 transition-[border-color,transform] touch-manipulation"
+                aria-label={v.description ? v.description.slice(0, 60) : v.filename}
+              >
+                {/* Miniatura placeholder + overlay play */}
+                <div class="aspect-video bg-[#111] overflow-hidden relative flex items-center justify-center">
+                  <span class="text-gray-700 text-[2.5rem] select-none pointer-events-none" aria-hidden="true">▶</span>
+                  {dur && (
+                    <span class="absolute bottom-1.5 right-1.5 text-[.65rem] font-bold tabular-nums px-1.5 py-[2px] rounded-[3px] bg-black/70 text-gray-300 pointer-events-none">
+                      {dur}
+                    </span>
+                  )}
+                  {ext && (
+                    <span class="absolute top-1.5 left-1.5 text-[.65rem] font-bold tracking-[.04em] px-1.5 py-[2px] rounded-[3px] bg-[#0d1a2e] text-blue-300 border border-[#1e40af] pointer-events-none">
+                      {ext}
+                    </span>
+                  )}
+                  <div class="group absolute inset-0 flex items-center justify-center hover:bg-black/45 transition-colors">
+                    <button
+                      class="focusable absolute inset-0 bg-transparent border-0 cursor-pointer focus-visible:outline-none"
+                      aria-label={`Reproducir: ${v.description?.slice(0, 60) ?? v.filename}`}
+                      data-play-uid={v.uid}
+                    >
+                      <span class="w-[52px] h-[52px] rounded-full bg-black/65 border-2 border-white/80 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" class="fill-white w-[22px] h-[22px] translate-x-[2px]"><polygon points="5,3 19,12 5,21"/></svg>
+                      </span>
+                    </button>
+                    {/* Botón flotante: abrir en una pestaña nueva */}
+                    <a
+                      href={`/buymyvids/play?uid=${v.uid}`}
+                      target="_blank"
+                      rel="noopener"
+                      class="focusable absolute top-1.5 right-1.5 z-10 w-8 h-8 flex items-center justify-center rounded-full bg-black/65 border border-white/40 text-white hover:bg-black/85 hover:border-blue-400 transition-[background-color,border-color] focus:outline-none focus:ring-2 focus:ring-blue-400"
+                      aria-label={`Abrir en una pestaña nueva: ${v.description?.slice(0, 60) ?? v.filename}`}
+                      title="Abrir en una pestaña nueva"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                    </a>
+                  </div>
+                </div>
+
+                {/* Cuerpo */}
+                <div class="px-4 py-3.5 flex flex-col gap-1.5 flex-1">
+                  {v.description && (
+                    <p class="text-[.85rem] text-gray-300 overflow-hidden line-clamp-3 min-w-0">{v.description}</p>
+                  )}
+
+                  <ul class="flex flex-wrap gap-y-1 gap-x-2.5 list-none p-0 mt-auto pt-2" aria-label="Metadatos">
+                    {v.likes !== undefined && (
+                      <li><span class="text-[.72rem] bg-[#2a2a2a] border border-vs-border rounded px-1.5 py-[2px] text-gray-500 whitespace-nowrap tabular-nums" aria-label={`Likes: ${formatNum(v.likes)}`}>♥ {formatNum(v.likes)}</span></li>
+                    )}
+                    {v.comments !== undefined && Number(v.comments) > 0 && (
+                      <li><span class="text-[.72rem] bg-[#2a2a2a] border border-vs-border rounded px-1.5 py-[2px] text-gray-500 whitespace-nowrap tabular-nums" aria-label={`Comentarios: ${formatNum(v.comments)}`}>💬 {formatNum(v.comments)}</span></li>
+                    )}
+                    {v.timestamp && (
+                      <li><span class="text-[.72rem] bg-[#2a2a2a] border border-vs-border rounded px-1.5 py-[2px] text-gray-500 whitespace-nowrap">📅 {formatDate(v.timestamp)}</span></li>
+                    )}
+                  </ul>
+                </div>
+
+                <p class="text-[.68rem] text-gray-700 font-mono px-4 pb-3 truncate" title={v.filename}>{v.filename}</p>
+              </article>
+            </li>
+          );
+        })}
+      </ol>
+    )}
+  </main>
+
+  {/* ─── Contenedor para reproducción (Fullscreen) ────────────────────────── */}
+  <div
+    id="video-container"
+    class="fixed inset-0 z-[100] hidden items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+    role="dialog"
+    aria-modal="true"
+    aria-label="Reproductor de video"
+  >
+    <div id="player-frame" class="relative flex items-center justify-center max-w-full max-h-[90vh]">
+      <VideoPlayer
+        id="bmv-modal-player"
+        rootClass="w-full h-full flex items-center justify-center"
+        videoClass="rounded-xl shadow-2xl max-w-[95vw] max-h-[90vh]"
+      />
+
+      {/* Botón de cerrar */}
+      <button
+        id="player-close"
+        type="button"
+        aria-label="Cerrar reproductor"
+        class="absolute top-2 right-2 z-50 w-9 h-9 flex items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80 focus:outline-none focus:ring-2 focus:ring-white/70 transition-colors"
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+  </div>
+
+  {/* Datos para el player */}
+  <script is:inline define:vars={{ playerDataJson }}>
+    window.__BMV_VIDEOS__ = JSON.parse(playerDataJson);
+  </script>
+
+  <script is:inline>
+    // ─── Buscador + ordenamiento ───────────────────────────────────────────────
+    const searchInput = document.getElementById("video-search");
+    const videosGrid  = document.getElementById("videos-grid");
+    const videoCount  = document.getElementById("video-count");
+    const searchEmpty = document.getElementById("search-empty");
+    const sortSelect  = document.getElementById("video-sort");
+
+    if (videosGrid) {
+      const allItems   = Array.from(videosGrid.querySelectorAll("li[data-search]"));
+      const totalLabel = videoCount ? videoCount.textContent : "";
+
+      function applyFilter() {
+        const q = searchInput ? searchInput.value.trim().toLowerCase() : "";
+        let visible = 0;
+        for (const li of allItems) {
+          const match = !q || li.dataset.search.includes(q);
+          li.style.display = match ? "" : "none";
+          if (match) visible++;
+        }
+        if (videoCount) {
+          videoCount.textContent = q
+            ? `${visible} resultado${visible !== 1 ? "s" : ""} de ${allItems.length}`
+            : totalLabel;
+        }
+        if (searchEmpty) searchEmpty.classList.toggle("hidden", visible > 0 || !q);
+      }
+
+      function applySort(key) {
+        const items = Array.from(videosGrid.querySelectorAll("li[data-search]"));
+        items.sort((a, b) => {
+          switch (key) {
+            case "date-asc":      return Number(a.dataset.date)     - Number(b.dataset.date);
+            case "date-desc":     return Number(b.dataset.date)     - Number(a.dataset.date);
+            case "likes-desc":    return Number(b.dataset.likes)    - Number(a.dataset.likes);
+            case "likes-asc":     return Number(a.dataset.likes)    - Number(b.dataset.likes);
+            case "comments-desc": return Number(b.dataset.comments) - Number(a.dataset.comments);
+            case "duration-desc": return Number(b.dataset.duration) - Number(a.dataset.duration);
+            case "duration-asc":  return Number(a.dataset.duration) - Number(b.dataset.duration);
+            default: return 0;
+          }
+        });
+        for (const li of items) videosGrid.appendChild(li);
+      }
+
+      if (searchInput) searchInput.addEventListener("input", applyFilter);
+      if (sortSelect)  sortSelect.addEventListener("change", () => applySort(sortSelect.value));
+    }
+
+    // ─── Aspect ratio conocido por video (relación = ancho / alto) ──────────────
+    // Lo aprendemos al generar la miniatura o al reproducir, y lo persistimos para
+    // abrir el modal ya con el tamaño correcto (sin el salto "miniatura → crece").
+    const arCache = new Map(); // url -> ratio (w/h); persistido en IndexedDB (store "meta")
+    function recordAr(url, ratio) {
+      if (!url || !ratio || !isFinite(ratio) || ratio <= 0) return;
+      if (arCache.get(url) === ratio) return;
+      arCache.set(url, ratio);
+      idbSet(META_STORE, url, ratio);
+    }
+
+    // ─── Player logic (modal) ──────────────────────────────────────────────────
+    const videoContainer = document.getElementById("video-container");
+    const playerApi      = window.bmvPlayer("#bmv-modal-player");
+    const videoEl        = playerApi.video;
+    const playerFrame    = document.getElementById("player-frame");
+
+    // Dimensiona el marco al aspect ratio conocido para abrir ya con el tamaño final.
+    function sizePlayerFrame(ratio) {
+      if (!ratio || !isFinite(ratio) || ratio <= 0) {
+        playerFrame.style.width = "";
+        playerFrame.style.height = "";
+        return;
+      }
+      const maxW = Math.min(window.innerWidth * 0.95, 768);
+      const maxH = window.innerHeight * 0.90;
+      let h = maxH, w = h * ratio;
+      if (w > maxW) { w = maxW; h = w / ratio; }
+      playerFrame.style.width = Math.round(w) + "px";
+      playerFrame.style.height = Math.round(h) + "px";
+    }
+
+    let isOpening = false, currentPlayerUrl = null;
+    function openPlayer(uid) {
+      if (isOpening) return;
+      isOpening = true;
+      const data = window.__BMV_VIDEOS__[uid];
+      if (!data) { isOpening = false; return; }
+
+      currentPlayerUrl = data.url;
+      sizePlayerFrame(arCache.get(data.url));
+
+      videoContainer.classList.remove("hidden");
+      videoContainer.classList.add("flex");
+
+      playerApi.load(data.url);
+      isOpening = false;
+    }
+
+    // Al cargar la metadata, registramos el ratio real (para la próxima vez) y, si
+    // aún no conocíamos el aspect ratio, ajustamos el marco al tamaño correcto.
+    videoEl.addEventListener("loadedmetadata", () => {
+      if (!videoEl.videoWidth || !videoEl.videoHeight) return;
+      const ratio = videoEl.videoWidth / videoEl.videoHeight;
+      const known = currentPlayerUrl && arCache.get(currentPlayerUrl);
+      recordAr(currentPlayerUrl, ratio);
+      if (!known) sizePlayerFrame(ratio);
+    });
+
+    function closePlayer() {
+      playerApi.clear();
+      videoContainer.classList.remove("flex");
+      videoContainer.classList.add("hidden");
+    }
+
+    // Cerrar: botón ✕, tecla Escape o clic en el fondo (fuera del video).
+    document.getElementById("player-close")?.addEventListener("click", closePlayer);
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !videoContainer.classList.contains("hidden")) closePlayer();
+    });
+    videoContainer.addEventListener("click", (e) => {
+      if (e.target === videoContainer) closePlayer();
+    });
+
+    document.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-play-uid]");
+      if (!btn) return;
+      closePreview();
+      openPlayer(btn.dataset.playUid);
+    });
+
+    // ─── Previsualización (hover desktop / mantener pulsado en móvil) ────────────
+    // Reproduce el video completo desde el CDN (streaming progresivo: sólo baja lo
+    // que se va reproduciendo) mientras dure el hover / la pulsación.
+    const previewVideo = document.createElement("video");
+    previewVideo.muted = true;
+    previewVideo.autoplay = true;
+    previewVideo.setAttribute("playsinline", "");
+    previewVideo.className = "absolute inset-0 w-full h-full object-cover z-[5] bg-black pointer-events-none";
+
+    let currentPreviewUrl = null;
+    previewVideo.addEventListener("loadedmetadata", () => {
+      if (previewVideo.videoWidth && previewVideo.videoHeight) {
+        recordAr(currentPreviewUrl, previewVideo.videoWidth / previewVideo.videoHeight);
+      }
+    });
+
+    function uidFromWrap(wrap) {
+      const btn = wrap.querySelector("[data-play-uid]");
+      return btn ? btn.dataset.playUid : null;
+    }
+
+    let autoplayTimer = null;
+    function closePreview() {
+      if (autoplayTimer) { clearTimeout(autoplayTimer); autoplayTimer = null; }
+      previewVideo.pause();
+      previewVideo.removeAttribute("src");
+      previewVideo.load();
+      if (previewVideo.parentElement) previewVideo.parentElement.removeChild(previewVideo);
+    }
+    function openPreview(uid, container) {
+      if (isOpening) return;
+      const data = window.__BMV_VIDEOS__[uid];
+      if (!data || !data.url) return;
+      closePreview();
+      currentPreviewUrl = data.url;
+      previewVideo.src = data.url;
+      container.appendChild(previewVideo);
+      previewVideo.play().catch(() => {});
+    }
+
+    // Teclado / navegación espacial: preview al enfocar (estilo mando TV).
+    document.addEventListener("focus", (e) => {
+      const focusable = e.target.closest("[data-play-uid]");
+      if (!focusable) return;
+      const uid = focusable.dataset.playUid;
+      const wrap = focusable.closest(".aspect-video");
+      if (!uid || !wrap) return;
+      if (autoplayTimer) clearTimeout(autoplayTimer);
+      autoplayTimer = setTimeout(() => {
+        if (document.activeElement === focusable) openPreview(uid, wrap);
+      }, 1000);
+    }, true);
+    document.addEventListener("blur", (e) => {
+      if (e.target.closest("[data-play-uid]")) closePreview();
+    }, true);
+
+    if (videosGrid) {
+      // Desktop: hover con mouse.
+      let hoverWrap = null;
+      videosGrid.addEventListener("pointerover", (e) => {
+        if (e.pointerType && e.pointerType !== "mouse") return;
+        const wrap = e.target.closest(".aspect-video");
+        if (!wrap || wrap === hoverWrap) return;
+        hoverWrap = wrap;
+        const uid = uidFromWrap(wrap);
+        if (!uid) return;
+        if (autoplayTimer) clearTimeout(autoplayTimer);
+        autoplayTimer = setTimeout(() => {
+          if (hoverWrap === wrap) openPreview(uid, wrap);
+        }, 200);
+      });
+      videosGrid.addEventListener("pointerout", (e) => {
+        if (e.pointerType && e.pointerType !== "mouse") return;
+        const wrap = e.target.closest(".aspect-video");
+        if (!wrap || wrap !== hoverWrap) return;
+        if (e.relatedTarget && wrap.contains(e.relatedTarget)) return;
+        hoverWrap = null;
+        closePreview();
+      });
+
+      // Móvil: mantener pulsado un momento (~180 ms) inicia la vista previa, que
+      // sigue reproduciéndose al soltar. Un toque normal (rápido) reproduce el
+      // video a pantalla completa.
+      let touchTimer = null, touchPreviewing = false;
+      videosGrid.addEventListener("touchstart", (e) => {
+        const wrap = e.target.closest(".aspect-video");
+        if (!wrap) return;
+        touchPreviewing = false;
+        const uid = uidFromWrap(wrap);
+        if (!uid) return;
+        touchTimer = setTimeout(() => {
+          touchPreviewing = true;
+          openPreview(uid, wrap);
+        }, 180);
+      }, { passive: true });
+
+      function endTouch(e) {
+        if (touchTimer) { clearTimeout(touchTimer); touchTimer = null; }
+        // Si se mostró la vista previa por mantener pulsado, la dejamos
+        // reproduciéndose y evitamos que el clic sintético abra el reproductor.
+        if (touchPreviewing && e.cancelable) e.preventDefault();
+        touchPreviewing = false;
+      }
+      videosGrid.addEventListener("touchend", endTouch, { passive: false });
+      videosGrid.addEventListener("touchcancel", endTouch, { passive: false });
+      videosGrid.addEventListener("touchmove", () => {
+        if (touchTimer) { clearTimeout(touchTimer); touchTimer = null; }
+      }, { passive: true });
+    }
+
+    // ─── Miniaturas (fotograma) lazy + persistencia en localStorage ─────────────
+    // Para evitar descargar el video completo, sólo pedimos los primeros bytes
+    // (cabecera + primeros frames) con una petición Range, extraemos un fotograma
+    // a un canvas y guardamos un JPEG pequeño. Cada video baja como máximo RANGE_BYTES.
+    const THUMBS_KEY   = "bmv-thumbnails";
+    const MAX_CONCURRENT = 3;
+    const thumbToggle  = document.getElementById("thumb-toggle");
+    const thumbLabel   = document.getElementById("thumb-toggle-label");
+    const thumbCache   = new Map();  // url -> dataURL | "fail"
+    let thumbsEnabled  = true;  // activadas por defecto
+    try { const stored = localStorage.getItem(THUMBS_KEY); if (stored !== null) thumbsEnabled = stored === "1"; } catch {}
+
+    function insertThumbImg(thumbWrap, dataUrl) {
+      if (thumbWrap.querySelector(".bmv-thumb")) return;
+      const img = document.createElement("img");
+      img.className = "bmv-thumb absolute inset-0 w-full h-full object-cover z-[1] bg-black pointer-events-none";
+      img.alt = "";
+      img.src = dataUrl;
+      thumbWrap.appendChild(img);
+    }
+
+    // Descarga sólo el inicio del archivo y captura un fotograma → dataURL JPEG.
+    function captureFrame(url) {
+      return new Promise((resolve, reject) => {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 15000);
+        // El proxy reensambla un mp4 faststart pequeño (resuelve CORS y tamaño).
+        const proxyUrl = "/api/buymyvids/thumb?url=" + encodeURIComponent(url);
+        fetch(proxyUrl, { signal: controller.signal })
+          .then((r) => { if (!r.ok) throw new Error("proxy " + r.status); return r.arrayBuffer(); })
+          .then((buf) => {
+            const objUrl = URL.createObjectURL(new Blob([buf], { type: "video/mp4" }));
+            const vid = document.createElement("video");
+            vid.muted = true;
+            vid.preload = "auto";
+            vid.setAttribute("playsinline", "");
+            let settled = false;
+            const cleanup = () => {
+              clearTimeout(timeout);
+              vid.removeAttribute("src");
+              vid.load();
+              URL.revokeObjectURL(objUrl);
+            };
+            const fail = (e) => { if (settled) return; settled = true; cleanup(); reject(e); };
+            const grab = () => {
+              if (settled) return;
+              try {
+                if (vid.videoWidth && vid.videoHeight) recordAr(url, vid.videoWidth / vid.videoHeight);
+                const vw = vid.videoWidth || 320, vh = vid.videoHeight || 180;
+                const w = Math.min(vw, 400), h = Math.round(vh * (w / vw));
+                const c = document.createElement("canvas");
+                c.width = w; c.height = h;
+                c.getContext("2d").drawImage(vid, 0, 0, w, h);
+                const dataUrl = c.toDataURL("image/jpeg", 0.6);
+                settled = true; cleanup(); resolve(dataUrl);
+              } catch (e) { fail(e); }
+            };
+            vid.addEventListener("error", () => fail(new Error("decode")));
+            vid.addEventListener("seeked", grab);
+            vid.addEventListener("loadeddata", () => {
+              try { vid.currentTime = 0.1; } catch { grab(); }
+            });
+            vid.src = objUrl;
+            vid.load();
+          })
+          .catch(reject);
+      });
+    }
+
+    // Cola con concurrencia limitada.
+    const thumbQueue = [];
+    let activeThumbs = 0;
+    function pumpThumbs() {
+      while (activeThumbs < MAX_CONCURRENT && thumbQueue.length) {
+        const task = thumbQueue.shift();
+        activeThumbs++;
+        task().finally(() => { activeThumbs--; pumpThumbs(); });
+      }
+    }
+
+    // ─── Persistencia en IndexedDB (sobrevive a recargas) ───────────────────────
+    const IDB_NAME = "bmv-thumbs", IDB_VERSION = 2;
+    const THUMB_STORE = "thumbs", META_STORE = "meta", FAIL_MARK = "fail";
+    let idbPromise = null;
+    function openIdb() {
+      if (idbPromise) return idbPromise;
+      idbPromise = new Promise((resolve) => {
+        if (!("indexedDB" in window)) { resolve(null); return; }
+        let req;
+        try { req = indexedDB.open(IDB_NAME, IDB_VERSION); } catch { resolve(null); return; }
+        req.onupgradeneeded = () => {
+          const db = req.result;
+          if (!db.objectStoreNames.contains(THUMB_STORE)) db.createObjectStore(THUMB_STORE);
+          if (!db.objectStoreNames.contains(META_STORE)) db.createObjectStore(META_STORE);
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => resolve(null);
+      });
+      return idbPromise;
+    }
+    function idbGet(store, key) {
+      return openIdb().then((db) => db && new Promise((resolve) => {
+        try {
+          const r = db.transaction(store, "readonly").objectStore(store).get(key);
+          r.onsuccess = () => resolve(r.result ?? null);
+          r.onerror = () => resolve(null);
+        } catch { resolve(null); }
+      }));
+    }
+    function idbSet(store, key, val) {
+      openIdb().then((db) => {
+        if (!db) return;
+        try { db.transaction(store, "readwrite").objectStore(store).put(val, key); } catch {}
+      });
+    }
+    // Precarga los aspect ratios persistidos a memoria (lectura única al cargar).
+    openIdb().then((db) => {
+      if (!db) return;
+      try {
+        const os = db.transaction(META_STORE, "readonly").objectStore(META_STORE);
+        const keysReq = os.getAllKeys(), valsReq = os.getAll();
+        valsReq.onsuccess = () => {
+          const keys = keysReq.result || [], vals = valsReq.result || [];
+          for (let i = 0; i < keys.length; i++) if (!arCache.has(keys[i])) arCache.set(keys[i], vals[i]);
+        };
+      } catch {}
+    });
+
+    function enqueueCapture(thumbWrap, url) {
+      thumbQueue.push(() => captureFrame(url)
+        .then((dataUrl) => {
+          thumbCache.set(url, dataUrl);
+          idbSet(THUMB_STORE, url, dataUrl);
+          if (thumbsEnabled) insertThumbImg(thumbWrap, dataUrl);
+        })
+        .catch(() => { thumbCache.set(url, "fail"); idbSet(THUMB_STORE, url, FAIL_MARK); }));
+      pumpThumbs();
+    }
+
+    function loadThumb(thumbWrap) {
+      if (thumbWrap.dataset.thumbLoaded) return;
+      const btn  = thumbWrap.querySelector("[data-play-uid]");
+      const data = btn && window.__BMV_VIDEOS__[btn.dataset.playUid];
+      if (!data || !data.url) return;
+      thumbWrap.dataset.thumbLoaded = "1";
+      const url = data.url;
+      const cached = thumbCache.get(url);
+      if (cached === "fail") return;
+      if (cached) { insertThumbImg(thumbWrap, cached); return; }
+      // 1) memoria → 2) IndexedDB → 3) generar (proxy + canvas)
+      idbGet(THUMB_STORE, url).then((stored) => {
+        if (!thumbsEnabled || thumbCache.has(url)) {
+          if (thumbsEnabled && thumbCache.get(url) && thumbCache.get(url) !== "fail") {
+            insertThumbImg(thumbWrap, thumbCache.get(url));
+          }
+          return;
+        }
+        // Sólo un dataURL es una miniatura válida; cualquier otro string = fallo.
+        if (typeof stored === "string" && stored.startsWith("data:")) {
+          thumbCache.set(url, stored);
+          insertThumbImg(thumbWrap, stored);
+          return;
+        }
+        if (stored) { thumbCache.set(url, "fail"); return; }
+        enqueueCapture(thumbWrap, url);
+      });
+    }
+
+    const thumbObserver = "IntersectionObserver" in window
+      ? new IntersectionObserver((entries, obs) => {
+          for (const entry of entries) {
+            if (!entry.isIntersecting) continue;
+            loadThumb(entry.target);
+            obs.unobserve(entry.target);
+          }
+        }, { rootMargin: "300px" })
+      : null;
+
+    function thumbWraps() {
+      return videosGrid ? videosGrid.querySelectorAll(".aspect-video") : [];
+    }
+    function enableThumbs() {
+      for (const w of thumbWraps()) {
+        if (w.dataset.thumbLoaded) continue;
+        if (thumbObserver) thumbObserver.observe(w);
+        else loadThumb(w);
+      }
+    }
+    function disableThumbs() {
+      if (thumbObserver) thumbObserver.disconnect();
+      thumbQueue.length = 0;
+      for (const img of document.querySelectorAll(".bmv-thumb")) {
+        const w = img.parentElement;
+        img.remove();
+        if (w) delete w.dataset.thumbLoaded;
+      }
+    }
+
+    if (thumbToggle) {
+      thumbToggle.checked = thumbsEnabled;
+      function setThumbs(on) {
+        thumbsEnabled = on;
+        thumbToggle.checked = on;
+        try { localStorage.setItem(THUMBS_KEY, on ? "1" : "0"); } catch {}
+        on ? enableThumbs() : disableThumbs();
+      }
+      thumbToggle.addEventListener("change", () => setThumbs(thumbToggle.checked));
+      // El label es focusable (spatial nav); Enter/click lo alternan.
+      if (thumbLabel) {
+        thumbLabel.addEventListener("click", (e) => {
+          e.preventDefault();
+          setThumbs(!thumbsEnabled);
+        });
+      }
+      if (thumbsEnabled) enableThumbs();
+    }
+
+    // ─── Limpiar caché de miniaturas (memoria + IndexedDB) ──────────────────────
+    const thumbClearBtn = document.getElementById("thumb-clear");
+    if (thumbClearBtn) {
+      thumbClearBtn.addEventListener("click", async () => {
+        const wasEnabled = thumbsEnabled;
+        disableThumbs();          // quita imágenes visibles y vacía la cola
+        thumbCache.clear();       // caché en memoria
+        // Cierra la conexión y borra la base de datos.
+        try {
+          const db = await openIdb();
+          if (db) db.close();
+        } catch {}
+        idbPromise = null;
+        try {
+          await new Promise((resolve) => {
+            const req = indexedDB.deleteDatabase(IDB_NAME);
+            req.onsuccess = req.onerror = req.onblocked = () => resolve();
+          });
+        } catch {}
+        // Si las miniaturas estaban activas, vuelve a generarlas desde cero.
+        if (wasEnabled) enableThumbs();
+      });
+    }
+
+    // ─── Spatial Navigation ───────────────────────────────────────────────────
+    (function() {
+      const FOCUSABLE_SELECTOR = '.focusable';
+      function getSpatialScore(rect1, rect2, direction) {
+        const c1 = { x: rect1.left + rect1.width / 2, y: rect1.top + rect1.height / 2 };
+        const c2 = { x: rect2.left + rect2.width / 2, y: rect2.top + rect2.height / 2 };
+        const dx = c2.x - c1.x, dy = c2.y - c1.y;
+        if (direction === 'ArrowUp' && dy >= 0) return Infinity;
+        if (direction === 'ArrowDown' && dy <= 0) return Infinity;
+        if (direction === 'ArrowLeft' && dx >= 0) return Infinity;
+        if (direction === 'ArrowRight' && dx <= 0) return Infinity;
+        const adx = Math.abs(dx), ady = Math.abs(dy);
+        if (direction === 'ArrowUp' || direction === 'ArrowDown') return ady + (adx * 1.5);
+        return adx + (ady * 1.5);
+      }
+      function navigate(direction) {
+        let current = document.activeElement;
+        const allFocusables = Array.from(document.querySelectorAll(FOCUSABLE_SELECTOR))
+          .filter(el => {
+            const rect = el.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0 && window.getComputedStyle(el).visibility !== 'hidden';
+          });
+        if (!allFocusables.length) return;
+        if (!allFocusables.includes(current)) { allFocusables[0].focus(); return; }
+        const rect1 = current.getBoundingClientRect();
+        let best = null, minScore = Infinity;
+        for (const candidate of allFocusables) {
+          if (candidate === current) continue;
+          const score = getSpatialScore(rect1, candidate.getBoundingClientRect(), direction);
+          if (score < minScore) { minScore = score; best = candidate; }
+        }
+        if (best) {
+          best.focus();
+          best.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+        }
+      }
+      window.addEventListener('keydown', (e) => {
+        const isInput = e.target.id === 'video-search' && e.target.tagName === 'INPUT';
+        if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+          if (isInput && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return;
+          e.preventDefault();
+          navigate(e.key);
+        }
+        if (e.key === 'Enter') {
+          const focused = document.activeElement;
+          if (!focused || !focused.classList.contains('focusable')) return;
+          const native = ['BUTTON', 'A', 'INPUT', 'SELECT', 'TEXTAREA'].includes(focused.tagName);
+          if (!native) focused.click();
+        }
+      });
+    })();
+  </script>
+</Layout>

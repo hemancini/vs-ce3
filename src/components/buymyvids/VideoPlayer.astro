@@ -1,0 +1,87 @@
+---
+/**
+ * Reproductor de video HTML5 reutilizable para BuyMyVids.
+ *
+ * Renderiza el <video> + un cartel de error y expone una pequeña API por
+ * elemento (accesible vía `window.bmvPlayer(selectorOEl)`):
+ *   - load(url)   → carga la URL e intenta reproducir
+ *   - clear()     → pausa y libera el src
+ *   - showError() / clearError()
+ *   - video       → el elemento <video>
+ *
+ * Se usa tanto en el modal de /buymyvids/videos como en la página
+ * standalone /buymyvids/play sin duplicar la lógica de reproducción.
+ */
+interface Props {
+  id?: string;
+  /** Clases extra para el contenedor raíz. */
+  rootClass?: string;
+  /** Clases extra para el elemento <video>. */
+  videoClass?: string;
+  poster?: string;
+}
+const { id, rootClass = "", videoClass = "", poster } = Astro.props;
+---
+
+<div class:list={["relative", rootClass]} {...(id ? { id } : {})} data-bmv-player>
+  <video
+    class:list={["bmv-player__video w-full h-full block bg-black object-contain", videoClass]}
+    playsinline
+    controls
+    poster={poster}
+  ></video>
+  <div
+    class="bmv-player__error absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-red-900/80 text-red-100 px-6 py-3 rounded-lg border border-red-500 hidden z-50"
+    role="alert"
+  ></div>
+</div>
+
+<script is:inline>
+  (function () {
+    if (window.__bmvPlayerInit) return;
+    window.__bmvPlayerInit = true;
+
+    function setup(root) {
+      if (root.__bmv) return root.__bmv;
+      const video   = root.querySelector(".bmv-player__video");
+      const errorEl = root.querySelector(".bmv-player__error");
+
+      function showError(msg) { errorEl.classList.remove("hidden"); errorEl.textContent = "Error: " + msg; }
+      function clearError()   { errorEl.classList.add("hidden");    errorEl.textContent = ""; }
+
+      function load(url) {
+        if (!url) return;
+        clearError();
+        video.src = url;
+        const p = video.play();
+        if (p && p.catch) {
+          p.catch((e) => {
+            // El bloqueo de autoplay no es un error real: el usuario puede pulsar play.
+            if (e && e.name === "NotAllowedError") return;
+            showError(e && e.message ? e.message : "No se pudo reproducir.");
+          });
+        }
+      }
+
+      function clear() {
+        video.pause();
+        video.removeAttribute("src");
+        video.load();
+        clearError();
+      }
+
+      const api = { root, video, errorEl, load, clear, showError, clearError };
+      root.__bmv = api;
+      return api;
+    }
+
+    window.bmvPlayer = function (sel) {
+      const root = typeof sel === "string" ? document.querySelector(sel) : sel;
+      return root ? setup(root) : null;
+    };
+
+    function initAll() { document.querySelectorAll("[data-bmv-player]").forEach(setup); }
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initAll);
+    else initAll();
+  })();
+</script>
