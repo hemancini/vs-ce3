@@ -6,6 +6,8 @@ interface Props {
 }
 const { video } = Astro.props;
 
+import { parseVideoDate } from "../../lib/sheer/scraper.js";
+
 const cleanTitle = (title: string) => title || "Video sin título";
 
 const sizes = video.sources?.map((s: any) => s.size).filter(Boolean) || [];
@@ -36,7 +38,9 @@ const searchBlob = [video.title, ...modelNames, ...tagNames]
 const views = video.views == null ? null : Number(video.views);
 const dateStr = video.date || "";
 const duration = video.duration || "";
-const dateMs = dateStr ? Date.parse(dateStr) || 0 : 0;
+// Sheer omite el año en posts recientes ("Jul 04"); parseVideoDate lo infiere
+// para que el orden por fecha no los mande a 2001. Ver src/lib/sheer/scraper.js.
+const dateMs = parseVideoDate(dateStr) || 0;
 
 // Datos que necesita el player. Ya no hay catálogo estático: al hacer clic la
 // tarjeta los guarda en sessionStorage y /sheer/play los lee desde ahí.

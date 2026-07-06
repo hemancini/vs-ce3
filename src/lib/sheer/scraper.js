@@ -583,12 +583,49 @@ const SECRET_KEY = 'SHEER_KV_SECRET';
 const resolveSecret = (env) =>
   env?.[SECRET_KEY] || (typeof process !== 'undefined' ? process.env?.[SECRET_KEY] : undefined);
 
+// Ordena videos por fecha, del más nuevo al más viejo. Sheer usa dos formatos:
+// con año en posts viejos ("Jan 18, 2023") y SIN año en los del año en curso
+// ("Jul 04"). Date.parse de una fecha sin año la interpreta como año 2001, así
+// que un post reciente quedaría debajo de uno viejo: por eso, cuando falta el
+// año, asumimos el actual (y el anterior si la fecha cae en el futuro). Si no
+// hay fecha o no parsea devolvemos null y el postId/videoId numérico desempata.
+export function parseVideoDate(dateStr) {
+  const s = dateStr ? String(dateStr).trim() : '';
+  if (!s) return null;
+  if (/\d{4}/.test(s)) {
+    const t = Date.parse(s);
+    return Number.isNaN(t) ? null : t;
+  }
+  const now = Date.now();
+  const year = new Date(now).getFullYear();
+  let t = Date.parse(`${s} ${year}`);
+  if (Number.isNaN(t)) return null;
+  // Un día de margen: si la fecha cae en el futuro, es del año pasado.
+  if (t > now + 86_400_000) t = Date.parse(`${s} ${year - 1}`);
+  return Number.isNaN(t) ? null : t;
+}
+function videoTime(v) {
+  return parseVideoDate(v?.date);
+}
+function compareVideosDesc(a, b) {
+  const ta = videoTime(a);
+  const tb = videoTime(b);
+  if (ta !== tb) return (tb ?? -Infinity) - (ta ?? -Infinity);
+  return (Number(b?.postId || b?.videoId) || 0) - (Number(a?.postId || a?.videoId) || 0);
+}
+
 // Une dos bibliotecas en modo ARCHIVO: nunca borra. Los videos se unen por
 // postId (fallback videoId); los nuevos pisan a los previos (metadata fresca) y
 // los que ya no aparecen en el scrape se conservan (posts borrados quedan
 // archivados). Igual con los creadores: los que dejaste de seguir se mantienen.
+// El resultado se ordena por fecha (más nuevos primero) en cada creador.
 function mergeLibrary(prev, next) {
-  if (!prev || !Array.isArray(prev.creators) || !prev.creators.length) return next;
+  if (!prev || !Array.isArray(prev.creators) || !prev.creators.length) {
+    for (const c of next?.creators || []) {
+      if (Array.isArray(c.videos)) c.videos.sort(compareVideosDesc);
+    }
+    return next;
+  }
 
   const byAlias = new Map();
   const order = [];
@@ -632,6 +669,7 @@ function mergeLibrary(prev, next) {
 
   const creators = order.map((k) => {
     const c = byAlias.get(k);
+    c.videos.sort(compareVideosDesc); // más nuevos primero
     c.count = c.videos.length;
     return c;
   });
@@ -775,7 +813,9 @@ export async function readLibraryFeed({ env } = {}) {
   for (const c of lib.creators || []) {
     for (const v of c.videos || []) all.push(v);
   }
-  return { videos: dedupVideos(all), generatedAt: lib.generatedAt ?? null, totalCreators: lib.totalCreators ?? (lib.creators || []).length };
+  // Feed global ordenado por fecha (más nuevos primero), no agrupado por creador.
+  const videos = dedupVideos(all).sort(compareVideosDesc);
+  return { videos, generatedAt: lib.generatedAt ?? null, totalCreators: lib.totalCreators ?? (lib.creators || []).length };
 }
 
 /**
