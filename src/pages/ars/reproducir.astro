@@ -1,0 +1,189 @@
+---
+import ArsLayout from "@/layouts/ArsLayout.astro";
+import PostCard from "@/components/ars/PostCard.astro";
+import ImageModal from "@/components/ars/ImageModal.astro";
+import SiteHeader from "@/components/ars/SiteHeader.astro";
+import { loadRawCreatorFeeds } from "@/utils/ars/raw-posts";
+
+// Lee y normaliza todos los JSON de scripts/output/ en tiempo de servidor.
+const feeds = loadRawCreatorFeeds();
+const totalPosts = feeds.reduce((acc, f) => acc + f.counts.total, 0);
+---
+
+<ArsLayout title="Reproducir capturas - Arsmate">
+  <script slot="head" is:inline src="https://cdn.jsdelivr.net/npm/hls.js@latest"
+  ></script>
+  <main class="max-w-4xl mx-auto pb-20">
+    <SiteHeader title="Reproducir capturas 🎬" />
+
+    {
+      feeds.length === 0 ? (
+        <div class="py-24 text-center text-gray-500">
+          No se encontraron JSON en <code>scripts/output/</code>.
+        </div>
+      ) : (
+        <>
+          {/* Resumen */}
+          <div class="px-4 pt-4">
+            <p class="text-xs text-gray-500">
+              {feeds.length} creador{feeds.length === 1 ? "" : "es"} ·{" "}
+              {totalPosts} publicaciones capturadas
+            </p>
+          </div>
+
+          {/* Pestañas por creador */}
+          <div
+            id="creator-tabs"
+            class="px-4 pt-3 flex gap-2 overflow-x-auto no-scrollbar"
+          >
+            {feeds.map((feed, i) => (
+              <button
+                type="button"
+                class:list={[
+                  "creator-tab shrink-0 px-3 py-1.5 rounded-full text-xs font-bold border transition-colors",
+                  i === 0
+                    ? "bg-blue-600 text-white border-blue-600"
+                    : "bg-white text-gray-600 border-gray-200 hover:border-blue-300",
+                ]}
+                data-target={`creator-${i}`}
+              >
+                @{feed.creatorInfo.username}
+                <span class="opacity-70 ml-1">({feed.counts.total})</span>
+              </button>
+            ))}
+          </div>
+
+          {/* Secciones (solo la activa visible) */}
+          {feeds.map((feed, i) => (
+            <section
+              id={`creator-${i}`}
+              class:list={["creator-section", i !== 0 && "hidden"]}
+            >
+              <div class="px-4 pt-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <h2 class="text-lg font-extrabold text-gray-900">
+                  @{feed.creatorInfo.username}
+                </h2>
+                <span class="text-[11px] text-gray-400">
+                  🎥 {feed.counts.videos} · 📷 {feed.counts.photos} · 🖼️{" "}
+                  {feed.counts.mixed} · 📝 {feed.counts.text}
+                  {feed.creatorInfo.endDate
+                    ? ` · vence ${feed.creatorInfo.endDate}`
+                    : ""}
+                </span>
+              </div>
+
+              <div class="pt-4 px-4 columns-1 sm:columns-2 gap-6">
+                {feed.posts.map((post) => (
+                  <div class="mb-6 break-inside-avoid">
+                    <PostCard
+                      post={post}
+                      username={feed.creatorInfo.username}
+                      isDetail={true}
+                    />
+                  </div>
+                ))}
+              </div>
+
+              {feed.posts.length === 0 && (
+                <div class="py-16 text-center text-gray-500">
+                  Sin publicaciones reproducibles.
+                </div>
+              )}
+            </section>
+          ))}
+        </>
+      )
+    }
+  </main>
+
+  <ImageModal />
+
+  <style>
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+  </style>
+
+  <script>
+    import { initPostCards, initDetailVideos } from "@/scripts/ars/postcard-client";
+
+    initPostCards();
+    initDetailVideos();
+
+    // --- Pestañas por creador: muestra una sección a la vez ---
+    const tabs = document.querySelectorAll<HTMLButtonElement>(".creator-tab");
+    const sections = document.querySelectorAll<HTMLElement>(".creator-section");
+
+    tabs.forEach((tab) => {
+      tab.addEventListener("click", () => {
+        const targetId = tab.dataset.target;
+
+        sections.forEach((s) =>
+          s.classList.toggle("hidden", s.id !== targetId),
+        );
+
+        tabs.forEach((t) => {
+          const active = t === tab;
+          t.classList.toggle("bg-blue-600", active);
+          t.classList.toggle("text-white", active);
+          t.classList.toggle("border-blue-600", active);
+          t.classList.toggle("bg-white", !active);
+          t.classList.toggle("text-gray-600", !active);
+          t.classList.toggle("border-gray-200", !active);
+        });
+
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      });
+    });
+  </script>
+
+  <script>
+    // Lightbox para imágenes (mismo comportamiento que el feed/perfil).
+    (window as any).openLightbox = (src: string) => {
+      const imageModal = document.getElementById("image-modal")!;
+      const modalImg = document.getElementById("modal-img") as HTMLImageElement;
+      modalImg.src = src;
+      imageModal.classList.remove("hidden");
+      imageModal.classList.add("flex");
+      document.body.style.overflow = "hidden";
+      setTimeout(() => {
+        modalImg.classList.remove("scale-95");
+        modalImg.classList.add("scale-100");
+      }, 10);
+    };
+
+    const imageModal = document.getElementById("image-modal")!;
+    const modalImg = document.getElementById("modal-img") as HTMLImageElement;
+
+    function closeImageModal() {
+      modalImg.classList.remove("scale-100");
+      modalImg.classList.add("scale-95");
+      setTimeout(() => {
+        imageModal.classList.add("hidden");
+        imageModal.classList.remove("flex");
+        document.body.style.overflow = "";
+        modalImg.src = "";
+      }, 200);
+    }
+
+    imageModal?.addEventListener("click", (e) => {
+      if (
+        e.target === imageModal ||
+        (e.target as HTMLElement).closest("#close-modal") ||
+        (e.target as HTMLElement).closest(".relative")
+      ) {
+        closeImageModal();
+      }
+    });
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !imageModal.classList.contains("hidden")) {
+        closeImageModal();
+      }
+    });
+  </script>
+</ArsLayout>

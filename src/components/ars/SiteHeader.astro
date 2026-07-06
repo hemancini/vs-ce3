@@ -1,0 +1,245 @@
+---
+// Header unificado para las páginas de Arsmate (perfil, feed global y detalle
+// de post). Mantiene el mismo nav sticky en todas y, opcionalmente, monta el
+// buscador de creadores (typeahead) usado en el feed global.
+interface Props {
+  /** Destino del botón "volver". Por defecto el buscador (home). */
+  backHref?: string;
+  /** Texto junto a la flecha (oculto en mobile). Ej: "Buscador" o "@usuario". */
+  backLabel?: string;
+  /** Título mostrado en el header. */
+  title?: string;
+  /** Monta el buscador de creadores (typeahead) ocupando el centro. */
+  showSearch?: boolean;
+}
+
+const {
+  backHref = "/ars",
+  backLabel,
+  title,
+  showSearch = false,
+} = Astro.props;
+---
+
+<nav
+  class="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-gray-200/50 px-4 flex items-center justify-between gap-3 h-12"
+>
+  <a
+    href={backHref}
+    class="text-blue-600 hover:text-blue-700 font-semibold flex items-center gap-1 transition-colors group shrink-0"
+    title="Volver"
+    aria-label="Volver"
+  >
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke-width="3"
+      stroke="currentColor"
+      class="w-4 h-4 transition-transform group-hover:-translate-x-0.5"
+    >
+      <path
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        d="M15.75 19.5 8.25 12l7.5-7.5"></path>
+    </svg>
+    {backLabel && <span class="text-xs hidden sm:inline">{backLabel}</span>}
+  </a>
+
+  {
+    showSearch && (
+      <div
+        id="search-wrap"
+        class="relative flex-1 max-w-md md:absolute md:left-1/2 md:top-1/2 md:w-full md:-translate-x-1/2 md:-translate-y-1/2"
+      >
+        <div class="absolute inset-y-0 left-3 flex items-center pointer-events-none text-gray-400">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            class="h-4 w-4"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+            />
+          </svg>
+        </div>
+        <input
+          type="text"
+          id="creator-search"
+          placeholder="Buscar creador..."
+          autocomplete="off"
+          class="w-full pl-9 pr-8 py-1.5 bg-gray-100 border border-transparent rounded-full text-sm outline-none transition-all focus:bg-white focus:border-gray-300 focus:ring-2 focus:ring-blue-100 placeholder:text-gray-400"
+        />
+        <button
+          id="search-clear"
+          type="button"
+          aria-label="Limpiar búsqueda"
+          class="hidden absolute inset-y-0 right-2 flex items-center text-gray-400 hover:text-gray-600"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            class="h-4 w-4"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M6 18L18 6M6 6l12 12"
+            />
+          </svg>
+        </button>
+
+        <div
+          id="search-dropdown"
+          class="hidden absolute left-0 right-0 top-full mt-2 bg-white rounded-xl shadow-xl border border-gray-100 overflow-hidden z-50 max-h-[70vh] overflow-y-auto"
+        >
+          <div id="search-results" />
+        </div>
+      </div>
+    )
+  }
+
+  {
+    title && (
+      <h1 class="font-bold text-sm tracking-tight truncate max-w-[180px] md:max-w-none shrink-0">
+        {title}
+      </h1>
+    )
+  }
+</nav>
+
+{
+  showSearch && (
+    <script>
+      // Buscador de creadores tipo typeahead en el header (similar a /).
+      import { getProxiedUrl } from "@/utils/ars/proxy";
+
+      const input = document.getElementById(
+        "creator-search",
+      ) as HTMLInputElement | null;
+
+      if (input) {
+        const wrap = document.getElementById("search-wrap")!;
+        const dropdown = document.getElementById("search-dropdown")!;
+        const results = document.getElementById("search-results")!;
+        const clearBtn = document.getElementById("search-clear")!;
+
+        const numberFormatter = new Intl.NumberFormat("es-CL", {
+          notation: "compact",
+        });
+        const formatNumber = (n: number) => numberFormatter.format(n || 0);
+
+        const verifiedSvg = `<svg class="w-3.5 h-3.5 text-sky-500 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>`;
+
+        let debounce: ReturnType<typeof setTimeout>;
+        let controller: AbortController | null = null;
+
+        const show = () => dropdown.classList.remove("hidden");
+        const hide = () => dropdown.classList.add("hidden");
+
+        function renderMessage(text: string) {
+          results.innerHTML = `<div class="px-4 py-6 text-center text-sm text-gray-400">${text}</div>`;
+          show();
+        }
+
+        function renderResults(creators: any[], query: string) {
+          if (!creators.length) {
+            renderMessage(`Sin resultados para "${query}"`);
+            return;
+          }
+
+          const items = creators
+            .slice(0, 6)
+            .map((c: any) => {
+              const avatar = getProxiedUrl(c.avatar);
+              const subs = formatNumber(c.stats?.subscribers || 0);
+              return `
+                <a href="/ars/${c.username}" class="flex items-center gap-3 px-3 py-2 hover:bg-gray-50 transition-colors">
+                  <div class="w-9 h-9 rounded-full overflow-hidden bg-gray-100 flex-shrink-0">
+                    ${
+                      avatar
+                        ? `<img src="${avatar}" alt="${c.username}" class="w-full h-full object-cover" loading="lazy" decoding="async" />`
+                        : `<span class="w-full h-full flex items-center justify-center">👤</span>`
+                    }
+                  </div>
+                  <span class="flex items-center gap-1 min-w-0 flex-1 text-sm font-medium text-gray-800">
+                    <span class="truncate">@${c.username}</span>
+                    ${c.isVerified ? verifiedSvg : ""}
+                  </span>
+                  <span class="text-xs text-gray-400 font-medium flex-shrink-0">${subs}</span>
+                </a>`;
+            })
+            .join("");
+
+          results.innerHTML =
+            items +
+            `<a href="/ars?q=${encodeURIComponent(query)}" class="block px-4 py-3 text-center text-sm font-semibold text-blue-600 hover:bg-gray-50 border-t border-gray-100">Ver todos los resultados →</a>`;
+          show();
+        }
+
+        async function search(query: string) {
+          if (controller) controller.abort();
+          controller = new AbortController();
+          try {
+            const params = new URLSearchParams({
+              q: query,
+              limit: "6",
+              page: "1",
+            });
+            const res = await fetch(`/api/ars/creators/search?${params}`, {
+              credentials: "include",
+              signal: controller.signal,
+            });
+            const data = (await res.json()) as any;
+            const creators = data.creators || data.data || [];
+            renderResults(creators, query);
+          } catch (e) {
+            if ((e as Error).name !== "AbortError") {
+              console.error("Error buscando creadores:", e);
+              renderMessage("Error al buscar");
+            }
+          }
+        }
+
+        input.addEventListener("input", () => {
+          const query = input.value.trim();
+          clearBtn.classList.toggle("hidden", query.length === 0);
+          clearTimeout(debounce);
+          if (query.length < 2) {
+            hide();
+            return;
+          }
+          renderMessage("Buscando...");
+          debounce = setTimeout(() => search(query), 300);
+        });
+
+        input.addEventListener("focus", () => {
+          if (input.value.trim().length >= 2 && results.innerHTML) show();
+        });
+
+        clearBtn.addEventListener("click", () => {
+          input.value = "";
+          clearBtn.classList.add("hidden");
+          hide();
+          input.focus();
+        });
+
+        document.addEventListener("click", (e) => {
+          if (!wrap.contains(e.target as Node)) hide();
+        });
+
+        document.addEventListener("keydown", (e) => {
+          if (e.key === "Escape") hide();
+        });
+      }
+    </script>
+  )
+}

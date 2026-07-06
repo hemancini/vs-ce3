@@ -1,0 +1,230 @@
+---
+import ArsLayout from "@/layouts/ArsLayout.astro";
+import PostCard from "@/components/ars/PostCard.astro";
+import ImageModal from "@/components/ars/ImageModal.astro";
+import SiteHeader from "@/components/ars/SiteHeader.astro";
+import { fetchArsFeed } from "@/lib/ars/feed";
+
+// Feed global (home) de Arsmate: /api/ars/posts/feed sin creatorId.
+const limit = 10;
+
+const postUsername = (post: any) =>
+  post.author?.username || post.user?.username || "";
+
+let initialPosts: any[] = [];
+// Llamada directa, sin loopback HTTP (ver src/lib/ars/creators.ts).
+const result = await fetchArsFeed(
+  { limit: String(limit), page: "1" },
+  Astro.locals.arsmateCookie,
+  Astro.locals.arsmateUserId,
+);
+const data = result.data as any;
+if (result.ok && data?.success && Array.isArray(data.posts)) {
+  initialPosts = data.posts;
+} else if (!result.ok) {
+  console.error("Error SSR feed global:", result.error);
+}
+
+const hasMoreInitial = initialPosts.length === limit;
+---
+
+<ArsLayout title="Feed - Arsmate">
+  <script slot="head" is:inline src="https://cdn.jsdelivr.net/npm/hls.js@latest"
+  ></script>
+  <main class="max-w-4xl mx-auto pb-20">
+    <!-- Navegación -->
+    <SiteHeader showSearch title="Feed 📸" />
+
+    <div
+      id="global-feed"
+      data-limit={limit}
+      data-has-more={hasMoreInitial ? "true" : "false"}
+    >
+      <!-- Grid (página 1 en SSR) -->
+      <div id="feed-grid" class="pt-4 px-4 columns-1 sm:columns-2 gap-6">
+        {
+          initialPosts.map((post) => (
+            <div class="mb-6 break-inside-avoid">
+              <PostCard post={post} username={postUsername(post)} />
+            </div>
+          ))
+        }
+      </div>
+
+      <div
+        id="feed-empty"
+        class:list={[
+          "py-20 text-center text-gray-500",
+          initialPosts.length > 0 && "hidden",
+        ]}
+      >
+        No se encontraron publicaciones.
+      </div>
+
+      <div id="feed-sentinel" class="py-12 text-center text-gray-500">
+        <div id="feed-spinner" class="hidden">
+          <div class="flex flex-col items-center justify-center gap-3">
+            <span
+              class="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"
+            ></span>
+            <span class="text-xs font-medium text-gray-400 animate-pulse"
+              >Cargando más publicaciones…</span
+            >
+          </div>
+        </div>
+      </div>
+
+      <div
+        id="feed-end"
+        class:list={[
+          "py-12 text-center text-gray-500 border-t mt-8",
+          hasMoreInitial && "hidden",
+        ]}
+      >
+        No hay más publicaciones para mostrar.
+      </div>
+    </div>
+  </main>
+
+  <ImageModal />
+
+  <script>
+    import { initPostCards } from "@/scripts/ars/postcard-client";
+    import {
+      createMasonry,
+      responsiveColumns,
+      parseCards,
+    } from "@/scripts/ars/masonry";
+
+    initPostCards();
+
+    const root = document.getElementById("global-feed")!;
+    const limit = Number(root.dataset.limit || "10");
+    const grid = document.getElementById("feed-grid")!;
+    const sentinel = document.getElementById("feed-sentinel")!;
+    const spinner = document.getElementById("feed-spinner")!;
+    const endEl = document.getElementById("feed-end")!;
+
+    let page = 1; // página ya renderizada (SSR)
+    let hasMore = root.dataset.hasMore === "true";
+    let isLoading = false;
+
+    // Masonry en JS: cada card va a la columna más corta y se queda ahí, así
+    // el contenido nuevo se añade al final sin reordenar lo ya cargado (CSS
+    // `columns` rebalanceaba todo al insertar).
+    const masonry = createMasonry(grid, responsiveColumns);
+
+    // El feed "recientes" crece por arriba y la API solo pagina por offset
+    // (page), así que page 2 suele re-servir posts ya mostrados. Dedup por id:
+    // sembramos con las cards del SSR y descartamos repetidos al insertar.
+    const seen = new Set<string>();
+    const initial = parseCards(grid.innerHTML);
+    initial.forEach((c) => seen.add(c.dataset.postId!));
+    masonry.layout(initial);
+
+    // Coloca solo las cards no vistas antes. Devuelve cuántas se añadieron.
+    function appendNew(html: string): number {
+      let added = 0;
+      for (const card of parseCards(html)) {
+        const id = card.dataset.postId!;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        masonry.place(card);
+        added++;
+      }
+      return added;
+    }
+
+    async function loadMore() {
+      if (isLoading || !hasMore) return;
+      isLoading = true;
+      spinner.classList.remove("hidden");
+      try {
+        // Avanza páginas hasta sumar contenido nuevo (la ventana móvil del
+        // feed puede devolver una página entera de repetidos). Tope para no
+        // disparar peticiones sin fin si todo es repetido.
+        let addedTotal = 0;
+        let attempts = 0;
+        while (addedTotal === 0 && hasMore && attempts < 5) {
+          attempts++;
+          const params = new URLSearchParams({
+            limit: String(limit),
+            page: String(page + 1),
+          });
+          const res = await fetch(`/ars/posts/feed-cards?${params}`, {
+            credentials: "include",
+          });
+          const data = {
+            success: res.ok,
+            html: await res.text(),
+            count: Number(res.headers.get("X-Count") || "0"),
+            hasMore: res.headers.get("X-Has-More") === "true",
+          };
+          page += 1;
+          hasMore = data.hasMore;
+          if (data.html) addedTotal += appendNew(data.html);
+        }
+        endEl.classList.toggle("hidden", hasMore);
+      } catch (e) {
+        console.error("Error cargando más posts:", e);
+      } finally {
+        isLoading = false;
+        spinner.classList.add("hidden");
+      }
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) loadMore();
+      },
+      { rootMargin: "300px" },
+    );
+    observer.observe(sentinel);
+  </script>
+
+  <script>
+    // Lightbox para imágenes (igual que en el perfil).
+    (window as any).openLightbox = (src: string) => {
+      const imageModal = document.getElementById("image-modal")!;
+      const modalImg = document.getElementById("modal-img") as HTMLImageElement;
+      modalImg.src = src;
+      imageModal.classList.remove("hidden");
+      imageModal.classList.add("flex");
+      document.body.style.overflow = "hidden";
+      setTimeout(() => {
+        modalImg.classList.remove("scale-95");
+        modalImg.classList.add("scale-100");
+      }, 10);
+    };
+
+    const imageModal = document.getElementById("image-modal")!;
+    const modalImg = document.getElementById("modal-img") as HTMLImageElement;
+
+    function closeImageModal() {
+      modalImg.classList.remove("scale-100");
+      modalImg.classList.add("scale-95");
+      setTimeout(() => {
+        imageModal.classList.add("hidden");
+        imageModal.classList.remove("flex");
+        document.body.style.overflow = "";
+        modalImg.src = "";
+      }, 200);
+    }
+
+    imageModal?.addEventListener("click", (e) => {
+      if (
+        e.target === imageModal ||
+        (e.target as HTMLElement).closest("#close-modal") ||
+        (e.target as HTMLElement).closest(".relative")
+      ) {
+        closeImageModal();
+      }
+    });
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !imageModal.classList.contains("hidden")) {
+        closeImageModal();
+      }
+    });
+  </script>
+</ArsLayout>

@@ -1,0 +1,505 @@
+---
+import ArsLayout from "@/layouts/ArsLayout.astro";
+---
+
+<ArsLayout
+  title="Arsmate - Live Search"
+  bodyClass="bg-[#fafafa] min-h-screen font-sans text-slate-800 antialiased"
+>
+  <main class="container mx-auto px-4 py-8">
+    <header
+      class="mb-6 flex flex-wrap items-center justify-between gap-4 pt-4 border-b border-slate-100 pb-4"
+    >
+      <div class="flex items-center gap-3">
+        <h1 class="text-xl font-bold text-slate-900 tracking-tight">Arsmate</h1>
+      </div>
+      <div class="flex items-center gap-2">
+        <a
+          href="/ars/posts"
+          class="px-3 py-1.5 text-xs font-bold text-white bg-slate-900 rounded-lg hover:bg-slate-800 transition-all shadow-sm"
+        >
+          Feed 📸
+        </a>
+      </div>
+    </header>
+
+    <!-- Buscador y Controles -->
+    <div class="flex flex-col md:flex-row items-center gap-4 mb-8">
+      <div class="relative grow max-w-md group">
+        <div
+          class="absolute inset-y-0 left-4 flex items-center pointer-events-none text-slate-400 group-focus-within:text-slate-600 transition-colors"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            class="h-4 w-4"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+          </svg>
+        </div>
+        <input
+          type="text"
+          id="search-input"
+          placeholder="Buscar creador..."
+          class="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl shadow-sm focus:ring-2 focus:ring-slate-100 focus:border-slate-300 outline-none transition-all text-sm placeholder:text-slate-400"
+        />
+      </div>
+
+      <div class="flex items-center gap-1 p-1 bg-slate-100 rounded-xl">
+        <button
+          data-sort="followers"
+          class="sort-btn px-3 py-1.5 bg-white text-slate-900 rounded-lg shadow-sm transition-all font-bold text-[10px] uppercase tracking-wider flex items-center gap-1.5"
+        >
+          <span>Seguidores</span>
+          <span class="indicator">▼</span>
+        </button>
+        <button
+          data-sort="likes"
+          class="sort-btn px-3 py-1.5 text-slate-500 rounded-lg hover:bg-white hover:text-slate-900 transition-all font-bold text-[10px] uppercase tracking-wider flex items-center gap-1.5"
+        >
+          <span>Likes</span>
+          <span class="indicator"></span>
+        </button>
+        <button
+          data-sort="posts"
+          class="sort-btn px-3 py-1.5 text-slate-500 rounded-lg hover:bg-white hover:text-slate-900 transition-all font-bold text-[10px] uppercase tracking-wider flex items-center gap-1.5"
+        >
+          <span>Posts</span>
+          <span class="indicator"></span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Grid de Creadores -->
+    <div
+      id="creators-grid"
+      class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 min-h-[400px]"
+    >
+      <!-- Skeleton Loader (se cargará vía JS o estará presente al inicio) -->
+      {
+        Array.from({ length: 12 }).map((_) => (
+          <div class="bg-white rounded-2xl border border-slate-100 shadow-sm flex flex-col overflow-hidden animate-pulse">
+            <div class="h-32 bg-slate-200" />
+            <div class="relative px-3 pb-4 pt-8 grow flex flex-col">
+              <div class="absolute -top-7 left-3 border-2 border-white rounded-xl w-14 h-14 bg-slate-200 shadow-sm" />
+              <div class="h-4 bg-slate-200 rounded w-3/4 mb-2" />
+              <div class="h-3 bg-slate-100 rounded w-1/2 mb-4" />
+              <div class="grid grid-cols-3 gap-y-2 gap-x-1 mb-4 border-y border-slate-50 py-2">
+                <div class="flex flex-col gap-1">
+                  <div class="h-3 bg-slate-200 rounded w-1/2" />
+                  <div class="h-2 bg-slate-100 rounded w-3/4" />
+                </div>
+                <div class="flex flex-col gap-1 items-center">
+                  <div class="h-3 bg-slate-200 rounded w-1/2" />
+                  <div class="h-2 bg-slate-100 rounded w-3/4" />
+                </div>
+                <div class="flex flex-col gap-1 items-end">
+                  <div class="h-3 bg-slate-200 rounded w-1/2" />
+                  <div class="h-2 bg-slate-100 rounded w-3/4" />
+                </div>
+              </div>
+              <div class="mt-auto flex justify-between items-center">
+                <div class="h-4 bg-slate-200 rounded w-1/4" />
+                <div class="h-3 bg-slate-100 rounded w-1/4" />
+              </div>
+            </div>
+          </div>
+        ))
+      }
+    </div>
+
+    <!-- Loader -->
+    <div id="loader" class="py-12 text-center text-gray-500 hidden">
+      <span
+        class="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"
+      ></span>
+      <span class="ml-2">Cargando más resultados...</span>
+    </div>
+
+    <!-- Infinite Scroll Sentinel -->
+    <div id="infinite-scroll-trigger" class="h-20 w-full pointer-events-none">
+    </div>
+
+    <!-- Empty State -->
+    <div
+      id="empty-state"
+      class="hidden py-20 text-center text-gray-500 col-span-full"
+    >
+      <p class="text-xl">
+        No se encontraron creadores que coincidan con tu búsqueda.
+      </p>
+      <button id="clear-search" class="mt-4 text-blue-600 hover:underline"
+        >Limpiar búsqueda</button
+      >
+    </div>
+  </main>
+
+  <script>
+    import { getProxiedUrl } from "@/utils/ars/proxy";
+
+    // Estado Global
+    let currentPage = 1;
+    const limit = 40;
+    let currentSort = "followers";
+    let currentOrder = "desc";
+    let currentSearch = "";
+    let isLoading = false;
+    let hasMore = true;
+
+    const grid = document.getElementById("creators-grid");
+    const loader = document.getElementById("loader");
+    const emptyState = document.getElementById("empty-state");
+    const searchInput = document.getElementById(
+      "search-input",
+    ) as HTMLInputElement;
+    const sortButtons = document.querySelectorAll(".sort-btn");
+
+    // Formateador (instancia única reutilizada; crear Intl.NumberFormat es caro)
+    const numberFormatter = new Intl.NumberFormat("es-CL", {
+      notation: "compact",
+    });
+    const formatNumber = (num: number) => numberFormatter.format(num || 0);
+
+    let isInitialLoad = true;
+
+    // Plantilla de Skeleton
+    const SKELETON_TEMPLATE = `
+                <div class="bg-white rounded-2xl border border-slate-100 shadow-sm flex flex-col overflow-hidden animate-pulse">
+                    <div class="h-32 bg-slate-200"></div>
+                    <div class="relative px-3 pb-4 pt-8 grow flex flex-col">
+                        <div class="absolute -top-7 left-3 border-2 border-white rounded-xl w-14 h-14 bg-slate-200 shadow-sm"></div>
+                        <div class="h-4 bg-slate-200 rounded w-3/4 mb-2"></div>
+                        <div class="h-3 bg-slate-100 rounded w-1/2 mb-4"></div>
+                        <div class="grid grid-cols-3 gap-y-2 gap-x-1 mb-4 border-y border-slate-50 py-2">
+                            <div class="flex flex-col gap-1">
+                                <div class="h-3 bg-slate-200 rounded w-1/2"></div>
+                                <div class="h-2 bg-slate-100 rounded w-3/4"></div>
+                            </div>
+                            <div class="flex flex-col gap-1 items-center">
+                                <div class="h-3 bg-slate-200 rounded w-1/2"></div>
+                                <div class="h-2 bg-slate-100 rounded w-3/4"></div>
+                            </div>
+                            <div class="flex flex-col gap-1 items-end">
+                                <div class="h-3 bg-slate-200 rounded w-1/2"></div>
+                                <div class="h-2 bg-slate-100 rounded w-3/4"></div>
+                            </div>
+                            <div class="flex flex-col gap-1">
+                                <div class="h-3 bg-slate-200 rounded w-1/2"></div>
+                                <div class="h-2 bg-slate-100 rounded w-3/4"></div>
+                            </div>
+                            <div class="flex flex-col gap-1 items-center">
+                                <div class="h-3 bg-slate-200 rounded w-1/2"></div>
+                                <div class="h-2 bg-slate-100 rounded w-3/4"></div>
+                            </div>
+                            <div class="flex flex-col gap-1 items-end opacity-0">
+                                <div class="h-3 bg-slate-200 rounded w-1/2"></div>
+                                <div class="h-2 bg-slate-100 rounded w-3/4"></div>
+                            </div>
+                        </div>
+                        <div class="mt-auto flex justify-between items-center">
+                            <div class="h-4 bg-slate-200 rounded w-1/4"></div>
+                            <div class="h-3 bg-slate-100 rounded w-1/4"></div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+    // Función para renderizar tarjeta
+    function createCard(creator: any) {
+      const isFree = !creator.price || parseFloat(String(creator.price)) === 0;
+      const avatar = getProxiedUrl(creator.avatar);
+      const cover = getProxiedUrl(creator.cover);
+
+      // Formatear estadísticas
+      const subs = formatNumber(creator.stats?.subscribers || 0);
+      const likes = formatNumber(creator.stats?.likes || 0);
+      const posts = creator.stats?.posts || 0;
+
+      return `
+                    <a href="/ars/${creator.username}" class="creator-card group bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-xl hover:border-slate-200 transition-all duration-300 flex flex-col cursor-pointer overflow-hidden animate-fade-in" data-username="${creator.username}">
+						<div class="relative h-32 bg-slate-100 overflow-hidden">
+							${
+                cover
+                  ? `
+                                <img src="${cover}" alt="Cover de ${creator.username}" class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="lazy" decoding="async" />
+                            `
+                  : `
+                                <div class="w-full h-full bg-slate-200"></div>
+                            `
+              }
+                            <div class="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+						</div>
+						
+                        <div class="relative px-3 pb-4 pt-8 grow flex flex-col">
+                            <div class="absolute -top-7 left-3 border-2 border-white rounded-xl overflow-hidden w-14 h-14 bg-slate-200 shadow-sm transition-transform duration-300 group-hover:-translate-y-1">
+                                ${
+                                  avatar
+                                    ? `
+                                    <img src="${avatar}" alt="${creator.username}" class="w-full h-full object-cover" loading="lazy" decoding="async" />
+                                `
+                                    : `
+                                    <span class="w-full h-full flex items-center justify-center text-xl">👤</span>
+                                `
+                                }
+                            </div>
+
+                            <div class="flex items-center gap-1 mb-0.5">
+                                <h2 class="text-sm font-bold truncate text-slate-900 leading-tight" title="${creator.name || creator.username}">${creator.name || creator.username}</h2>
+                                ${
+                                  creator.isVerified
+                                    ? `
+                                    <svg class="w-3 h-3 text-sky-500 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24">
+                                        <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+                                    </svg>
+                                `
+                                    : ""
+                                }
+                            </div>
+                            <p class="text-[10px] text-slate-400 font-bold tracking-tight mb-3">@${creator.username}</p>
+                            
+                            <div class="grid grid-cols-3 gap-y-2 gap-x-1 mb-4 border-y border-slate-50 py-2">
+                                <div class="flex flex-col">
+                                    <span class="text-[11px] font-bold text-slate-900 leading-none">${subs}</span>
+                                    <span class="text-[8px] text-slate-400 font-bold uppercase tracking-tighter">Fans</span>
+                                </div>
+                                <div class="flex flex-col text-center">
+                                    <span class="text-[11px] font-bold text-slate-900 leading-none">${likes}</span>
+                                    <span class="text-[8px] text-slate-400 font-bold uppercase tracking-tighter">Likes</span>
+                                </div>
+                                <div class="flex flex-col text-right">
+                                    <span class="text-[11px] font-bold text-slate-900 leading-none">${posts}</span>
+                                    <span class="text-[8px] text-slate-400 font-bold uppercase tracking-tighter">Posts</span>
+                                </div>
+                            </div>
+
+                            <div class="mt-auto flex justify-between items-center">
+                                <span class="text-[11px] font-bold ${isFree ? "text-emerald-500" : "text-slate-900"}">
+                                    ${isFree ? "Gratis" : `$${creator.price} <span class="text-[8px] text-slate-400 font-medium">USD</span>`}
+                                </span>
+                                <span class="text-[9px] font-bold text-slate-300 group-hover:text-slate-900 transition-colors uppercase tracking-widest">
+                                    Perfil
+                                </span>
+                            </div>
+                        </div>
+					</a>
+                `;
+    }
+
+    async function fetchCreators(append = false) {
+      if (isLoading) return 0;
+      isLoading = true;
+      let loadedCount = 0;
+
+      if (!append) {
+        // En la primera carga conservamos los skeletons que ya pintó el SSR
+        // en vez de reconstruirlos (evita un reflow innecesario).
+        if (!isInitialLoad) {
+          grid!.innerHTML = SKELETON_TEMPLATE.repeat(12);
+        }
+        isInitialLoad = false;
+        currentPage = 1;
+        hasMore = true;
+        emptyState?.classList.add("hidden");
+      } else {
+        loader?.classList.remove("hidden");
+      }
+
+      try {
+        const params = new URLSearchParams({
+          page: currentPage.toString(),
+          limit: limit.toString(),
+        });
+
+        if (currentSearch) {
+          params.set("q", currentSearch);
+        } else {
+          params.set("sort", currentSort);
+          params.set("order", currentOrder);
+        }
+
+        const response = await fetch(`/api/ars/creators/search?${params}`, {
+          credentials: "include",
+        });
+        const data = (await response.json()) as any;
+
+        if (!response.ok)
+          throw new Error(data.error || "Error al cargar creadores");
+
+        // La API de Arsmate puede devolver data.data o data.creators
+        const creators =
+          data.creators || data.data || (Array.isArray(data) ? data : []);
+
+        if (creators.length === 0) {
+          hasMore = false;
+          if (!append) {
+            emptyState?.classList.remove("hidden");
+            grid!.innerHTML = "";
+          }
+        } else {
+          const html = creators.map(createCard).join("");
+          if (append) {
+            grid!.insertAdjacentHTML("beforeend", html);
+          } else {
+            grid!.innerHTML = html;
+          }
+
+          // Si recibimos menos de lo pedido o estamos en el límite,
+          // pero la API no nos dice explícitamente si hay más,
+          // confiamos en data.hasMore si existe
+          if (data.hasMore !== undefined) {
+            hasMore = data.hasMore;
+          } else if (creators.length < limit) {
+            hasMore = false;
+          }
+
+          if (hasMore) currentPage++;
+          loadedCount = creators.length;
+        }
+      } catch (error) {
+        console.error("Error fetching creators:", error);
+        if (!append) {
+          grid!.innerHTML = `
+                            <div class="col-span-full py-20 text-center">
+                                <p class="text-red-500 font-bold mb-4">Error: ${(error as Error).message}</p>
+                                <button onclick="location.reload()" class="px-4 py-2 bg-blue-600 text-white rounded-lg">Reintentar</button>
+                            </div>
+                        `;
+        }
+      } finally {
+        isLoading = false;
+        loader?.classList.add("hidden");
+
+        // Si la página recién cargada no llenó el viewport, el centinela puede
+        // seguir intersectando sin emitir un nuevo evento. Re-observamos (tras
+        // el layout) para forzar otra comprobación y cargar la siguiente página.
+        if (hasMore && loadedCount > 0 && sentinel) {
+          requestAnimationFrame(() => {
+            observer.unobserve(sentinel);
+            observer.observe(sentinel);
+          });
+        }
+      }
+
+      return loadedCount;
+    }
+
+    // Infinite Scroll
+    const sentinel = document.getElementById("infinite-scroll-trigger");
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+
+        if (entry.isIntersecting && hasMore && !isLoading) {
+          fetchCreators(true);
+        }
+      },
+      {
+        threshold: 0,
+        rootMargin: "400px", // Cargar antes de que llegue al final
+      },
+    );
+
+    if (sentinel) observer.observe(sentinel);
+
+    // Debounce for search
+    let timeout: any;
+    searchInput?.addEventListener("input", (e) => {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => {
+        currentSearch = (e.target as HTMLInputElement).value;
+        fetchCreators();
+      }, 500);
+    });
+
+    searchInput?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        clearTimeout(timeout);
+        currentSearch = (e.target as HTMLInputElement).value;
+        fetchCreators();
+      }
+    });
+
+    // Sorting
+    sortButtons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const sort = btn.getAttribute("data-sort");
+        if (sort === currentSort) {
+          currentOrder = currentOrder === "desc" ? "asc" : "desc";
+        } else {
+          currentSort = sort!;
+          currentOrder = "desc";
+        }
+
+        // Update UI indicators
+        sortButtons.forEach((b) => {
+          const indicator = b.querySelector(".indicator");
+          if (b === btn) {
+            b.classList.add("bg-white", "shadow-sm", "text-slate-900");
+            b.classList.remove("text-slate-500");
+            indicator!.textContent = currentOrder === "desc" ? "▼" : "▲";
+          } else {
+            b.classList.remove(
+              "bg-white",
+              "shadow-sm",
+              "text-slate-900",
+              "bg-slate-100",
+            );
+            b.classList.add("text-slate-500");
+            indicator!.textContent = "";
+          }
+        });
+
+        fetchCreators();
+      });
+    });
+
+    // Clear search
+    document.getElementById("clear-search")?.addEventListener("click", () => {
+      searchInput.value = "";
+      currentSearch = "";
+      fetchCreators();
+    });
+
+    // Búsqueda inicial desde la URL (?q=...), p.ej. al llegar desde el feed.
+    const initialQuery = new URLSearchParams(window.location.search)
+      .get("q")
+      ?.trim();
+    if (initialQuery) {
+      currentSearch = initialQuery;
+      searchInput.value = initialQuery;
+    }
+
+    // Initial load
+    fetchCreators();
+  </script>
+
+  <style>
+    .scrollbar-hide::-webkit-scrollbar {
+      display: none;
+    }
+    .scrollbar-hide {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+    .animate-fade-in {
+      animation: fadeIn 0.5s ease-out forwards;
+    }
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+  </style>
+</ArsLayout>

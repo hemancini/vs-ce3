@@ -1,0 +1,34 @@
+---
+import "@/styles/ars.css";
+
+interface Props {
+  /** Contenido del <title>. */
+  title?: string;
+  /** Clases aplicadas al <body>. */
+  bodyClass?: string;
+  /** Idioma del documento. */
+  lang?: string;
+  /** Atributos extra para el <body> (p.ej. data-username). */
+  bodyAttrs?: Record<string, unknown>;
+}
+
+const {
+  title = "Arsmate",
+  bodyClass = "bg-gray-100 min-h-screen font-sans text-gray-800",
+  lang = "es",
+  bodyAttrs = {},
+} = Astro.props;
+---
+
+<html lang={lang}>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width" />
+    <title>{title}</title>
+    <slot name="head" />
+  </head>
+  <body class={bodyClass} {...bodyAttrs}>
+    <slot />
+  </body>
+</html>

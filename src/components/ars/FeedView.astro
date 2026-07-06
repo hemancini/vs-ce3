@@ -1,0 +1,605 @@
+---
+import SkeletonCard from "@/components/ars/SkeletonCard.astro";
+
+interface Props {
+  username: string;
+  creatorId?: string | null;
+}
+
+const { username, creatorId } = Astro.props;
+const limit = 10;
+
+// El feed y los counts ya no se piden en SSR: la página pinta de inmediato el
+// cascarón (filtros + grid de skeletons) y el cliente trae la primera página al
+// montar. Así se ve un skeleton en la primera carga del perfil.
+const SKELETON_COUNT = 6;
+
+const contentFilters = [
+  {
+    id: "all",
+    label: "Todos",
+    filter: "contentFilter",
+    value: "all",
+    icon: "M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75a2.25 2.25 0 0 1 2.25-2.25H6a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 6 20.25H3.75a2.25 2.25 0 0 1-2.25-2.25v-2.25ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25a2.25 2.25 0 0 1-2.25-2.25v-2.25Z",
+  },
+  {
+    id: "free",
+    label: "Gratis",
+    filter: "contentFilter",
+    value: "free",
+    icon: "M21 11.25v8.25a1.5 1.5 0 0 1-1.5 1.5H4.5a1.5 1.5 0 0 1-1.5-1.5v-8.25M12 4.875A2.625 2.625 0 1 0 9.375 7.5H12m0-2.625V7.5m0-2.625A2.625 2.625 0 1 1 14.625 7.5H12m0 0V21m-8.625-9.75h17.25",
+  },
+  {
+    id: "videos",
+    label: "Vídeos",
+    filter: "filtroMedia",
+    value: "videos",
+    icon: "m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z",
+  },
+  {
+    id: "fotos",
+    label: "Fotos",
+    filter: "filtroMedia",
+    value: "fotos",
+    icon: "m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6.75a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6.75v10.5a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z",
+  },
+  {
+    id: "subscription",
+    label: "Suscripción",
+    filter: "contentFilter",
+    value: "subscription",
+    icon: "M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z",
+  },
+  {
+    id: "ppv",
+    label: "PPV",
+    filter: "contentFilter",
+    value: "ppv",
+    icon: "M12 6v12m-3-2.818.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z",
+  },
+];
+---
+
+<div
+  id="creator-feed"
+  class="w-full"
+  data-creator-id={creatorId || ""}
+  data-username={username}
+  data-limit={limit}
+  data-has-more="false"
+  data-skeleton-count={SKELETON_COUNT}
+>
+  <!-- Filtros -->
+  <div
+    id="feed-filters"
+    class="sticky top-[44px] z-40 bg-gray-100/95 backdrop-blur-md border-b border-gray-200/20 mb-3 px-2 py-1 transition-opacity duration-200"
+  >
+    <div class="flex flex-row items-center gap-2 min-h-[36px]">
+      <div
+        class="flex flex-row gap-0.5 items-center overflow-x-auto no-scrollbar flex-1 min-w-0 -my-1 py-1"
+      >
+        {
+          contentFilters.map((f) => (
+            <button
+              type="button"
+              data-filter={f.filter}
+              data-value={f.value}
+              data-id={f.id}
+              class:list={[
+                "filter-btn shrink-0 whitespace-nowrap px-2 py-1 rounded-lg text-xs font-semibold transition-all duration-200 cursor-pointer flex items-center",
+                f.value === "all"
+                  ? "bg-blue-600 text-white shadow-md"
+                  : "text-gray-500 hover:text-gray-900 hover:bg-gray-100/50",
+              ]}
+              title={f.label}
+            >
+              <span class="inline-block align-middle">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke-width="2"
+                  stroke="currentColor"
+                  class="w-4 h-4"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    d={f.icon}
+                  />
+                </svg>
+              </span>
+              <span class="count-badge ml-0.5 opacity-60" data-count-id={f.id}>
+                {f.id !== "all" && (
+                  <span class="count-skeleton inline-block w-4 h-2 rounded bg-gray-300/70 animate-pulse align-middle" />
+                )}
+              </span>
+            </button>
+          ))
+        }
+      </div>
+
+      <div class="flex flex-row gap-0.5 items-center shrink-0">
+        <button
+          type="button"
+          data-sort="recientes"
+          class="sort-btn px-2 py-1 rounded-lg text-xs font-semibold transition-all duration-200 cursor-pointer bg-gray-800 text-white shadow-md"
+          title="Recientes"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke-width="2"
+            stroke="currentColor"
+            class="w-4 h-4"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"></path>
+          </svg>
+        </button>
+        <button
+          type="button"
+          data-sort="antiguos"
+          class="sort-btn px-2 py-1 rounded-lg text-xs font-semibold transition-all duration-200 cursor-pointer text-gray-500 hover:text-gray-900 hover:bg-gray-100/50"
+          title="Antiguos"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke-width="2"
+            stroke="currentColor"
+            class="w-4 h-4"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99"
+            ></path>
+          </svg>
+        </button>
+        <div
+          class="w-px h-5 bg-gray-300/70 mx-1 self-center"
+          aria-hidden="true"
+        >
+        </div>
+        <button
+          type="button"
+          data-view="list"
+          class="view-btn px-2 py-1 rounded-lg text-xs font-semibold transition-all duration-200 cursor-pointer text-gray-500 hover:text-gray-900 hover:bg-gray-100/50"
+          title="Vista lista"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke-width="2"
+            stroke="currentColor"
+            class="w-4 h-4"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5"></path>
+          </svg>
+        </button>
+        <button
+          type="button"
+          data-view="grid"
+          class="view-btn px-2 py-1 rounded-lg text-xs font-semibold transition-all duration-200 cursor-pointer bg-gray-800 text-white shadow-md"
+          title="Vista mosaico"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke-width="2"
+            stroke="currentColor"
+            class="w-4 h-4"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75a2.25 2.25 0 0 1 2.25-2.25H6a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 6 20.25H3.75a2.25 2.25 0 0 1-2.25-2.25v-2.25ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25a2.25 2.25 0 0 1-2.25-2.25v-2.25Z"
+            ></path>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Grid: skeletons en SSR; el cliente los reemplaza con la página 1 real. -->
+  <div
+    id="feed-grid"
+    class="px-4 md:px-0 columns-1 sm:columns-2 gap-6 transition-all duration-500"
+  >
+    {
+      Array.from({ length: SKELETON_COUNT }).map((_, i) => (
+        <div class="mb-6 break-inside-avoid">
+          <SkeletonCard tall={i % 2 === 1} />
+        </div>
+      ))
+    }
+  </div>
+
+  <!-- Plantilla para clonar skeletons desde JS (cambio de filtros). -->
+  <template id="skeleton-template"><SkeletonCard /></template>
+
+  <div id="feed-empty" class:list={["py-20 text-center text-gray-500 hidden"]}>
+    No se encontraron publicaciones con estos filtros.
+  </div>
+
+  <div id="feed-sentinel" class="py-12 text-center text-gray-500">
+    <div id="feed-spinner" class="hidden">
+      <div class="flex flex-col items-center justify-center gap-3">
+        <span
+          class="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"
+        ></span>
+        <span class="text-xs font-medium text-gray-400 animate-pulse"
+          >Cargando más publicaciones…</span
+        >
+      </div>
+    </div>
+  </div>
+
+  <div
+    id="feed-end"
+    class:list={["py-12 text-center text-gray-500 border-t mt-8 hidden"]}
+  >
+    No hay más publicaciones para mostrar.
+  </div>
+</div>
+
+<style>
+  /* Scroll horizontal de filtros en mobile sin barra visible. */
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+</style>
+
+<script>
+  import { initPostCards } from "@/scripts/ars/postcard-client";
+  import {
+    createMasonry,
+    responsiveColumns,
+    parseCards,
+  } from "@/scripts/ars/masonry";
+
+  initPostCards();
+
+  const root = document.getElementById("creator-feed")!;
+  const creatorId = root.dataset.creatorId || "";
+  const username = root.dataset.username || "";
+  const limit = Number(root.dataset.limit || "10");
+  const skeletonCount = Number(root.dataset.skeletonCount || "6");
+
+  const grid = document.getElementById("feed-grid")!;
+  const sentinel = document.getElementById("feed-sentinel")!;
+  const spinner = document.getElementById("feed-spinner")!;
+  const filterBar = document.getElementById("feed-filters")!;
+  const emptyEl = document.getElementById("feed-empty")!;
+  const endEl = document.getElementById("feed-end")!;
+  const skeletonTpl = document.getElementById(
+    "skeleton-template",
+  ) as HTMLTemplateElement;
+
+  // Estado inicial de los filtros leído desde la query string para que la vista
+  // sea compartible y sobreviva al recargar.
+  const initialParams = new URL(window.location.href).searchParams;
+  const filters = {
+    contentFilter: initialParams.get("contentFilter") || "all",
+    ordenacion: initialParams.get("ordenacion") || "recientes",
+    filtroMedia: initialParams.get("filtroMedia") || "todos",
+  };
+  let currentView = initialParams.get("view") || "grid";
+
+  // Refleja el estado actual de los filtros en la URL (solo los que difieren del
+  // valor por defecto, para mantener la query limpia).
+  function syncUrl() {
+    const url = new URL(window.location.href);
+    const setParam = (key: string, value: string, def: string) => {
+      if (value && value !== def) url.searchParams.set(key, value);
+      else url.searchParams.delete(key);
+    };
+    setParam("contentFilter", filters.contentFilter, "all");
+    setParam("ordenacion", filters.ordenacion, "recientes");
+    setParam("filtroMedia", filters.filtroMedia, "todos");
+    setParam("view", currentView, "grid");
+    history.replaceState(null, "", url);
+  }
+
+  let page = 1; // última página cargada (la 1 la trae el cliente al montar)
+  let hasMore = root.dataset.hasMore === "true";
+  let isLoading = false;
+
+  // Masonry en JS: cada card va a la columna más corta y se queda ahí, así el
+  // contenido nuevo se añade al final sin reordenar lo ya cargado (CSS `columns`
+  // rebalanceaba todo al insertar).
+  // En vista "lista" forzamos 1 columna; en "mosaico" usamos las columnas
+  // responsivas. El masonry consulta esta función cada vez que re-maqueta.
+  const columnsForView = () =>
+    currentView === "list" ? 1 : responsiveColumns();
+  const masonry = createMasonry(grid, columnsForView);
+
+  // Dedup por id: la API solo pagina por offset, así que una página puede
+  // re-servir posts ya mostrados.
+  const seen = new Set<string>();
+
+  // Reparte una lista de cards desde cero (SSR inicial / cambio de filtros) y
+  // resiembra el set de dedup.
+  function setCards(cards: HTMLElement[]) {
+    seen.clear();
+    cards.forEach((c) => seen.add(c.dataset.postId!));
+    masonry.layout(cards);
+  }
+
+  // Coloca solo las cards no vistas antes. Devuelve cuántas se añadieron.
+  function appendNew(html: string): number {
+    let added = 0;
+    for (const card of parseCards(html)) {
+      const id = card.dataset.postId!;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      masonry.place(card);
+      added++;
+    }
+    return added;
+  }
+
+  // --- Skeletons (placeholder mientras carga el feed) ---
+  // Se clonan de <template id="skeleton-template"> (mismo SkeletonCard del SSR).
+  function makeSkeletonCard(): HTMLElement {
+    return skeletonTpl.content.firstElementChild!.cloneNode(
+      true,
+    ) as HTMLElement;
+  }
+
+  // Reparte `n` skeletons entre las columnas actuales del masonry (round-robin).
+  function spreadSkeletons(n: number) {
+    const columns = Array.from(grid.children) as HTMLElement[];
+    if (!columns.length) return;
+    for (let i = 0; i < n; i++) {
+      columns[i % columns.length].appendChild(makeSkeletonCard());
+    }
+  }
+
+  // Vacía el grid y lo llena de skeletons desde cero (primera carga / filtros).
+  function showSkeletonGrid(n: number) {
+    masonry.clear();
+    spreadSkeletons(n);
+  }
+
+  // Atenúa la barra de filtros mientras se recarga el grid (cambio de filtros).
+  function setFiltersLoading(on: boolean) {
+    filterBar.classList.toggle("opacity-60", on);
+    filterBar.classList.toggle("pointer-events-none", on);
+  }
+
+  function buildParams(pageNum: number) {
+    const params = new URLSearchParams({
+      creatorId,
+      username,
+      limit: String(limit),
+      page: String(pageNum),
+      contentFilter: filters.contentFilter,
+      ordenacion: filters.ordenacion,
+      filtroMedia: filters.filtroMedia,
+    });
+    return params.toString();
+  }
+
+  async function fetchHtml(pageNum: number) {
+    // Partial SSR: devuelve las cards como HTML; hasMore/count van en headers.
+    const res = await fetch(`/ars/posts/feed-cards?${buildParams(pageNum)}`, {
+      credentials: "include",
+    });
+    const html = await res.text();
+    return {
+      success: res.ok,
+      html,
+      count: Number(res.headers.get("X-Count") || "0"),
+      hasMore: res.headers.get("X-Has-More") === "true",
+    };
+  }
+
+  async function fetchCounts(): Promise<Record<string, number>> {
+    try {
+      const res = await fetch(`/api/ars/posts/counts?creatorId=${creatorId}`, {
+        credentials: "include",
+      });
+      const data = (await res.json()) as { counts?: Record<string, number> };
+      return data.counts || {};
+    } catch {
+      return {};
+    }
+  }
+
+  // Rellena los badges de count (o los limpia si no hay dato), quitando su
+  // skeleton.
+  function applyCounts(counts: Record<string, number>) {
+    document.querySelectorAll<HTMLElement>("[data-count-id]").forEach((el) => {
+      const id = el.dataset.countId!;
+      el.textContent = counts[id] !== undefined ? `(${counts[id]})` : "";
+    });
+  }
+
+  // Primera carga: el SSR ya pintó los skeletons; el cliente trae counts +
+  // página 1 y reemplaza.
+  async function loadInitial() {
+    try {
+      const [counts, data] = await Promise.all([fetchCounts(), fetchHtml(1)]);
+      applyCounts(counts);
+      setCards(parseCards(data.html || ""));
+      page = 1;
+      hasMore = data.hasMore;
+      emptyEl.classList.toggle("hidden", (data.count || 0) > 0);
+      endEl.classList.toggle("hidden", hasMore);
+    } catch (e) {
+      console.error("Error cargando feed:", e);
+    } finally {
+      isLoading = false;
+    }
+  }
+
+  function init() {
+    if (!creatorId) {
+      applyCounts({});
+      masonry.clear();
+      emptyEl.classList.remove("hidden");
+      return;
+    }
+    isLoading = true;
+    showSkeletonGrid(skeletonCount); // sincrónico: evita el flash del masonry
+    loadInitial();
+  }
+
+  async function loadMore() {
+    if (isLoading || !hasMore || !creatorId) return;
+    isLoading = true;
+    spinner.classList.remove("hidden");
+    try {
+      // Avanza páginas hasta sumar contenido nuevo (una página puede venir
+      // entera de repetidos). Tope para no encadenar peticiones sin fin.
+      let addedTotal = 0;
+      let attempts = 0;
+      while (addedTotal === 0 && hasMore && attempts < 5) {
+        attempts++;
+        const data = await fetchHtml(page + 1);
+        page += 1;
+        hasMore = data.hasMore;
+        if (data.html) addedTotal += appendNew(data.html);
+      }
+      endEl.classList.toggle("hidden", hasMore);
+    } catch (e) {
+      console.error("Error cargando más posts:", e);
+    } finally {
+      spinner.classList.add("hidden");
+      isLoading = false;
+    }
+  }
+
+  async function reset() {
+    if (!creatorId) return;
+    isLoading = true;
+    endEl.classList.add("hidden");
+    emptyEl.classList.add("hidden"); // evita parpadeo del "sin resultados"
+    setFiltersLoading(true);
+    showSkeletonGrid(skeletonCount);
+    try {
+      const data = await fetchHtml(1);
+      setCards(parseCards(data.html || "")); // nueva base tras cambiar filtros
+      page = 1;
+      hasMore = data.hasMore;
+      emptyEl.classList.toggle("hidden", (data.count || 0) > 0);
+      endEl.classList.toggle("hidden", hasMore);
+      window.scrollTo({ top: 0, behavior: "auto" });
+    } catch (e) {
+      console.error("Error aplicando filtros:", e);
+    } finally {
+      setFiltersLoading(false);
+      isLoading = false;
+    }
+  }
+
+  const ACTIVE_FILTER = ["bg-blue-600", "text-white", "shadow-md"];
+  const INACTIVE_FILTER = [
+    "text-gray-500",
+    "hover:text-gray-900",
+    "hover:bg-gray-100/50",
+  ];
+  const ACTIVE_DARK = ["bg-gray-800", "text-white", "shadow-md"];
+
+  function setActive(btn: Element, active: boolean, activeClasses: string[]) {
+    if (active) {
+      btn.classList.add(...activeClasses);
+      btn.classList.remove(...INACTIVE_FILTER);
+    } else {
+      btn.classList.remove(...activeClasses);
+      btn.classList.add(...INACTIVE_FILTER);
+    }
+  }
+
+  function refreshFilterButtons() {
+    document.querySelectorAll<HTMLElement>(".filter-btn").forEach((btn) => {
+      const key = btn.dataset.filter as "contentFilter" | "filtroMedia";
+      const active = filters[key] === btn.dataset.value;
+      setActive(btn, active, ACTIVE_FILTER);
+    });
+  }
+
+  // Filtros de contenido / media
+  document.querySelectorAll<HTMLElement>(".filter-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const key = btn.dataset.filter as "contentFilter" | "filtroMedia";
+      const value = btn.dataset.value || "";
+      // filtroMedia es toggle: volver a clickear el activo lo resetea a "todos".
+      if (key === "filtroMedia" && filters.filtroMedia === value) {
+        filters.filtroMedia = "todos";
+      } else {
+        filters[key] = value;
+      }
+      refreshFilterButtons();
+      syncUrl();
+      reset();
+    });
+  });
+
+  // Orden
+  document.querySelectorAll<HTMLElement>(".sort-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const value = btn.dataset.sort || "recientes";
+      if (filters.ordenacion === value) return;
+      filters.ordenacion = value;
+      document.querySelectorAll(".sort-btn").forEach((b) => {
+        setActive(b, b === btn, ACTIVE_DARK);
+      });
+      syncUrl();
+      reset();
+    });
+  });
+
+  // Vista grid / lista
+  function applyView(value: string) {
+    const changed = value !== currentView;
+    currentView = value;
+    document.querySelectorAll<HTMLElement>(".view-btn").forEach((b) => {
+      setActive(b, b.dataset.view === value, ACTIVE_DARK);
+    });
+    // Re-maqueta las cards ya pintadas con el nuevo nº de columnas.
+    if (changed && masonry.cards.length) masonry.layout(masonry.cards.slice());
+  }
+
+  document.querySelectorAll<HTMLElement>(".view-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      applyView(btn.dataset.view || "grid");
+      syncUrl();
+    });
+  });
+
+  // Scroll infinito
+  const observer = new IntersectionObserver(
+    (entries) => {
+      if (entries[0].isIntersecting) loadMore();
+    },
+    { rootMargin: "300px" },
+  );
+  observer.observe(sentinel);
+
+  // Refleja en los botones el estado inicial leído de la URL (filtros, orden y
+  // vista) antes de la primera carga.
+  refreshFilterButtons();
+  document.querySelectorAll<HTMLElement>(".sort-btn").forEach((b) => {
+    setActive(b, b.dataset.sort === filters.ordenacion, ACTIVE_DARK);
+  });
+  applyView(currentView);
+
+  // Arranca la primera carga (counts + página 1) reemplazando los skeletons SSR.
+  init();
+</script>

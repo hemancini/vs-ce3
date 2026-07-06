@@ -1,0 +1,53 @@
+---
+// Partial SSR: renderiza las cards del feed como HTML para el scroll infinito y
+// los cambios de filtro (mismo PostCard que las páginas). Es un partial de Astro
+// (`export const partial = true`), no un endpoint con experimental_AstroContainer:
+// el container arrastra `node:fs`, que NO existe en el runtime de Cloudflare
+// Workers y hacía que /api/ars/posts/feed-html devolviera 500. Los partials pasan
+// por el pipeline SSR normal, así que funcionan en Pages.
+//
+// La metadata (hasMore/count) viaja en headers porque el cuerpo es HTML puro.
+export const partial = true;
+
+import PostCard from "@/components/ars/PostCard.astro";
+import { fetchArsFeed } from "@/lib/ars/feed";
+
+const sp = Astro.url.searchParams;
+const username = sp.get("username") || "";
+const limit = Number(sp.get("limit") || "10");
+
+const result = await fetchArsFeed(
+  {
+    creatorId: sp.get("creatorId"),
+    limit: sp.get("limit") || undefined,
+    page: sp.get("page") || undefined,
+    contentFilter: sp.get("contentFilter") || undefined,
+    ordenacion: sp.get("ordenacion") || undefined,
+    filtroMedia: sp.get("filtroMedia") || undefined,
+  },
+  Astro.locals.arsmateCookie,
+  Astro.locals.arsmateUserId,
+);
+
+const data = result.data as any;
+const posts =
+  result.ok && data?.success && Array.isArray(data.posts) ? data.posts : [];
+const hasMore = posts.length === limit;
+
+// En el feed global cada post trae su propio autor; usamos ese username para que
+// la card enlace al creador correcto. En el feed por-creador caemos al de la query.
+const postUsername = (post: any) =>
+  post.author?.username || post.user?.username || username;
+
+Astro.response.headers.set("X-Has-More", hasMore ? "true" : "false");
+Astro.response.headers.set("X-Count", String(posts.length));
+Astro.response.headers.set("Content-Type", "text/html; charset=utf-8");
+---
+
+{
+  posts.map((post: any) => (
+    <div class="mb-6 break-inside-avoid">
+      <PostCard post={post} username={postUsername(post)} isDetail={false} />
+    </div>
+  ))
+}

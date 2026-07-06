@@ -1,0 +1,123 @@
+---
+import ArsLayout from "@/layouts/ArsLayout.astro";
+import ProfileHeader from "@/components/ars/ProfileHeader.astro";
+import ImageModal from "@/components/ars/ImageModal.astro";
+import FeedView from "@/components/ars/FeedView.astro";
+import SiteHeader from "@/components/ars/SiteHeader.astro";
+import { fetchArsCreator } from "@/lib/ars/creators";
+
+const { username } = Astro.params;
+const arsmateCookie = Astro.locals.arsmateCookie;
+
+let creator = null;
+const result = await fetchArsCreator(username, arsmateCookie);
+if (result.ok && result.data?.success) {
+  creator = result.data.creator;
+} else if (!result.ok) {
+  console.error("Error SSR profile:", result.error);
+}
+---
+
+<ArsLayout
+  title={`${creator ? `@${creator.username}` : `@${username}`} - Arsmate`}
+  bodyAttrs={{ "data-username": username }}
+>
+  <script slot="head" is:inline src="https://cdn.jsdelivr.net/npm/hls.js@latest"
+  ></script>
+  <main class="max-w-4xl mx-auto pb-20">
+    <!-- Header / Navigation -->
+    <SiteHeader showSearch backLabel="Buscador" title={`@${username}`} />
+
+    <!-- Profile Section (SSR for better SEO/Speed) -->
+    <ProfileHeader creator={creator} />
+
+    <!-- Feed 100% SSR -->
+    <FeedView username={username!} creatorId={creator?.id != null ? String(creator.id) : null} />
+  </main>
+
+  <!-- Image Lightbox Modal -->
+  <ImageModal />
+
+  <script>
+    // Simple global helper for React components to open the existing ImageModal
+    (window as any).openLightbox = (src: string) => {
+      const imageModal = document.getElementById("image-modal")!;
+      const modalImg = document.getElementById("modal-img") as HTMLImageElement;
+
+      modalImg.src = src;
+      imageModal.classList.remove("hidden");
+      imageModal.classList.add("flex");
+      document.body.style.overflow = "hidden";
+      setTimeout(() => {
+        modalImg.classList.remove("scale-95");
+        modalImg.classList.add("scale-100");
+      }, 10);
+    };
+
+    const imageModal = document.getElementById("image-modal")!;
+    const modalImg = document.getElementById("modal-img") as HTMLImageElement;
+
+    function closeImageModal() {
+      modalImg.classList.remove("scale-100");
+      modalImg.classList.add("scale-95");
+      setTimeout(() => {
+        imageModal.classList.add("hidden");
+        imageModal.classList.remove("flex");
+        document.body.style.overflow = "";
+        modalImg.src = "";
+      }, 200);
+    }
+
+    imageModal?.addEventListener("click", (e) => {
+      if (
+        e.target === imageModal ||
+        (e.target as HTMLElement).closest("#close-modal") ||
+        (e.target as HTMLElement).closest(".relative")
+      ) {
+        closeImageModal();
+      }
+    });
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !imageModal.classList.contains("hidden")) {
+        closeImageModal();
+      }
+    });
+  </script>
+
+  <style>
+    .active {
+      box-shadow: 0 2px 6px -2px rgba(37, 99, 235, 0.18);
+    }
+    .sort-btn.active,
+    .view-btn.active {
+      box-shadow: 0 2px 6px -2px rgba(31, 41, 55, 0.13);
+    }
+    .filter-btn,
+    .sort-btn,
+    .view-btn {
+      min-width: 32px;
+      min-height: 28px;
+      padding: 0 0.5rem;
+      border-radius: 0.5rem;
+      line-height: 1.1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .count-badge {
+      font-size: 10px;
+      margin-left: 2px;
+    }
+    .sticky {
+      box-shadow: 0 1px 4px 0 rgba(0, 0, 0, 0.03);
+    }
+    .scrollbar-hide {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+    .scrollbar-hide::-webkit-scrollbar {
+      display: none;
+    }
+  </style>
+</ArsLayout>

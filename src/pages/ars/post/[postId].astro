@@ -1,0 +1,45 @@
+---
+import ArsLayout from "@/layouts/ArsLayout.astro";
+import { fetchArsPost } from "@/lib/ars/posts";
+
+// Permalink corto sin username (https://arsmate.com/post/<id>). Resolvemos el
+// autor con la API de Arsmate (que devuelve el post solo con el postId) y
+// redirigimos a la URL canónica /<username>/post/<id>, que ya tiene toda la
+// lógica del detalle.
+const { postId } = Astro.params as { postId: string };
+const arsmateCookie = Astro.locals.arsmateCookie;
+
+let username: string | null = null;
+try {
+  // Llamada directa, sin loopback HTTP (ver src/lib/ars/posts.ts).
+  const result = await fetchArsPost(postId, null, arsmateCookie);
+  const post = (result.data as { post?: any } | undefined)?.post;
+  if (post) {
+    username = post.author?.username || post.user?.username || null;
+  }
+} catch (e) {
+  console.error("Error resolviendo post -> creador:", e);
+}
+
+if (username) {
+  return Astro.redirect(`/ars/${username.trim()}/post/${postId}`);
+}
+---
+
+<ArsLayout
+  title="Publicación no encontrada - Arsmate"
+  bodyClass="bg-gray-100 min-h-screen font-sans text-gray-800 flex flex-col items-center justify-center px-4 text-center"
+>
+  <h1 class="text-3xl font-bold text-gray-900 mb-2">
+    Publicación no encontrada
+  </h1>
+  <p class="text-gray-600 mb-8">
+    No pudimos localizar la publicación #{postId}.
+  </p>
+  <a
+    href="/ars"
+    class="px-6 py-2 bg-purple-600 text-white rounded-full font-bold shadow-md hover:bg-purple-700 transition-colors"
+  >
+    Volver al Inicio
+  </a>
+</ArsLayout>

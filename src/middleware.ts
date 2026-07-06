@@ -1,10 +1,11 @@
-import { defineMiddleware } from "astro:middleware";
+import { defineMiddleware, sequence } from "astro:middleware";
 import { verifyToken, COOKIE_NAME } from "@/lib/auth";
+import { arsMiddleware } from "@/lib/ars/session";
 
 /** Rutas que no requieren autenticación */
 const PUBLIC_PREFIXES = ["/login", "/api/auth/"];
 
-export const onRequest = defineMiddleware(async (context, next) => {
+const authMiddleware = defineMiddleware(async (context, next) => {
   const { pathname } = new URL(context.request.url);
 
   // Chrome DevTools solicita este archivo automáticamente ("Automatic Workspace
@@ -39,3 +40,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
 
   return next();
 });
+
+// Primero la autenticación de la app, luego la lógica de sesión/cache de Arsmate
+// (que internamente solo actúa sobre las rutas `/ars` y `/api/ars/`).
+export const onRequest = sequence(authMiddleware, arsMiddleware);

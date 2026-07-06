@@ -1,0 +1,141 @@
+---
+import ArsLayout from "@/layouts/ArsLayout.astro";
+import ImageModal from "@/components/ars/ImageModal.astro";
+import PostCard from "@/components/ars/PostCard.astro";
+import SiteHeader from "@/components/ars/SiteHeader.astro";
+import type { ArsmatePost } from "@/types/arsmate";
+import { fetchArsCreator } from "@/lib/ars/creators";
+import { fetchArsPost } from "@/lib/ars/posts";
+
+const { username, postId } = Astro.params as {
+  username: string;
+  postId: string;
+};
+const arsmateCookie = Astro.locals.arsmateCookie;
+
+if (!arsmateCookie) {
+  return Astro.redirect("/login");
+}
+
+let postData: ArsmatePost | null = null;
+let error: string | null = null;
+
+try {
+  // 1. Fetch creator to get ID (llamada directa, sin loopback HTTP)
+  const creatorResult = await fetchArsCreator(username, arsmateCookie);
+
+  if (!creatorResult.ok || !creatorResult.data?.success || !creatorResult.data.creator) {
+    throw new Error("No se pudo encontrar el creador");
+  }
+
+  const creatorId = String(creatorResult.data.creator.id);
+
+  // 2. Fetch the specific post (llamada directa, sin loopback HTTP)
+  const postResult = await fetchArsPost(postId, creatorId, arsmateCookie);
+  const postJson = postResult.data as { success?: boolean; post?: ArsmatePost } | undefined;
+
+  if (!postResult.ok || !postJson?.success || !postJson.post) {
+    throw new Error("No se pudo cargar la publicación");
+  }
+
+  postData = postJson.post;
+} catch (e: any) {
+  console.error("Error SSR detail page:", e);
+  error = e.message;
+}
+---
+
+<ArsLayout
+  title={`${postData ? `Post ${postId} de @${username}` : "Cargando..."} - Arsmate`}
+  bodyAttrs={{ "data-username": username, "data-postid": postId }}
+>
+  <script slot="head" is:inline src="https://cdn.jsdelivr.net/npm/hls.js@latest"
+  ></script>
+  <main class="max-w-4xl mx-auto pb-20">
+    <!-- Header / Navigation -->
+    <SiteHeader
+      showSearch
+      backHref={`/ars/${username}`}
+      backLabel={`@${username}`}
+      title="Publicación"
+    />
+
+    <!-- Post Container -->
+    <div id="post-container" class="px-4 py-8 max-w-2xl mx-auto space-y-6">
+      {
+        postData ? (
+          <PostCard post={postData} username={username} isDetail={true} />
+        ) : (
+          <div id="error-message" class="py-12 text-center text-red-500 px-4">
+            <p class="text-lg font-medium">
+              {error || "No se pudo cargar la publicación"}
+            </p>
+            <a
+              href={`/ars/${username}`}
+              class="mt-4 inline-block text-blue-600 hover:underline"
+            >
+              Volver al perfil
+            </a>
+          </div>
+        )
+      }
+    </div>
+  </main>
+
+  <ImageModal />
+
+  <script>
+    import { initPostCards, initDetailVideos } from "@/scripts/ars/postcard-client";
+
+    const postContainer = document.getElementById("post-container")!;
+
+    // Modal elements (copied from username.astro)
+    (window as any).openLightbox = (src: string) => {
+      const imageModal = document.getElementById("image-modal")!;
+      const modalImg = document.getElementById("modal-img") as HTMLImageElement;
+
+      modalImg.src = src;
+      imageModal.classList.remove("hidden");
+      imageModal.classList.add("flex");
+      document.body.style.overflow = "hidden";
+      setTimeout(() => {
+        modalImg.classList.remove("scale-95");
+        modalImg.classList.add("scale-100");
+      }, 10);
+    };
+
+    const imageModal = document.getElementById("image-modal")!;
+    const modalImg = document.getElementById("modal-img") as HTMLImageElement;
+
+    function closeImageModal() {
+      modalImg.classList.remove("scale-100");
+      modalImg.classList.add("scale-95");
+      setTimeout(() => {
+        imageModal.classList.add("hidden");
+        imageModal.classList.remove("flex");
+        document.body.style.overflow = "";
+        modalImg.src = "";
+      }, 200);
+    }
+
+    imageModal?.addEventListener("click", (e) => {
+      if (
+        e.target === imageModal ||
+        (e.target as HTMLElement).closest("#close-modal") ||
+        (e.target as HTMLElement).closest(".relative")
+      ) {
+        closeImageModal();
+      }
+    });
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !imageModal.classList.contains("hidden")) {
+        closeImageModal();
+      }
+    });
+
+    // Interactividad (JSON/MP4/lightbox/navegación) + players del detalle.
+    initPostCards();
+    initDetailVideos(postContainer);
+  </script>
+</ArsLayout>
