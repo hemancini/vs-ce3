@@ -114,14 +114,17 @@ async function firebaseLogin() {
   }
 }
 
-// ─── Registrar sesión del dispositivo (Cloud Function) ───────────────────────
-// vodscene aplica sesión única. Sin registrar, el enforcement puede cortar la
-// reproducción. Devuelve el payload de sesión (útil para inspeccionar y, si hay
-// que sembrarlo, ver qué claves usa el front).
-let sessionData = null;
+// ─── Registrar sesión del dispositivo (Cloud Function callable) ──────────────
+// registerUserSession es un CALLABLE de Firebase Functions (envelope {data:{}}).
+// Devuelve {result:{token, sessionId}}, donde `token` es un JWT que el player
+// (watch2) espera encontrar en la COOKIE `payperview_access_token`: su guard
+// hace `const e=H("payperview_access_token"); if(f=F(),!f||!e) throw "No se
+// encontro sesion activa"` — y tanto H() como F() leen esa cookie. Por eso lo
+// registramos aquí y sembramos la cookie antes de abrir el player.
+let deviceSessionToken = null; // JWT de sesión de dispositivo
 async function registerUserSession() {
   if (!fbSession?.idToken) return null;
-  console.log('🪪 Registrando sesión (registerUserSession)...');
+  console.log('🪪 Registrando sesión de dispositivo (registerUserSession)...');
   try {
     const res = await fetch(CF_REGISTER_SESSION_URL, {
       method: 'POST',
@@ -131,17 +134,17 @@ async function registerUserSession() {
         Referer: `${VODSCENE_ORIGIN}/`,
         Origin: VODSCENE_ORIGIN,
       },
-      body: JSON.stringify({ uid: fbSession.localId, userAgent: 'Mozilla/5.0', platform: 'web' }),
+      body: JSON.stringify({ data: { deviceType: 'desktop', platform: 'web' } }),
     });
-    let data = {};
-    try { data = await res.json(); } catch { /* sin JSON */ }
-    if (!res.ok) {
-      console.warn(`⚠️  registerUserSession: ${res.status} — continuo con el idToken igualmente.`);
-    } else {
-      sessionData = data;
-      console.log(`✅ Sesión registrada. keys: ${Object.keys(data).join(', ') || '(vacío)'}`);
+    const data = await res.json().catch(() => ({}));
+    const token = data?.result?.token;
+    if (!res.ok || !token) {
+      console.warn(`⚠️  registerUserSession: ${res.status} sin token — ${JSON.stringify(data).slice(0, 140)}`);
+      return null;
     }
-    return data;
+    deviceSessionToken = token;
+    console.log(`✅ Sesión de dispositivo registrada. sessionId=${String(data.result.sessionId).slice(0, 12)}…`);
+    return token;
   } catch (err) {
     console.warn('⚠️  Error en registerUserSession:', err.message);
     return null;
@@ -397,6 +400,60 @@ const TARGET_URL = process.argv.find((a) => a.startsWith('http')) || VODSCENE_BA
       return;
     }
 
+    // ─── getVideoProxyURL / batchGetVideoProxyURLs → forzar hasAccess ────────
+    // Callables de Firebase Functions que devuelven las URLs de manifiesto y el
+    // gating de acceso: {result:{ hasAccess, useDRM, userData:{isAdmin,...} }}.
+    // El backend pone hasAccess=false si la cuenta no está suscrita/compró. Lo
+    // reescribimos a true para que el player intente reproducir.
+    // OJO: esto sólo engaña al FRONTEND. Si el video es useDRM=true, la licencia
+    // Widevine/EZDRM se valida en el servidor (con userId+videoId), y el
+    // manifiesto /api/video/<id>/master.mpd puede estar gateado server-side: en
+    // ese caso NO reproducirá aunque forcemos hasAccess. El tráiler/preview
+    // (sin DRM) sí suele reproducir. Para bajar el video completo con DRM, usa
+    // scripts/vodscene/download-video.mjs (maneja las claves).
+    if (request.method() === 'POST' && /cloudfunctions\.net\/(getVideoProxyURL|batchGetVideoProxyURLs)\b/.test(url)) {
+      try {
+        const reqHeaders = { ...request.headers() };
+        delete reqHeaders['host'];
+        reqHeaders['referer'] = `${VODSCENE_ORIGIN}/`;
+        reqHeaders['origin'] = VODSCENE_ORIGIN;
+
+        const upstream = await fetch(url, {
+          method: 'POST',
+          headers: reqHeaders,
+          body: request.postData() || undefined,
+        });
+        const data = await upstream.json();
+        const grant = (v) => {
+          if (!v || typeof v !== 'object') return;
+          if ('hasAccess' in v) v.hasAccess = true;
+          if (v.userData && typeof v.userData === 'object') {
+            v.userData.isAdmin = true;
+            v.userData.hasPurchased = true;
+            v.userData.hasSubscription = true;
+          }
+        };
+        const r = data?.result;
+        if (r) {
+          grant(r);
+          if (Array.isArray(r.videos)) r.videos.forEach(grant);
+        }
+        console.log(`🔥 ${new URL(url).pathname} → hasAccess forzado a true`);
+        route.fulfill({
+          status: upstream.status,
+          contentType: 'application/json',
+          body: JSON.stringify(data),
+          headers: { 'Access-Control-Allow-Origin': '*' },
+        });
+      } catch (err) {
+        console.error('❌ Error interceptando video proxy:', err.message);
+        route.continue({
+          headers: { ...request.headers(), referer: `${VODSCENE_ORIGIN}/`, origin: VODSCENE_ORIGIN },
+        });
+      }
+      return;
+    }
+
     // ─── Forzar Referer/Origin en las APIs de Google ─────────────────────────
     // La apiKey de Firebase está restringida por HTTP-referer a vodscene.com. El
     // SDK del navegador a veces emite estas llamadas con Referer vacío → 403. Se
@@ -478,6 +535,26 @@ const TARGET_URL = process.argv.find((a) => a.startsWith('http')) || VODSCENE_BA
   // ─── Login: Firebase API + registro de sesión ──────────────────────────────
   await firebaseLogin();
   await registerUserSession();
+
+  // Sembrar la cookie que el player exige (payperview_access_token = JWT de
+  // sesión de dispositivo). Sin ella, watch2 aborta con "No se encontro sesion
+  // activa". La ponemos en el contexto ANTES de cualquier navegación.
+  if (deviceSessionToken) {
+    try {
+      await context.addCookies([{
+        name: 'payperview_access_token',
+        value: deviceSessionToken,
+        domain: 'vodscene.com',
+        path: '/',
+        secure: true,
+        httpOnly: false,
+        sameSite: 'Lax',
+      }]);
+      console.log('🍪 Cookie payperview_access_token sembrada.');
+    } catch (e) {
+      console.error('❌ Error sembrando cookie de sesión:', e.message);
+    }
+  }
 
   // Abrir el origen primero (necesario para que exista el IndexedDB del origen).
   console.log(`🌍 Abriendo: ${VODSCENE_BASE}`);
@@ -562,7 +639,7 @@ const TARGET_URL = process.argv.find((a) => a.startsWith('http')) || VODSCENE_BA
       // Esa redirección aborta nuestra propia recarga con ERR_ABORTED: es la
       // señal de que la sesión fue reconocida, no un fallo. Lo toleramos.
       try {
-        await page.reload({ waitUntil: 'networkidle', timeout: 60000 });
+        await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
       } catch (e) {
         if (/ERR_ABORTED|frame was detached/.test(e.message)) {
           console.log('   ↳ El SPA redirigió solo (sesión reconocida) — recarga abortada, es lo esperado.');
@@ -575,14 +652,34 @@ const TARGET_URL = process.argv.find((a) => a.startsWith('http')) || VODSCENE_BA
     }
   }
 
-  // Navegar al destino final si es distinto del home.
+  // Diagnóstico: vuelca localStorage a output/ para ver con qué clave guarda el
+  // SPA el token de sesión de dispositivo y si persiste entre páginas (MPA).
+  const dumpLocalStorage = async (tag) => {
+    try {
+      const data = await page.evaluate(() => {
+        const grab = (s) => { const o = {}; for (let i = 0; i < s.length; i++) { const k = s.key(i); o[k] = s.getItem(k); } return o; };
+        return { local: grab(localStorage), session: grab(sessionStorage), cookies: document.cookie };
+      });
+      fs.writeFileSync(path.join(OUTPUT_DIR, `localstorage-${tag}.json`), JSON.stringify(data, null, 2));
+      console.log(`🗄️  [${tag}] local: ${Object.keys(data.local).join(',') || '∅'} | session: ${Object.keys(data.session).join(',') || '∅'} | cookies: ${data.cookies ? data.cookies.split(';').map((c) => c.split('=')[0].trim()).join(',') : '∅'}`);
+    } catch (e) {
+      console.warn(`no pude volcar localStorage[${tag}]:`, e.message);
+    }
+  };
+
+  // ─── Navegar directo al destino (player) ───────────────────────────────────
+  // El player (/watch2) exige la cookie payperview_access_token, ya sembrada
+  // arriba tras registerUserSession. Con eso su guard pasa y no hace falta el
+  // rodeo por /catalog. (--direct se mantiene por compatibilidad; el flujo ya es
+  // directo.)
   if (TARGET_URL !== VODSCENE_BASE) {
     console.log(`🌍 Navegando a: ${TARGET_URL}`);
     try {
-      await page.goto(TARGET_URL, { waitUntil: 'networkidle', timeout: 60000 });
+      await page.goto(TARGET_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
     } catch (e) {
       console.error('❌ Error navigating:', e.message);
     }
+    await dumpLocalStorage('target');
   }
 
   console.log('✅ Navegador listo.');
