@@ -72,7 +72,7 @@ const contentFilters = [
   <!-- Filtros -->
   <div
     id="feed-filters"
-    class="sticky top-[44px] z-40 bg-gray-100/95 backdrop-blur-md border-b border-gray-200/20 mb-3 px-2 py-1 transition-opacity duration-200"
+    class="sticky top-[44px] z-40 bg-gray-100/95 dark:bg-slate-800/95 backdrop-blur-md border-b border-gray-200/20 dark:border-slate-800/20 mb-3 px-2 py-1 transition-opacity duration-200"
   >
     <div class="flex flex-row items-center gap-2 min-h-[36px]">
       <div
@@ -89,7 +89,7 @@ const contentFilters = [
                 "filter-btn shrink-0 whitespace-nowrap px-2 py-1 rounded-lg text-xs font-semibold transition-all duration-200 cursor-pointer flex items-center",
                 f.value === "all"
                   ? "bg-blue-600 text-white shadow-md"
-                  : "text-gray-500 hover:text-gray-900 hover:bg-gray-100/50",
+                  : "text-gray-500 hover:text-gray-900 hover:bg-gray-100/50 dark:text-slate-400 dark:hover:text-slate-100 dark:hover:bg-slate-800/50",
               ]}
               title={f.label}
             >
@@ -111,7 +111,7 @@ const contentFilters = [
               </span>
               <span class="count-badge ml-0.5 opacity-60" data-count-id={f.id}>
                 {f.id !== "all" && (
-                  <span class="count-skeleton inline-block w-4 h-2 rounded bg-gray-300/70 animate-pulse align-middle" />
+                  <span class="count-skeleton inline-block w-4 h-2 rounded bg-gray-300/70 dark:bg-slate-700/70 animate-pulse align-middle" />
                 )}
               </span>
             </button>
@@ -123,7 +123,7 @@ const contentFilters = [
         <button
           type="button"
           data-sort="recientes"
-          class="sort-btn px-2 py-1 rounded-lg text-xs font-semibold transition-all duration-200 cursor-pointer bg-gray-800 text-white shadow-md"
+          class="sort-btn px-2 py-1 rounded-lg text-xs font-semibold transition-all duration-200 cursor-pointer bg-gray-800 dark:bg-slate-600 text-white shadow-md"
           title="Recientes"
         >
           <svg
@@ -143,7 +143,7 @@ const contentFilters = [
         <button
           type="button"
           data-sort="antiguos"
-          class="sort-btn px-2 py-1 rounded-lg text-xs font-semibold transition-all duration-200 cursor-pointer text-gray-500 hover:text-gray-900 hover:bg-gray-100/50"
+          class="sort-btn px-2 py-1 rounded-lg text-xs font-semibold transition-all duration-200 cursor-pointer text-gray-500 hover:text-gray-900 hover:bg-gray-100/50 dark:text-slate-400 dark:hover:text-slate-100 dark:hover:bg-slate-800/50"
           title="Antiguos"
         >
           <svg
@@ -162,14 +162,14 @@ const contentFilters = [
           </svg>
         </button>
         <div
-          class="w-px h-5 bg-gray-300/70 mx-1 self-center"
+          class="w-px h-5 bg-gray-300/70 dark:bg-slate-700/70 mx-1 self-center"
           aria-hidden="true"
         >
         </div>
         <button
           type="button"
           data-view="list"
-          class="view-btn px-2 py-1 rounded-lg text-xs font-semibold transition-all duration-200 cursor-pointer text-gray-500 hover:text-gray-900 hover:bg-gray-100/50"
+          class="view-btn px-2 py-1 rounded-lg text-xs font-semibold transition-all duration-200 cursor-pointer text-gray-500 hover:text-gray-900 hover:bg-gray-100/50 dark:text-slate-400 dark:hover:text-slate-100 dark:hover:bg-slate-800/50"
           title="Vista lista"
         >
           <svg
@@ -189,7 +189,7 @@ const contentFilters = [
         <button
           type="button"
           data-view="grid"
-          class="view-btn px-2 py-1 rounded-lg text-xs font-semibold transition-all duration-200 cursor-pointer bg-gray-800 text-white shadow-md"
+          class="view-btn px-2 py-1 rounded-lg text-xs font-semibold transition-all duration-200 cursor-pointer bg-gray-800 dark:bg-slate-600 text-white shadow-md"
           title="Vista mosaico"
         >
           <svg
@@ -228,17 +228,17 @@ const contentFilters = [
   <!-- Plantilla para clonar skeletons desde JS (cambio de filtros). -->
   <template id="skeleton-template"><SkeletonCard /></template>
 
-  <div id="feed-empty" class:list={["py-20 text-center text-gray-500 hidden"]}>
+  <div id="feed-empty" class:list={["py-20 text-center text-gray-500 dark:text-slate-400 hidden"]}>
     No se encontraron publicaciones con estos filtros.
   </div>
 
-  <div id="feed-sentinel" class="py-12 text-center text-gray-500">
+  <div id="feed-sentinel" class="py-12 text-center text-gray-500 dark:text-slate-400">
     <div id="feed-spinner" class="hidden">
       <div class="flex flex-col items-center justify-center gap-3">
         <span
           class="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"
         ></span>
-        <span class="text-xs font-medium text-gray-400 animate-pulse"
+        <span class="text-xs font-medium text-gray-400 dark:text-slate-500 animate-pulse"
           >Cargando más publicaciones…</span
         >
       </div>
@@ -247,7 +247,7 @@ const contentFilters = [
 
   <div
     id="feed-end"
-    class:list={["py-12 text-center text-gray-500 border-t mt-8 hidden"]}
+    class:list={["py-12 text-center text-gray-500 dark:text-slate-400 border-t dark:border-slate-800 mt-8 hidden"]}
   >
     No hay más publicaciones para mostrar.
   </div>
@@ -513,8 +513,11 @@ const contentFilters = [
     "text-gray-500",
     "hover:text-gray-900",
     "hover:bg-gray-100/50",
+    "dark:text-slate-400",
+    "dark:hover:text-slate-100",
+    "dark:hover:bg-slate-800/50",
   ];
-  const ACTIVE_DARK = ["bg-gray-800", "text-white", "shadow-md"];
+  const ACTIVE_DARK = ["bg-gray-800", "dark:bg-slate-600", "text-white", "shadow-md"];
 
   function setActive(btn: Element, active: boolean, activeClasses: string[]) {
     if (active) {

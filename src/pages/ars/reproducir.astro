@@ -18,14 +18,14 @@ const totalPosts = feeds.reduce((acc, f) => acc + f.counts.total, 0);
 
     {
       feeds.length === 0 ? (
-        <div class="py-24 text-center text-gray-500">
-          No se encontraron JSON en <code>scripts/output/</code>.
+        <div class="py-24 text-center text-gray-500 dark:text-slate-400">
+          No se encontraron JSON en <code class="dark:text-slate-300">scripts/output/</code>.
         </div>
       ) : (
         <>
           {/* Resumen */}
           <div class="px-4 pt-4">
-            <p class="text-xs text-gray-500">
+            <p class="text-xs text-gray-500 dark:text-slate-400">
               {feeds.length} creador{feeds.length === 1 ? "" : "es"} ·{" "}
               {totalPosts} publicaciones capturadas
             </p>
@@ -43,7 +43,7 @@ const totalPosts = feeds.reduce((acc, f) => acc + f.counts.total, 0);
                   "creator-tab shrink-0 px-3 py-1.5 rounded-full text-xs font-bold border transition-colors",
                   i === 0
                     ? "bg-blue-600 text-white border-blue-600"
-                    : "bg-white text-gray-600 border-gray-200 hover:border-blue-300",
+                    : "bg-white dark:bg-slate-800 text-gray-600 dark:text-slate-300 border-gray-200 dark:border-slate-700 hover:border-blue-300",
                 ]}
                 data-target={`creator-${i}`}
               >
@@ -60,10 +60,10 @@ const totalPosts = feeds.reduce((acc, f) => acc + f.counts.total, 0);
               class:list={["creator-section", i !== 0 && "hidden"]}
             >
               <div class="px-4 pt-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                <h2 class="text-lg font-extrabold text-gray-900">
+                <h2 class="text-lg font-extrabold text-gray-900 dark:text-slate-100">
                   @{feed.creatorInfo.username}
                 </h2>
-                <span class="text-[11px] text-gray-400">
+                <span class="text-[11px] text-gray-400 dark:text-slate-500">
                   🎥 {feed.counts.videos} · 📷 {feed.counts.photos} · 🖼️{" "}
                   {feed.counts.mixed} · 📝 {feed.counts.text}
                   {feed.creatorInfo.endDate
@@ -85,7 +85,7 @@ const totalPosts = feeds.reduce((acc, f) => acc + f.counts.total, 0);
               </div>
 
               {feed.posts.length === 0 && (
-                <div class="py-16 text-center text-gray-500">
+                <div class="py-16 text-center text-gray-500 dark:text-slate-400">
                   Sin publicaciones reproducibles.
                 </div>
               )}
@@ -132,8 +132,11 @@ const totalPosts = feeds.reduce((acc, f) => acc + f.counts.total, 0);
           t.classList.toggle("text-white", active);
           t.classList.toggle("border-blue-600", active);
           t.classList.toggle("bg-white", !active);
+          t.classList.toggle("dark:bg-slate-800", !active);
           t.classList.toggle("text-gray-600", !active);
+          t.classList.toggle("dark:text-slate-300", !active);
           t.classList.toggle("border-gray-200", !active);
+          t.classList.toggle("dark:border-slate-700", !active);
         });
 
         window.scrollTo({ top: 0, behavior: "smooth" });

@@ -14,7 +14,7 @@ interface Props {
 
 const {
   title = "Arsmate",
-  bodyClass = "bg-gray-100 min-h-screen font-sans text-gray-800",
+  bodyClass = "bg-gray-100 dark:bg-[#0a0a0a] min-h-screen font-sans text-gray-800 dark:text-slate-200 transition-colors",
   lang = "es",
   bodyAttrs = {},
 } = Astro.props;
@@ -26,6 +26,31 @@ const {
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width" />
     <title>{title}</title>
+    <script is:inline>
+      // Aplica el tema antes de pintar para evitar el flash de color (FOUC).
+      (function () {
+        try {
+          const stored = localStorage.getItem("ars-theme");
+          const prefersDark = window.matchMedia(
+            "(prefers-color-scheme: dark)",
+          ).matches;
+          if (stored === "dark" || (!stored && prefersDark)) {
+            document.documentElement.classList.add("dark");
+          }
+        } catch (e) {}
+      })();
+
+      // Toggle de tema global vía delegación: cualquier elemento con
+      // [data-theme-toggle] alterna el modo oscuro y lo persiste.
+      document.addEventListener("click", function (e) {
+        const toggle = e.target.closest && e.target.closest("[data-theme-toggle]");
+        if (!toggle) return;
+        const isDark = document.documentElement.classList.toggle("dark");
+        try {
+          localStorage.setItem("ars-theme", isDark ? "dark" : "light");
+        } catch (err) {}
+      });
+    </script>
     <slot name="head" />
   </head>
   <body class={bodyClass} {...bodyAttrs}>

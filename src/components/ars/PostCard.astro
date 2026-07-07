@@ -192,20 +192,20 @@ const hasText = !!(post.text || post.description);
 
 <div
   class:list={[
-    "post-card relative block bg-white rounded-xl shadow-sm overflow-hidden border border-gray-100 hover:shadow-md transition-all duration-300",
+    "post-card relative block bg-white dark:bg-slate-900 rounded-xl shadow-sm overflow-hidden border border-gray-100 dark:border-slate-800 hover:shadow-md transition-all duration-300",
     !isDetail && "hover:border-blue-200 cursor-pointer",
   ]}
   data-post-id={post.id}
   data-username={username}
   data-is-detail={isDetail ? "true" : "false"}
 >
-  <header class="p-4 flex justify-between items-center border-b border-gray-50">
+  <header class="p-4 flex justify-between items-center border-b border-gray-50 dark:border-slate-800">
     <div
       class="relative z-10 flex items-center gap-2 cursor-pointer"
       data-profile-link={username}
     >
       <div
-        class="w-8 h-8 rounded-full bg-gray-200 overflow-hidden shadow-inner"
+        class="w-8 h-8 rounded-full bg-gray-200 dark:bg-slate-800 overflow-hidden shadow-inner"
       >
         <img
           src={getProxiedUrl(post.creatorAvatar || post.user?.avatar)}
@@ -216,18 +216,18 @@ const hasText = !!(post.text || post.description);
       <div>
         <a
           href={`/ars/${username}`}
-          class="font-bold text-sm text-gray-900 hover:text-blue-600 hover:underline transition-colors"
+          class="font-bold text-sm text-gray-900 dark:text-slate-100 hover:text-blue-600 dark:hover:text-blue-400 hover:underline transition-colors"
         >
           {post.creatorName || post.user?.username || username}
         </a>
         <p
-          class="text-[10px] text-gray-500 uppercase tracking-tight font-medium"
+          class="text-[10px] text-gray-500 dark:text-slate-400 uppercase tracking-tight font-medium"
         >
           {formatDate(post.date || post.createdAt)}
         </p>
       </div>
     </div>
-    <div class="flex gap-3 text-xs text-gray-500">
+    <div class="flex gap-3 text-xs text-gray-500 dark:text-slate-400">
       <span class="flex items-center gap-1">
         <svg
           xmlns="http://www.w3.org/2000/svg"
@@ -269,7 +269,7 @@ const hasText = !!(post.text || post.description);
     {
       hasText && (
         <p
-          class="relative z-10 text-sm text-gray-800 whitespace-pre-wrap mb-4"
+          class="relative z-10 text-sm text-gray-800 dark:text-slate-100 whitespace-pre-wrap mb-4"
           set:html={linkifyDescription(post.text || post.description)}
         />
       )
@@ -280,15 +280,15 @@ const hasText = !!(post.text || post.description);
         <div
           class:list={[
             mediaViews.length > 1 ? "grid grid-cols-2 gap-1" : "block",
-            "relative z-10 rounded-lg overflow-hidden border border-gray-100",
+            "relative z-10 rounded-lg overflow-hidden border border-gray-100 dark:border-slate-800",
           ]}
         >
           {mediaViews.map((m: any) => {
             if (m.kind === "audio") {
               return (
-                <div class="audio-player p-4 bg-gradient-to-br from-gray-50 to-gray-100">
+                <div class="audio-player p-4 bg-gradient-to-br from-gray-50 to-gray-100 dark:from-slate-800 dark:to-slate-800">
                   <div class="flex items-center gap-3 mb-3">
-                    <div class="w-12 h-12 rounded-full bg-white border border-blue-200 flex items-center justify-center text-blue-500 shrink-0 shadow-sm">
+                    <div class="w-12 h-12 rounded-full bg-white dark:bg-slate-900 border border-blue-200 flex items-center justify-center text-blue-500 shrink-0 shadow-sm">
                       <svg
                         xmlns="http://www.w3.org/2000/svg"
                         fill="none"
@@ -305,10 +305,10 @@ const hasText = !!(post.text || post.description);
                       </svg>
                     </div>
                     <div class="min-w-0">
-                      <p class="font-semibold text-sm text-gray-900 leading-tight">
+                      <p class="font-semibold text-sm text-gray-900 dark:text-slate-100 leading-tight">
                         Nota de voz
                       </p>
-                      <p class="text-xs text-gray-500">Audio</p>
+                      <p class="text-xs text-gray-500 dark:text-slate-400">Audio</p>
                     </div>
                   </div>
 
@@ -335,7 +335,7 @@ const hasText = !!(post.text || post.description);
                         <path d="M6 5h4v14H6zM14 5h4v14h-4z" />
                       </svg>
                     </button>
-                    <span class="audio-time text-xs text-gray-600 tabular-nums shrink-0">
+                    <span class="audio-time text-xs text-gray-600 dark:text-slate-300 tabular-nums shrink-0">
                       0:00 / 0:00
                     </span>
                     <input
@@ -350,8 +350,8 @@ const hasText = !!(post.text || post.description);
                   </div>
 
                   <div class="flex items-center gap-2 mt-3">
-                    <span class="text-xs text-gray-500">Velocidad:</span>
-                    <select class="audio-speed text-xs border border-gray-200 rounded px-1.5 py-0.5 bg-white text-gray-700 cursor-pointer">
+                    <span class="text-xs text-gray-500 dark:text-slate-400">Velocidad:</span>
+                    <select class="audio-speed text-xs border border-gray-200 dark:border-slate-800 rounded px-1.5 py-0.5 bg-white dark:bg-slate-900 text-gray-700 dark:text-slate-300 cursor-pointer">
                       <option value="0.5">0.5x</option>
                       <option value="1" selected>
                         1x
@@ -429,7 +429,7 @@ const hasText = !!(post.text || post.description);
             if (m.kind === "image") {
               return (
                 <div
-                  class="post-image aspect-square bg-gray-100 relative overflow-hidden group cursor-zoom-in"
+                  class="post-image aspect-square bg-gray-100 dark:bg-slate-800 relative overflow-hidden group cursor-zoom-in"
                   data-src={m.src}
                 >
                   <img
@@ -517,11 +517,11 @@ const hasText = !!(post.text || post.description);
     }
 
     <div
-      class="relative z-10 mt-4 pt-4 border-t border-gray-50 flex justify-between items-center"
+      class="relative z-10 mt-4 pt-4 border-t border-gray-50 dark:border-slate-800 flex justify-between items-center"
     >
       <button
         type="button"
-        class="json-toggle text-[10px] text-gray-400 hover:text-gray-600 transition-colors uppercase tracking-widest font-bold"
+        class="json-toggle text-[10px] text-gray-400 dark:text-slate-500 hover:text-gray-600 dark:hover:text-slate-300 transition-colors uppercase tracking-widest font-bold"
       >
         Ver JSON Raw
       </button>

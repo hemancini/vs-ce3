@@ -56,3 +56,5 @@ frida-server-*
 # ─── Docker ─────────────────────────────────────────────────────────────────────
 docker-widevine/tmp/
 scripts/**/output/
+**/network_full.jsonl
+.playwright-mcp/

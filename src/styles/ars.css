@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* Modo oscuro basado en clase (.dark en <html>) en lugar del prefers-color-scheme por defecto de Tailwind v4. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @layer utilities {
   @keyframes progress-indeterminate {
     0% {

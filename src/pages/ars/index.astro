@@ -4,19 +4,59 @@ import ArsLayout from "@/layouts/ArsLayout.astro";
 
 <ArsLayout
   title="Arsmate - Live Search"
-  bodyClass="bg-[#fafafa] min-h-screen font-sans text-slate-800 antialiased"
+  bodyClass="bg-[#fafafa] dark:bg-[#0a0a0a] min-h-screen font-sans text-slate-800 dark:text-slate-200 antialiased transition-colors"
 >
   <main class="container mx-auto px-4 py-8">
     <header
-      class="mb-6 flex flex-wrap items-center justify-between gap-4 pt-4 border-b border-slate-100 pb-4"
+      class="mb-6 flex flex-wrap items-center justify-between gap-4 pt-4 border-b border-slate-100 dark:border-slate-800 pb-4"
     >
       <div class="flex items-center gap-3">
-        <h1 class="text-xl font-bold text-slate-900 tracking-tight">Arsmate</h1>
+        <h1
+          class="text-xl font-bold text-slate-900 dark:text-slate-100 tracking-tight"
+        >
+          Arsmate
+        </h1>
       </div>
       <div class="flex items-center gap-2">
+        <button
+          data-theme-toggle
+          type="button"
+          aria-label="Cambiar tema"
+          title="Cambiar tema"
+          class="p-2 text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 transition-all shadow-sm"
+        >
+          <svg
+            class="theme-icon-sun h-4 w-4 hidden dark:block"
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"
+            ></path>
+          </svg>
+          <svg
+            class="theme-icon-moon h-4 w-4 block dark:hidden"
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"
+            ></path>
+          </svg>
+        </button>
         <a
           href="/ars/posts"
-          class="px-3 py-1.5 text-xs font-bold text-white bg-slate-900 rounded-lg hover:bg-slate-800 transition-all shadow-sm"
+          class="px-3 py-1.5 text-xs font-bold text-white bg-slate-900 dark:bg-slate-800 dark:text-slate-100 border border-transparent dark:border-slate-700 rounded-lg hover:bg-slate-800 dark:hover:bg-slate-700 transition-all shadow-sm"
         >
           Feed 📸
         </a>
@@ -27,7 +67,7 @@ import ArsLayout from "@/layouts/ArsLayout.astro";
     <div class="flex flex-col md:flex-row items-center gap-4 mb-8">
       <div class="relative grow max-w-md group">
         <div
-          class="absolute inset-y-0 left-4 flex items-center pointer-events-none text-slate-400 group-focus-within:text-slate-600 transition-colors"
+          class="absolute inset-y-0 left-4 flex items-center pointer-events-none text-slate-400 dark:text-slate-500 group-focus-within:text-slate-600 dark:group-focus-within:text-slate-300 transition-colors"
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -47,28 +87,30 @@ import ArsLayout from "@/layouts/ArsLayout.astro";
           type="text"
           id="search-input"
           placeholder="Buscar creador..."
-          class="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl shadow-sm focus:ring-2 focus:ring-slate-100 focus:border-slate-300 outline-none transition-all text-sm placeholder:text-slate-400"
+          class="w-full pl-10 pr-4 py-2 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-xl shadow-sm focus:ring-2 focus:ring-slate-100 dark:focus:ring-slate-700 focus:border-slate-300 dark:focus:border-slate-600 outline-none transition-all text-sm placeholder:text-slate-400 dark:placeholder:text-slate-500"
         />
       </div>
 
-      <div class="flex items-center gap-1 p-1 bg-slate-100 rounded-xl">
+      <div
+        class="flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl"
+      >
         <button
           data-sort="followers"
-          class="sort-btn px-3 py-1.5 bg-white text-slate-900 rounded-lg shadow-sm transition-all font-bold text-[10px] uppercase tracking-wider flex items-center gap-1.5"
+          class="sort-btn px-3 py-1.5 bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 rounded-lg shadow-sm transition-all font-bold text-[10px] uppercase tracking-wider flex items-center gap-1.5"
         >
           <span>Seguidores</span>
           <span class="indicator">▼</span>
         </button>
         <button
           data-sort="likes"
-          class="sort-btn px-3 py-1.5 text-slate-500 rounded-lg hover:bg-white hover:text-slate-900 transition-all font-bold text-[10px] uppercase tracking-wider flex items-center gap-1.5"
+          class="sort-btn px-3 py-1.5 text-slate-500 dark:text-slate-400 rounded-lg hover:bg-white dark:hover:bg-slate-700 hover:text-slate-900 dark:hover:text-slate-100 transition-all font-bold text-[10px] uppercase tracking-wider flex items-center gap-1.5"
         >
           <span>Likes</span>
           <span class="indicator"></span>
         </button>
         <button
           data-sort="posts"
-          class="sort-btn px-3 py-1.5 text-slate-500 rounded-lg hover:bg-white hover:text-slate-900 transition-all font-bold text-[10px] uppercase tracking-wider flex items-center gap-1.5"
+          class="sort-btn px-3 py-1.5 text-slate-500 dark:text-slate-400 rounded-lg hover:bg-white dark:hover:bg-slate-700 hover:text-slate-900 dark:hover:text-slate-100 transition-all font-bold text-[10px] uppercase tracking-wider flex items-center gap-1.5"
         >
           <span>Posts</span>
           <span class="indicator"></span>
@@ -84,29 +126,29 @@ import ArsLayout from "@/layouts/ArsLayout.astro";
       <!-- Skeleton Loader (se cargará vía JS o estará presente al inicio) -->
       {
         Array.from({ length: 12 }).map((_) => (
-          <div class="bg-white rounded-2xl border border-slate-100 shadow-sm flex flex-col overflow-hidden animate-pulse">
-            <div class="h-32 bg-slate-200" />
+          <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm flex flex-col overflow-hidden animate-pulse">
+            <div class="h-32 bg-slate-200 dark:bg-slate-800" />
             <div class="relative px-3 pb-4 pt-8 grow flex flex-col">
-              <div class="absolute -top-7 left-3 border-2 border-white rounded-xl w-14 h-14 bg-slate-200 shadow-sm" />
-              <div class="h-4 bg-slate-200 rounded w-3/4 mb-2" />
-              <div class="h-3 bg-slate-100 rounded w-1/2 mb-4" />
-              <div class="grid grid-cols-3 gap-y-2 gap-x-1 mb-4 border-y border-slate-50 py-2">
+              <div class="absolute -top-7 left-3 border-2 border-white dark:border-slate-900 rounded-xl w-14 h-14 bg-slate-200 dark:bg-slate-800 shadow-sm" />
+              <div class="h-4 bg-slate-200 dark:bg-slate-800 rounded w-3/4 mb-2" />
+              <div class="h-3 bg-slate-100 dark:bg-slate-800 rounded w-1/2 mb-4" />
+              <div class="grid grid-cols-3 gap-y-2 gap-x-1 mb-4 border-y border-slate-50 dark:border-slate-800 py-2">
                 <div class="flex flex-col gap-1">
-                  <div class="h-3 bg-slate-200 rounded w-1/2" />
-                  <div class="h-2 bg-slate-100 rounded w-3/4" />
+                  <div class="h-3 bg-slate-200 dark:bg-slate-800 rounded w-1/2" />
+                  <div class="h-2 bg-slate-100 dark:bg-slate-800 rounded w-3/4" />
                 </div>
                 <div class="flex flex-col gap-1 items-center">
-                  <div class="h-3 bg-slate-200 rounded w-1/2" />
-                  <div class="h-2 bg-slate-100 rounded w-3/4" />
+                  <div class="h-3 bg-slate-200 dark:bg-slate-800 rounded w-1/2" />
+                  <div class="h-2 bg-slate-100 dark:bg-slate-800 rounded w-3/4" />
                 </div>
                 <div class="flex flex-col gap-1 items-end">
-                  <div class="h-3 bg-slate-200 rounded w-1/2" />
-                  <div class="h-2 bg-slate-100 rounded w-3/4" />
+                  <div class="h-3 bg-slate-200 dark:bg-slate-800 rounded w-1/2" />
+                  <div class="h-2 bg-slate-100 dark:bg-slate-800 rounded w-3/4" />
                 </div>
               </div>
               <div class="mt-auto flex justify-between items-center">
-                <div class="h-4 bg-slate-200 rounded w-1/4" />
-                <div class="h-3 bg-slate-100 rounded w-1/4" />
+                <div class="h-4 bg-slate-200 dark:bg-slate-800 rounded w-1/4" />
+                <div class="h-3 bg-slate-100 dark:bg-slate-800 rounded w-1/4" />
               </div>
             </div>
           </div>
@@ -115,7 +157,10 @@ import ArsLayout from "@/layouts/ArsLayout.astro";
     </div>
 
     <!-- Loader -->
-    <div id="loader" class="py-12 text-center text-gray-500 hidden">
+    <div
+      id="loader"
+      class="py-12 text-center text-gray-500 dark:text-slate-400 hidden"
+    >
       <span
         class="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"
       ></span>
@@ -129,12 +174,14 @@ import ArsLayout from "@/layouts/ArsLayout.astro";
     <!-- Empty State -->
     <div
       id="empty-state"
-      class="hidden py-20 text-center text-gray-500 col-span-full"
+      class="hidden py-20 text-center text-gray-500 dark:text-slate-400 col-span-full"
     >
       <p class="text-xl">
         No se encontraron creadores que coincidan con tu búsqueda.
       </p>
-      <button id="clear-search" class="mt-4 text-blue-600 hover:underline"
+      <button
+        id="clear-search"
+        class="mt-4 text-blue-600 dark:text-blue-400 hover:underline"
         >Limpiar búsqueda</button
       >
     </div>
@@ -168,43 +215,71 @@ import ArsLayout from "@/layouts/ArsLayout.astro";
 
     let isInitialLoad = true;
 
+    // Sincroniza los filtros actuales con la URL (sin recargar ni ensuciar
+    // el historial). Se omiten los valores por defecto para mantenerla limpia.
+    function syncUrl() {
+      const params = new URLSearchParams(window.location.search);
+
+      if (currentSearch) {
+        params.set("q", currentSearch);
+      } else {
+        params.delete("q");
+      }
+
+      if (currentSort !== "followers") {
+        params.set("sort", currentSort);
+      } else {
+        params.delete("sort");
+      }
+
+      if (currentOrder !== "desc") {
+        params.set("order", currentOrder);
+      } else {
+        params.delete("order");
+      }
+
+      const query = params.toString();
+      const newUrl = `${window.location.pathname}${query ? `?${query}` : ""}`;
+      history.replaceState(null, "", newUrl);
+    }
+
     // Plantilla de Skeleton
     const SKELETON_TEMPLATE = `
-                <div class="bg-white rounded-2xl border border-slate-100 shadow-sm flex flex-col overflow-hidden animate-pulse">
-                    <div class="h-32 bg-slate-200"></div>
+                <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm flex flex-col overflow-hidden animate-pulse">
+                    <div class="h-32 bg-slate-200 dark:bg-slate-800"></div>
                     <div class="relative px-3 pb-4 pt-8 grow flex flex-col">
-                        <div class="absolute -top-7 left-3 border-2 border-white rounded-xl w-14 h-14 bg-slate-200 shadow-sm"></div>
-                        <div class="h-4 bg-slate-200 rounded w-3/4 mb-2"></div>
-                        <div class="h-3 bg-slate-100 rounded w-1/2 mb-4"></div>
-                        <div class="grid grid-cols-3 gap-y-2 gap-x-1 mb-4 border-y border-slate-50 py-2">
+                        <div class="absolute -top-7 left-3 border-2 border-white dark:border-slate-900 rounded-xl w-14 h-14 bg-slate-200 dark:bg-slate-800 shadow-sm"></div>
+                        <div class="h-4 bg-slate-200 dark:bg-slate-800 rounded w-3/4 mb-2"></div>
+                        <div class="h-3 bg-slate-100 dark:bg-slate-800 rounded w-1/2 mb-4"></div>
+                        <div class="grid grid-cols-3 gap-y-2 gap-x-1 mb-4 border-y border-slate-50 dark:border-slate-800 py-2">
                             <div class="flex flex-col gap-1">
-                                <div class="h-3 bg-slate-200 rounded w-1/2"></div>
-                                <div class="h-2 bg-slate-100 rounded w-3/4"></div>
+                                <div class="h-3 bg-slate-200 dark:bg-slate-800 rounded w-1/2"></div>
+                                <div class="h-2 bg-slate-100 dark:bg-slate-800 rounded w-3/4"></div>
                             </div>
                             <div class="flex flex-col gap-1 items-center">
-                                <div class="h-3 bg-slate-200 rounded w-1/2"></div>
-                                <div class="h-2 bg-slate-100 rounded w-3/4"></div>
+                                <div class="h-3 bg-slate-200 dark:bg-slate-800 rounded w-1/2"></div>
+                                <div class="h-2 bg-slate-100 dark:bg-slate-800 rounded w-3/4"></div>
                             </div>
                             <div class="flex flex-col gap-1 items-end">
-                                <div class="h-3 bg-slate-200 rounded w-1/2"></div>
-                                <div class="h-2 bg-slate-100 rounded w-3/4"></div>
+                                <div class="h-3 bg-slate-200 dark:bg-slate-800 rounded w-1/2"></div>
+                                <div class="h-2 bg-slate-100 dark:bg-slate-800 rounded w-3/4"></div>
                             </div>
                             <div class="flex flex-col gap-1">
-                                <div class="h-3 bg-slate-200 rounded w-1/2"></div>
-                                <div class="h-2 bg-slate-100 rounded w-3/4"></div>
+                                <div class="h-3 bg-slate-200 dark:bg-slate-800 rounded w-1/2"></div>
+                                <div class="h-2 bg-slate-100 dark:bg-slate-800 rounded w-3/4"></div>
                             </div>
                             <div class="flex flex-col gap-1 items-center">
-                                <div class="h-3 bg-slate-200 rounded w-1/2"></div>
-                                <div class="h-2 bg-slate-100 rounded w-3/4"></div>
+                                <div class="h-3 bg-slate-200 dark:bg-slate-800 rounded w-1/2"></div>
+                                <div class="h-2 bg-slate-100 dark:bg-slate-800 rounded w-3/4"></div>
                             </div>
                             <div class="flex flex-col gap-1 items-end opacity-0">
-                                <div class="h-3 bg-slate-200 rounded w-1/2"></div>
-                                <div class="h-2 bg-slate-100 rounded w-3/4"></div>
+                                <div class="h-3 bg-slate-200 dark:bg-slate-800 rounded w-1/2"></div>
+                                <div class="h-2 bg-slate-100 dark:bg-slate-800 rounded w-3/4"></div>
                             </div>
                         </div>
                         <div class="mt-auto flex justify-between items-center">
-                            <div class="h-4 bg-slate-200 rounded w-1/4"></div>
-                            <div class="h-3 bg-slate-100 rounded w-1/4"></div>
+                            <div class="h-4 bg-slate-200 dark:bg-slate-800 rounded w-1/4"></div>
+                            <div class="h-3 bg-slate-100 dark:bg-slate-800 rounded w-1/4"></div>
                         </div>
                     </div>
                 </div>
@@ -222,22 +297,22 @@ import ArsLayout from "@/layouts/ArsLayout.astro";
       const posts = creator.stats?.posts || 0;
 
       return `
-                    <a href="/ars/${creator.username}" class="creator-card group bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-xl hover:border-slate-200 transition-all duration-300 flex flex-col cursor-pointer overflow-hidden animate-fade-in" data-username="${creator.username}">
-						<div class="relative h-32 bg-slate-100 overflow-hidden">
+                    <a href="/ars/${creator.username}" class="creator-card group bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm hover:shadow-xl dark:hover:shadow-black/40 hover:border-slate-200 dark:hover:border-slate-700 transition-all duration-300 flex flex-col cursor-pointer overflow-hidden animate-fade-in" data-username="${creator.username}">
+						<div class="relative h-32 bg-slate-100 dark:bg-slate-800 overflow-hidden">
 							${
                 cover
                   ? `
                                 <img src="${cover}" alt="Cover de ${creator.username}" class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" loading="lazy" decoding="async" />
                             `
                   : `
-                                <div class="w-full h-full bg-slate-200"></div>
+                                <div class="w-full h-full bg-slate-200 dark:bg-slate-800"></div>
                             `
               }
                             <div class="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
 						</div>
 						
                         <div class="relative px-3 pb-4 pt-8 grow flex flex-col">
-                            <div class="absolute -top-7 left-3 border-2 border-white rounded-xl overflow-hidden w-14 h-14 bg-slate-200 shadow-sm transition-transform duration-300 group-hover:-translate-y-1">
+                            <div class="absolute -top-7 left-3 border-2 border-white dark:border-slate-900 rounded-xl overflow-hidden w-14 h-14 bg-slate-200 dark:bg-slate-800 shadow-sm transition-transform duration-300 group-hover:-translate-y-1">
                                 ${
                                   avatar
                                     ? `
@@ -250,7 +325,7 @@ import ArsLayout from "@/layouts/ArsLayout.astro";
                             </div>
 
                             <div class="flex items-center gap-1 mb-0.5">
-                                <h2 class="text-sm font-bold truncate text-slate-900 leading-tight" title="${creator.name || creator.username}">${creator.name || creator.username}</h2>
+                                <h2 class="text-sm font-bold truncate text-slate-900 dark:text-slate-100 leading-tight" title="${creator.name || creator.username}">${creator.name || creator.username}</h2>
                                 ${
                                   creator.isVerified
                                     ? `
@@ -261,28 +336,28 @@ import ArsLayout from "@/layouts/ArsLayout.astro";
                                     : ""
                                 }
                             </div>
-                            <p class="text-[10px] text-slate-400 font-bold tracking-tight mb-3">@${creator.username}</p>
-                            
-                            <div class="grid grid-cols-3 gap-y-2 gap-x-1 mb-4 border-y border-slate-50 py-2">
+                            <p class="text-[10px] text-slate-400 dark:text-slate-500 font-bold tracking-tight mb-3">@${creator.username}</p>
+
+                            <div class="grid grid-cols-3 gap-y-2 gap-x-1 mb-4 border-y border-slate-50 dark:border-slate-800 py-2">
                                 <div class="flex flex-col">
-                                    <span class="text-[11px] font-bold text-slate-900 leading-none">${subs}</span>
-                                    <span class="text-[8px] text-slate-400 font-bold uppercase tracking-tighter">Fans</span>
+                                    <span class="text-[11px] font-bold text-slate-900 dark:text-slate-100 leading-none">${subs}</span>
+                                    <span class="text-[8px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-tighter">Fans</span>
                                 </div>
                                 <div class="flex flex-col text-center">
-                                    <span class="text-[11px] font-bold text-slate-900 leading-none">${likes}</span>
-                                    <span class="text-[8px] text-slate-400 font-bold uppercase tracking-tighter">Likes</span>
+                                    <span class="text-[11px] font-bold text-slate-900 dark:text-slate-100 leading-none">${likes}</span>
+                                    <span class="text-[8px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-tighter">Likes</span>
                                 </div>
                                 <div class="flex flex-col text-right">
-                                    <span class="text-[11px] font-bold text-slate-900 leading-none">${posts}</span>
-                                    <span class="text-[8px] text-slate-400 font-bold uppercase tracking-tighter">Posts</span>
+                                    <span class="text-[11px] font-bold text-slate-900 dark:text-slate-100 leading-none">${posts}</span>
+                                    <span class="text-[8px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-tighter">Posts</span>
                                 </div>
                             </div>
 
                             <div class="mt-auto flex justify-between items-center">
-                                <span class="text-[11px] font-bold ${isFree ? "text-emerald-500" : "text-slate-900"}">
-                                    ${isFree ? "Gratis" : `$${creator.price} <span class="text-[8px] text-slate-400 font-medium">USD</span>`}
+                                <span class="text-[11px] font-bold ${isFree ? "text-emerald-500" : "text-slate-900 dark:text-slate-100"}">
+                                    ${isFree ? "Gratis" : `$${creator.price} <span class="text-[8px] text-slate-400 dark:text-slate-500 font-medium">USD</span>`}
                                 </span>
-                                <span class="text-[9px] font-bold text-slate-300 group-hover:text-slate-900 transition-colors uppercase tracking-widest">
+                                <span class="text-[9px] font-bold text-slate-300 dark:text-slate-600 group-hover:text-slate-900 dark:group-hover:text-slate-100 transition-colors uppercase tracking-widest">
                                     Perfil
                                 </span>
                             </div>
@@ -414,6 +489,7 @@ import ArsLayout from "@/layouts/ArsLayout.astro";
       clearTimeout(timeout);
       timeout = setTimeout(() => {
         currentSearch = (e.target as HTMLInputElement).value;
+        syncUrl();
         fetchCreators();
       }, 500);
     });
@@ -422,9 +498,40 @@ import ArsLayout from "@/layouts/ArsLayout.astro";
       if (e.key === "Enter") {
         clearTimeout(timeout);
         currentSearch = (e.target as HTMLInputElement).value;
+        syncUrl();
         fetchCreators();
       }
     });
+
+    // Actualiza los indicadores visuales de los botones de orden
+    // según currentSort/currentOrder.
+    function updateSortUI() {
+      sortButtons.forEach((b) => {
+        const indicator = b.querySelector(".indicator");
+        if (b.getAttribute("data-sort") === currentSort) {
+          b.classList.add(
+            "bg-white",
+            "dark:bg-slate-700",
+            "shadow-sm",
+            "text-slate-900",
+            "dark:text-slate-100",
+          );
+          b.classList.remove("text-slate-500", "dark:text-slate-400");
+          indicator!.textContent = currentOrder === "desc" ? "▼" : "▲";
+        } else {
+          b.classList.remove(
+            "bg-white",
+            "dark:bg-slate-700",
+            "shadow-sm",
+            "text-slate-900",
+            "dark:text-slate-100",
+            "bg-slate-100",
+          );
+          b.classList.add("text-slate-500", "dark:text-slate-400");
+          indicator!.textContent = "";
+        }
+      });
+    }
 
     // Sorting
     sortButtons.forEach((btn) => {
@@ -437,25 +544,8 @@ import ArsLayout from "@/layouts/ArsLayout.astro";
           currentOrder = "desc";
         }
 
-        // Update UI indicators
-        sortButtons.forEach((b) => {
-          const indicator = b.querySelector(".indicator");
-          if (b === btn) {
-            b.classList.add("bg-white", "shadow-sm", "text-slate-900");
-            b.classList.remove("text-slate-500");
-            indicator!.textContent = currentOrder === "desc" ? "▼" : "▲";
-          } else {
-            b.classList.remove(
-              "bg-white",
-              "shadow-sm",
-              "text-slate-900",
-              "bg-slate-100",
-            );
-            b.classList.add("text-slate-500");
-            indicator!.textContent = "";
-          }
-        });
-
+        updateSortUI();
+        syncUrl();
         fetchCreators();
       });
     });
@@ -464,17 +554,31 @@ import ArsLayout from "@/layouts/ArsLayout.astro";
     document.getElementById("clear-search")?.addEventListener("click", () => {
       searchInput.value = "";
       currentSearch = "";
+      syncUrl();
       fetchCreators();
     });
 
-    // Búsqueda inicial desde la URL (?q=...), p.ej. al llegar desde el feed.
-    const initialQuery = new URLSearchParams(window.location.search)
-      .get("q")
-      ?.trim();
+    // Estado inicial desde la URL (?q=...&sort=...&order=...), p.ej. al
+    // llegar desde el feed o al recargar/compartir la página.
+    const initialParams = new URLSearchParams(window.location.search);
+
+    const initialQuery = initialParams.get("q")?.trim();
     if (initialQuery) {
       currentSearch = initialQuery;
       searchInput.value = initialQuery;
     }
+
+    const initialSort = initialParams.get("sort");
+    if (initialSort && ["followers", "likes", "posts"].includes(initialSort)) {
+      currentSort = initialSort;
+    }
+
+    const initialOrder = initialParams.get("order");
+    if (initialOrder && ["asc", "desc"].includes(initialOrder)) {
+      currentOrder = initialOrder;
+    }
+
+    updateSortUI();
 
     // Initial load
     fetchCreators();

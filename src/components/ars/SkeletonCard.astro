@@ -9,29 +9,29 @@ const { tall = false } = Astro.props;
 ---
 
 <div
-  class="skeleton-card bg-white rounded-xl shadow-sm overflow-hidden border border-gray-100 animate-pulse"
+  class="skeleton-card bg-white dark:bg-slate-900 rounded-xl shadow-sm overflow-hidden border border-gray-100 dark:border-slate-800 animate-pulse"
 >
-  <div class="p-4 flex items-center gap-2 border-b border-gray-50">
-    <div class="w-8 h-8 rounded-full bg-gray-200 flex-shrink-0"></div>
+  <div class="p-4 flex items-center gap-2 border-b border-gray-50 dark:border-slate-800">
+    <div class="w-8 h-8 rounded-full bg-gray-200 dark:bg-slate-800 flex-shrink-0"></div>
     <div class="flex-1 space-y-1.5">
-      <div class="h-3 w-24 bg-gray-200 rounded"></div>
-      <div class="h-2 w-16 bg-gray-100 rounded"></div>
+      <div class="h-3 w-24 bg-gray-200 dark:bg-slate-800 rounded"></div>
+      <div class="h-2 w-16 bg-gray-100 dark:bg-slate-800 rounded"></div>
     </div>
   </div>
   <div class="p-4">
     <div class="space-y-2 mb-4">
-      <div class="h-3 w-full bg-gray-200 rounded"></div>
-      <div class="h-3 w-2/3 bg-gray-200 rounded"></div>
+      <div class="h-3 w-full bg-gray-200 dark:bg-slate-800 rounded"></div>
+      <div class="h-3 w-2/3 bg-gray-200 dark:bg-slate-800 rounded"></div>
     </div>
     <div
-      class:list={[tall ? "aspect-[3/4]" : "aspect-square", "bg-gray-200 rounded-lg"]}
+      class:list={[tall ? "aspect-[3/4]" : "aspect-square", "bg-gray-200 dark:bg-slate-800 rounded-lg"]}
     >
     </div>
     <div
-      class="mt-4 pt-4 border-t border-gray-50 flex justify-between items-center"
+      class="mt-4 pt-4 border-t border-gray-50 dark:border-slate-800 flex justify-between items-center"
     >
-      <div class="h-2 w-16 bg-gray-100 rounded"></div>
-      <div class="h-4 w-12 bg-gray-100 rounded-full"></div>
+      <div class="h-2 w-16 bg-gray-100 dark:bg-slate-800 rounded"></div>
+      <div class="h-4 w-12 bg-gray-100 dark:bg-slate-800 rounded-full"></div>
     </div>
   </div>
 </div>
