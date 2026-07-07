@@ -245,7 +245,11 @@ const hasText = !!(post.text || post.description);
         </svg>
         {formatNumber(post.likes_count || post.likes || 0)}
       </span>
-      <span class="flex items-center gap-1">
+      <button
+        type="button"
+        class="comments-toggle relative z-10 flex items-center gap-1 hover:text-blue-500 dark:hover:text-blue-400 transition-colors cursor-pointer"
+        aria-label="Ver comentarios"
+      >
         <svg
           xmlns="http://www.w3.org/2000/svg"
           fill="none"
@@ -261,7 +265,7 @@ const hasText = !!(post.text || post.description);
           ></path>
         </svg>
         {formatNumber(post.comments_count || post.comments || 0)}
-      </span>
+      </button>
     </div>
   </header>
 
@@ -563,6 +567,28 @@ const hasText = !!(post.text || post.description);
     <pre
       tabindex="0"
       class="json-content relative z-10 hidden mt-4 p-4 bg-gray-900 text-gray-100 rounded-lg text-[10px] overflow-auto max-h-60 shadow-inner select-text cursor-text outline-none">{JSON.stringify(post, null, 2)}</pre>
+
+    <div
+      class="comments-section relative z-10 hidden mt-4 pt-4 border-t border-gray-50 dark:border-slate-800"
+      data-post-id={post.id}
+    >
+      <p
+        class="text-[10px] text-gray-400 dark:text-slate-500 uppercase tracking-widest font-bold mb-3"
+      >
+        Comentarios
+      </p>
+      <div class="comments-list space-y-3"></div>
+      <p
+        class="comments-status hidden text-xs text-gray-400 dark:text-slate-500 text-center py-2"
+      >
+      </p>
+      <button
+        type="button"
+        class="comments-more hidden mt-3 w-full text-[10px] font-bold uppercase tracking-widest text-blue-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors py-1"
+      >
+        Ver más comentarios
+      </button>
+    </div>
   </div>
 
   {

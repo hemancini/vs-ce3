@@ -222,8 +222,125 @@ function wireAudio(container: HTMLElement): HTMLAudioElement | null {
   return audio;
 }
 
+// --- Comentarios ---
+// Se cargan lazy desde /api/ars/posts/{id}/comments al abrir la sección.
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function formatCommentDate(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const diffMs = Date.now() - d.getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return "ahora";
+  if (mins < 60) return `hace ${mins} min`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `hace ${hours} h`;
+  return d.toLocaleDateString("es-CL", { day: "numeric", month: "short", year: "numeric" });
+}
+
+function renderComment(c: any): string {
+  const user = c?.user || {};
+  const name = escapeHtml(user.name || user.username || "Usuario");
+  const avatar = typeof user.avatarUrl === "string" ? user.avatarUrl : "";
+  const initial = escapeHtml((user.name || user.username || "?").trim().charAt(0).toUpperCase());
+  const avatarHtml = avatar
+    ? `<img src="${escapeHtml(avatar)}" class="w-7 h-7 rounded-full object-cover bg-gray-200 dark:bg-slate-700 ring-1 ring-black/5 dark:ring-white/10 shrink-0" alt="" loading="lazy" onerror="this.outerHTML='<div class=&quot;w-7 h-7 rounded-full bg-gray-200 dark:bg-slate-700 ring-1 ring-black/5 dark:ring-white/10 flex items-center justify-center text-[10px] font-bold text-gray-500 dark:text-slate-200 shrink-0&quot;>${initial}</div>'" />`
+    : `<div class="w-7 h-7 rounded-full bg-gray-200 dark:bg-slate-700 ring-1 ring-black/5 dark:ring-white/10 flex items-center justify-center text-[10px] font-bold text-gray-500 dark:text-slate-200 shrink-0">${initial}</div>`;
+  const likes = Number(c?.likesCount) || 0;
+  const likesHtml = likes > 0 ? `<span class="text-[10px] text-gray-400 dark:text-slate-500 ml-2">♥ ${likes}</span>` : "";
+  return `
+    <div class="flex items-start gap-2">
+      ${avatarHtml}
+      <div class="min-w-0 flex-1">
+        <p class="text-xs leading-tight">
+          <span class="font-bold text-gray-900 dark:text-slate-100">${name}</span>
+          <span class="text-gray-400 dark:text-slate-500 ml-1">${escapeHtml(formatCommentDate(c?.createdAt || ""))}</span>
+          ${likesHtml}
+        </p>
+        <p class="text-sm text-gray-800 dark:text-slate-100 whitespace-pre-wrap break-words mt-0.5">${escapeHtml(c?.text || "")}</p>
+      </div>
+    </div>`;
+}
+
+async function loadComments(section: HTMLElement, page: number) {
+  if (section.dataset.loading === "1") return;
+  section.dataset.loading = "1";
+  const postId = section.dataset.postId;
+  const list = section.querySelector<HTMLElement>(".comments-list");
+  const status = section.querySelector<HTMLElement>(".comments-status");
+  const moreBtn = section.querySelector<HTMLElement>(".comments-more");
+  if (status) {
+    status.textContent = "Cargando comentarios…";
+    status.classList.remove("hidden");
+  }
+  moreBtn?.classList.add("hidden");
+
+  try {
+    const res = await fetch(`/api/ars/posts/${postId}/comments?page=${page}&limit=10`);
+    const data = await res.json();
+    if (!res.ok || !data?.success) throw new Error(data?.error || `HTTP ${res.status}`);
+
+    const comments: any[] = Array.isArray(data.comments) ? data.comments : [];
+    if (list) list.insertAdjacentHTML("beforeend", comments.map(renderComment).join(""));
+    section.dataset.page = String(page);
+
+    if (status) {
+      if (page === 1 && comments.length === 0) {
+        status.textContent = "Sin comentarios todavía";
+      } else {
+        status.classList.add("hidden");
+      }
+    }
+    if (data.hasMore) moreBtn?.classList.remove("hidden");
+  } catch {
+    if (status) {
+      status.textContent = "No se pudieron cargar los comentarios";
+      status.classList.remove("hidden");
+    }
+    // Permite reintentar al volver a abrir/pedir más.
+    if (page === 1) delete section.dataset.loaded;
+  } finally {
+    delete section.dataset.loading;
+  }
+}
+
 function onClick(e: MouseEvent) {
   const target = e.target as HTMLElement;
+
+  // Comentarios: toggle de la sección (carga lazy la primera vez)
+  const commentsToggle = target.closest<HTMLElement>(".comments-toggle");
+  if (commentsToggle) {
+    e.preventDefault();
+    e.stopPropagation();
+    const section = commentsToggle
+      .closest(".post-card")
+      ?.querySelector<HTMLElement>(".comments-section");
+    if (section) {
+      section.classList.toggle("hidden");
+      if (!section.classList.contains("hidden") && section.dataset.loaded !== "1") {
+        section.dataset.loaded = "1";
+        loadComments(section, 1);
+      }
+    }
+    return;
+  }
+
+  // Comentarios: paginación
+  const commentsMore = target.closest<HTMLElement>(".comments-more");
+  if (commentsMore) {
+    e.preventDefault();
+    e.stopPropagation();
+    const section = commentsMore.closest<HTMLElement>(".comments-section");
+    if (section) loadComments(section, (Number(section.dataset.page) || 1) + 1);
+    return;
+  }
 
   // 0. Reproducir / pausar nota de voz
   const audioBtn = target.closest<HTMLElement>(".audio-play");
@@ -297,7 +414,7 @@ function onClick(e: MouseEvent) {
   // 6. No navegar al hacer click en controles/elementos interactivos
   if (
     target.closest(
-      "button, a, video, input, select, .audio-player, .video-player-container, .video-wrapper, .json-content",
+      "button, a, video, input, select, .audio-player, .video-player-container, .video-wrapper, .json-content, .comments-section",
     )
   ) {
     return;

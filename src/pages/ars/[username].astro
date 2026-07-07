@@ -32,7 +32,12 @@ if (result.ok && result.data?.success) {
     <ProfileHeader creator={creator} />
 
     <!-- Feed 100% SSR -->
-    <FeedView username={username!} creatorId={creator?.id != null ? String(creator.id) : null} />
+    <FeedView
+      username={username!}
+      creatorId={creator?.id != null ? String(creator.id) : null}
+      videosCount={creator?.stats?.videos ?? creator?.stats?.videos_count ?? null}
+      photosCount={creator?.stats?.photos ?? creator?.stats?.photos_count ?? null}
+    />
   </main>
 
   <!-- Image Lightbox Modal -->

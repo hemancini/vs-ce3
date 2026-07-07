@@ -4,10 +4,19 @@ import SkeletonCard from "@/components/ars/SkeletonCard.astro";
 interface Props {
   username: string;
   creatorId?: string | null;
+  videosCount?: number | null;
+  photosCount?: number | null;
 }
 
-const { username, creatorId } = Astro.props;
+const { username, creatorId, videosCount = null, photosCount = null } = Astro.props;
 const limit = 10;
+
+// Counts conocidos ya en SSR (vienen de las stats del perfil): se pintan de
+// inmediato junto al icono. El endpoint de counts solo devuelve los de tipo de
+// contenido (free/subscription/ppv), no videos/fotos.
+const ssrCounts: Record<string, number> = {};
+if (videosCount != null) ssrCounts.videos = videosCount;
+if (photosCount != null) ssrCounts.fotos = photosCount;
 
 // El feed y los counts ya no se piden en SSR: la página pinta de inmediato el
 // cascarón (filtros + grid de skeletons) y el cliente trae la primera página al
@@ -68,6 +77,7 @@ const contentFilters = [
   data-limit={limit}
   data-has-more="false"
   data-skeleton-count={SKELETON_COUNT}
+  data-ssr-counts={JSON.stringify(ssrCounts)}
 >
   <!-- Filtros -->
   <div
@@ -110,9 +120,11 @@ const contentFilters = [
                 </svg>
               </span>
               <span class="count-badge ml-0.5 opacity-60" data-count-id={f.id}>
-                {f.id !== "all" && (
-                  <span class="count-skeleton inline-block w-4 h-2 rounded bg-gray-300/70 dark:bg-slate-700/70 animate-pulse align-middle" />
-                )}
+                {ssrCounts[f.id] !== undefined
+                  ? `(${ssrCounts[f.id]})`
+                  : f.id !== "all" && (
+                      <span class="count-skeleton inline-block w-4 h-2 rounded bg-gray-300/70 dark:bg-slate-700/70 animate-pulse align-middle" />
+                    )}
               </span>
             </button>
           ))
@@ -421,12 +433,20 @@ const contentFilters = [
     }
   }
 
+  // Counts que el SSR ya conoce (videos/fotos, desde las stats del perfil): el
+  // endpoint de counts no los trae, así que se preservan al aplicar la respuesta.
+  const ssrCounts = JSON.parse(root.dataset.ssrCounts || "{}") as Record<
+    string,
+    number
+  >;
+
   // Rellena los badges de count (o los limpia si no hay dato), quitando su
   // skeleton.
   function applyCounts(counts: Record<string, number>) {
+    const merged = { ...ssrCounts, ...counts };
     document.querySelectorAll<HTMLElement>("[data-count-id]").forEach((el) => {
       const id = el.dataset.countId!;
-      el.textContent = counts[id] !== undefined ? `(${counts[id]})` : "";
+      el.textContent = merged[id] !== undefined ? `(${merged[id]})` : "";
     });
   }
 
