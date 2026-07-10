@@ -45,10 +45,10 @@
         id="timeline-container"
         class="relative group/timeline flex h-3 w-full cursor-pointer items-center pointer-events-auto select-none"
       >
-        <!-- Preview Tooltip -->
+        <!-- Preview Tooltip (fixed: escapa el overflow-hidden del player/card) -->
         <div
           id="preview-tooltip"
-          class="absolute bottom-7 left-0 -translate-x-1/2 pointer-events-none opacity-0 transition-opacity duration-200 flex flex-col items-center gap-1.5 z-30"
+          class="fixed -translate-x-1/2 pointer-events-none opacity-0 transition-opacity duration-200 flex flex-col items-center gap-1.5 z-300"
         >
           <!-- Thumbnail wrapper: canvas shows last frame instantly; hidden video seeks in background -->
           <div
@@ -206,7 +206,8 @@
   #preview-tooltip {
     transition:
       opacity 0.2s ease,
-      left 0.05s linear;
+      left 0.05s linear,
+      top 0.05s linear;
   }
 
   /* Styling for Volume Slider Range input */
@@ -486,11 +487,15 @@
       }
 
       const tooltipWidth = previewTooltip.offsetWidth || 160;
+      const tooltipHeight = previewTooltip.offsetHeight || 120;
       const xOffset = clientX - rect.left;
       const minX = tooltipWidth / 2;
       const maxX = rect.width - tooltipWidth / 2;
       const clampedX = Math.max(minX, Math.min(maxX, xOffset));
-      previewTooltip.style.left = `${clampedX}px`;
+      // El tooltip es position:fixed (coordenadas de viewport) para que no
+      // quede recortado por el overflow-hidden del player ni de la card.
+      previewTooltip.style.left = `${rect.left + clampedX}px`;
+      previewTooltip.style.top = `${Math.max(8, rect.top - tooltipHeight - 12)}px`;
       previewTooltip.style.opacity = "1";
     }
     function hideTimelineHover() {
