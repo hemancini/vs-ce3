@@ -2,8 +2,7 @@
 //
 // Multicuenta de vodscene. Cada cuenta guarda las credenciales de Firebase
 // (email + contraseña) cifradas en KV (VS_C3_KV, clave `vodscene:accounts`).
-// La cuenta ACTIVA es la que usa el endpoint de Firestore para autenticarse, en
-// lugar de las vars en duro VODSCENE_EMAIL / VODSCENE_PASSWORD.
+// La cuenta ACTIVA es la que usa el endpoint de Firestore para autenticarse.
 //
 // El cifrado reutiliza el helper AES-256-GCM de Sheer (SHEER_KV_SECRET). La
 // lectura tolera datos en texto plano (passthrough) por compatibilidad.
@@ -162,17 +161,14 @@ export async function loadActiveCredentials(
 }
 
 /**
- * Resuelve las credenciales a usar: la cuenta activa en KV o, como respaldo,
- * las vars VODSCENE_EMAIL / VODSCENE_PASSWORD (secrets) si existieran.
+ * Resuelve las credenciales a usar: la cuenta activa guardada en KV (multicuenta,
+ * gestionada desde el avatar de /vodscene). Devuelve null si no hay ninguna.
  */
 export async function resolveCredentials(
   env: any,
-): Promise<{ email: string; password: string; source: "account" | "env" } | null> {
+): Promise<{ email: string; password: string; source: "account" } | null> {
   const active = await loadActiveCredentials(env);
   if (active && active.email && active.password) return { ...active, source: "account" };
-  const email = envVar(env, "VODSCENE_EMAIL");
-  const password = envVar(env, "VODSCENE_PASSWORD");
-  if (email && password) return { email, password, source: "env" };
   return null;
 }
 

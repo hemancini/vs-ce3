@@ -3,6 +3,7 @@ import ArsLayout from "@/layouts/ArsLayout.astro";
 import PostCard from "@/components/ars/PostCard.astro";
 import ImageModal from "@/components/ars/ImageModal.astro";
 import SiteHeader from "@/components/ars/SiteHeader.astro";
+import LoginRequired from "@/components/ars/LoginRequired.astro";
 import { fetchArsFeed } from "@/lib/ars/feed";
 
 // Feed global (home) de Arsmate: /api/ars/posts/feed sin creatorId.
@@ -11,18 +12,23 @@ const limit = 10;
 const postUsername = (post: any) =>
   post.author?.username || post.user?.username || "";
 
+// Sin sesión no hay feed que mostrar: invitamos a iniciar sesión.
+const hasSession = !!Astro.locals.arsmateCookie;
+
 let initialPosts: any[] = [];
-// Llamada directa, sin loopback HTTP (ver src/lib/ars/creators.ts).
-const result = await fetchArsFeed(
-  { limit: String(limit), page: "1" },
-  Astro.locals.arsmateCookie,
-  Astro.locals.arsmateUserId,
-);
-const data = result.data as any;
-if (result.ok && data?.success && Array.isArray(data.posts)) {
-  initialPosts = data.posts;
-} else if (!result.ok) {
-  console.error("Error SSR feed global:", result.error);
+if (hasSession) {
+  // Llamada directa, sin loopback HTTP (ver src/lib/ars/creators.ts).
+  const result = await fetchArsFeed(
+    { limit: String(limit), page: "1" },
+    Astro.locals.arsmateCookie,
+    Astro.locals.arsmateUserId,
+  );
+  const data = result.data as any;
+  if (result.ok && data?.success && Array.isArray(data.posts)) {
+    initialPosts = data.posts;
+  } else if (!result.ok) {
+    console.error("Error SSR feed global:", result.error);
+  }
 }
 
 const hasMoreInitial = initialPosts.length === limit;
@@ -35,6 +41,9 @@ const hasMoreInitial = initialPosts.length === limit;
     <!-- Navegación -->
     <SiteHeader showSearch title="Feed 📸" />
 
+    {!hasSession && <LoginRequired message="Necesitas una sesión para ver el feed." />}
+
+    {hasSession && (
     <div
       id="global-feed"
       data-limit={limit}
@@ -84,6 +93,7 @@ const hasMoreInitial = initialPosts.length === limit;
         No hay más publicaciones para mostrar.
       </div>
     </div>
+    )}
   </main>
 
   <ImageModal />
@@ -98,7 +108,8 @@ const hasMoreInitial = initialPosts.length === limit;
 
     initPostCards();
 
-    const root = document.getElementById("global-feed")!;
+    const root = document.getElementById("global-feed");
+    if (root) {
     const limit = Number(root.dataset.limit || "10");
     const grid = document.getElementById("feed-grid")!;
     const sentinel = document.getElementById("feed-sentinel")!;
@@ -180,6 +191,7 @@ const hasMoreInitial = initialPosts.length === limit;
       { rootMargin: "300px" },
     );
     observer.observe(sentinel);
+    }
   </script>
 
   <script>

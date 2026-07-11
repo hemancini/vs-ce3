@@ -51,10 +51,10 @@ async function fetchJSON(url: string, options: RequestInit = {}) {
 export const GET: APIRoute = async ({ locals, url }) => {
   const env = (locals as App.Locals).runtime?.env;
 
-  const FIREBASE_API_KEY = env?.FIREBASE_API_KEY ?? import.meta.env.FIREBASE_API_KEY;
-  const FIREBASE_PROJECT = env?.FIREBASE_PROJECT ?? import.meta.env.FIREBASE_PROJECT;
+  const FIREBASE_API_KEY = env?.VS_FIREBASE_API_KEY ?? import.meta.env.VS_FIREBASE_API_KEY;
+  const FIREBASE_PROJECT = env?.VS_FIREBASE_PROJECT ?? import.meta.env.VS_FIREBASE_PROJECT;
 
-  // Credenciales: cuenta activa en KV (multicuenta) o respaldo en secrets.
+  // Credenciales: cuenta activa en KV (multicuenta, gestionada desde el avatar).
   const creds = await resolveCredentials(env);
   if (!FIREBASE_API_KEY || !creds) {
     return new Response(

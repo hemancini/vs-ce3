@@ -8,5 +8,5 @@ binding = "VS_C3_KV"
 id = "70fe3a1138d94643b68aaabb138c81b5"
 
 [vars]
-FIREBASE_API_KEY = "AIzaSyAUPv7dU2kEk1rdC__6z8aGlPYPfQh_ogA"
-FIREBASE_PROJECT = "payperview-7c21f"
+VS_FIREBASE_API_KEY = "AIzaSyAUPv7dU2kEk1rdC__6z8aGlPYPfQh_ogA"
+VS_FIREBASE_PROJECT = "payperview-7c21f"

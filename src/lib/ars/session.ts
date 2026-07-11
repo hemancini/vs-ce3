@@ -1,4 +1,5 @@
 import { defineMiddleware } from "astro:middleware";
+import { loadArsSession, type ArsSession } from "./auth";
 
 // Lógica de sesión + cache de Arsmate, extraída del middleware original de la app
 // `arsmate` para vivir dentro de vs-ce3. El handler exportado (`arsMiddleware`)
@@ -11,10 +12,9 @@ let globalArsmateCookie: string | undefined = undefined;
 let globalArsmateUserId: string | undefined = undefined;
 
 // Env del runtime de Cloudflare (secrets/vars), capturado en cada request por el
-// middleware. Se guarda a nivel de módulo para que loginArsmate/reloginArsmate
-// puedan leer las credenciales sin recibir `context` (reloginArsmate se llama
-// desde endpoints que no tienen acceso directo al env). En `astro dev` el
-// adaptador lo rellena desde .dev.vars; en prod desde `wrangler secret put`.
+// middleware. Se guarda a nivel de módulo para que reloginArsmate pueda releer
+// la sesión de KV sin recibir `context` (se llama desde endpoints que no tienen
+// acceso directo al env).
 let runtimeEnv: Env | undefined = undefined;
 
 // Sistema simple de cache en memoria para las APIs de Arsmate
@@ -30,78 +30,52 @@ const CACHE_TTL = 5 * 60 * 1000; // 5 minutos en milisegundos
 // Prefijos de ruta gestionados por este middleware.
 const ARS_PAGE_PREFIX = "/ars";
 const ARS_API_PREFIX = "/api/ars/";
+// Endpoint de autenticación: su respuesta refleja el estado de sesión en vivo, así
+// que NUNCA debe cachearse (si no, tras iniciar sesión seguiría diciendo "Sin sesión").
+const ARS_AUTH_ENDPOINT = "/api/ars/auth";
+// Cookie de primera parte (por navegador) donde guardamos la sesión activa. Viaja
+// con cada request, así que funciona igual en dev y en producción sin depender de
+// memoria de módulo ni de la consistencia de KV entre requests.
+const ARS_SESSION_COOKIE = "ars_session";
 
-// Realiza el login en Arsmate y guarda la cookie en la global. Devuelve la cookie.
-async function loginArsmate(): Promise<string | undefined> {
-    const email = runtimeEnv?.ARSMATE_EMAIL;
-    const password = runtimeEnv?.ARSMATE_PASSWORD;
-    const baseUrl = "https://arsmate.com";
-
-    if (!email || !password) {
-        console.error(
-            "❌ [ArsMiddleware] Faltan ARSMATE_EMAIL / ARSMATE_PASSWORD. " +
-            "Configúralos con `wrangler secret put` (prod) o en .dev.vars (local).",
-        );
+// Recarga la sesión guardada en KV (establecida desde la UI /api/ars/auth) y la
+// refleja en las globales en memoria. Devuelve la cookie o undefined si no hay.
+async function reloadFromStore(): Promise<string | undefined> {
+    const stored = await loadArsSession(runtimeEnv);
+    if (stored?.cookie) {
+        globalArsmateCookie = stored.cookie;
+        globalArsmateUserId = stored.userId;
         return globalArsmateCookie;
     }
-
-    console.log(`🔑 [ArsMiddleware] Intentando login para: ${email}`);
-
-    try {
-        const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Origin": baseUrl,
-                "Referer": `${baseUrl}/`,
-                "Accept": "application/json"
-            },
-            body: JSON.stringify({ email, password }),
-            redirect: "manual"
-        });
-
-        console.log(`[ArsMiddleware] Respuesta login: ${loginRes.status} ${loginRes.statusText}`);
-
-        if (loginRes.ok) {
-            const loginData = await loginRes.json() as any;
-
-            if (loginData.user && loginData.user.id) {
-                globalArsmateUserId = String(loginData.user.id);
-            } else if (loginData.id) {
-                globalArsmateUserId = String(loginData.id);
-            }
-
-            const setCookies = loginRes.headers.getSetCookie ? loginRes.headers.getSetCookie() : [];
-            if (setCookies.length === 0) {
-                const raw = loginRes.headers.get('set-cookie');
-                if (raw) setCookies.push(raw);
-            }
-
-            const authCookieMatch = setCookies.find(c => c.startsWith('ars_mate_auth='));
-            if (authCookieMatch) {
-                const authValue = authCookieMatch.split(';')[0].split('=')[1];
-                globalArsmateCookie = `ars_mate_auth=${authValue}`;
-                console.log("✅ [ArsMiddleware] Cookie ars_mate_auth guardada globalmente");
-                return globalArsmateCookie;
-            }
-        } else {
-            const errorText = await loginRes.text();
-            console.error(`❌ [ArsMiddleware] Login falló (${loginRes.status}): ${errorText.slice(0, 200)}`);
-        }
-    } catch (error) {
-        console.error("❌ [ArsMiddleware] Error durante el login:", error);
-    }
-    return globalArsmateCookie;
+    return undefined;
 }
 
-// Fuerza un re-login: la cookie almacenada puede expirar. El feed lo tolera como
-// invitado, pero /api/ars/creators/search exige sesión válida y devuelve 500
-// ("No autenticado"). Los endpoints que detecten ese caso pueden llamar a esto y
-// reintentar con la cookie fresca.
+// Aplica en memoria una sesión establecida desde la UI (endpoint /api/ars/auth).
+// Tiene prioridad sobre la cookie de entorno: al setearla, todas las peticiones
+// siguientes la usan sin releer KV. La persistencia en KV la hace el endpoint.
+export function setArsSession(session: ArsSession | null | undefined): void {
+    if (session?.cookie) {
+        globalArsmateCookie = session.cookie;
+        if (session.userId) globalArsmateUserId = session.userId;
+    }
+}
+
+// Olvida la sesión en memoria (p. ej. al cerrar sesión desde la UI). La próxima
+// petición recargará desde KV (si el usuario ha guardado una).
+export function clearArsSessionMemory(): void {
+    globalArsmateCookie = undefined;
+    globalArsmateUserId = undefined;
+}
+
+// Fuerza recargar la sesión: la cookie en memoria puede haber expirado. El feed
+// lo tolera como invitado, pero /api/ars/creators/search exige sesión válida y
+// devuelve 500 ("No autenticado"). Los endpoints que detecten ese caso llaman a
+// esto para releer la sesión del usuario guardada en KV (mantenida desde el
+// avatar de /ars) y reintentar. Ya NO se usan credenciales de entorno.
 export async function reloginArsmate(): Promise<string | undefined> {
     globalArsmateCookie = undefined;
-    return await loginArsmate();
+    globalArsmateUserId = undefined;
+    return await reloadFromStore();
 }
 
 export const arsMiddleware = defineMiddleware(async (context, next) => {
@@ -115,12 +89,24 @@ export const arsMiddleware = defineMiddleware(async (context, next) => {
         return next();
     }
 
-    // Capturamos el env del runtime de Cloudflare para que el login pueda leer
-    // las credenciales (ver nota en la declaración de `runtimeEnv`).
+    // Capturamos el env del runtime de Cloudflare (para leer la sesión de KV).
     runtimeEnv = (context.locals as App.Locals).runtime?.env;
 
-    // Si es una petición a la API de Arsmate, intentamos obtenerla del cache
-    if (isArsApi && request.method === 'GET') {
+    // Sesión por navegador (cookie de primera parte): máxima prioridad. Es la que
+    // fija el avatar al iniciar sesión y la que hace que funcione en dev.
+    const browserSession = context.cookies.get(ARS_SESSION_COOKIE)?.value;
+
+    // Respaldo compartido: sesión en memoria/KV (para SSR o clientes sin cookie).
+    // En arranque en frío (sin cookie en memoria) la recuperamos de KV.
+    if (!browserSession && !globalArsmateCookie) {
+        await reloadFromStore();
+    }
+
+    // El endpoint de auth refleja el estado en vivo: nunca se sirve desde caché.
+    const isAuthEndpoint = url.pathname === ARS_AUTH_ENDPOINT;
+
+    // Si es una petición a la API de Arsmate (salvo auth), intentamos el cache.
+    if (isArsApi && !isAuthEndpoint && request.method === 'GET') {
         const cacheKey = url.toString();
         const cached = apiCache.get(cacheKey);
 
@@ -138,15 +124,11 @@ export const arsMiddleware = defineMiddleware(async (context, next) => {
         console.log(`🔍 [Cache] MISS: ${url.pathname}`);
     }
 
-    // Intentar obtener la cookie de la variable global
-    let arsmateCookie = globalArsmateCookie;
+    // Cookie de la sesión activa: prioridad a la del navegador, luego la global.
+    // Puede ser undefined: en ese caso las rutas responden como invitado / piden login.
+    const arsmateCookie = browserSession || globalArsmateCookie;
 
-    console.log(`[ArsMiddleware] Cookie global: ${arsmateCookie ? 'Encontrada' : 'No encontrada (requiere login)'}`);
-
-    // Si no hay cookie global, realizamos el login
-    if (!arsmateCookie) {
-        arsmateCookie = await loginArsmate();
-    }
+    console.log(`[ArsMiddleware] Sesión: ${arsmateCookie ? (browserSession ? 'Cookie de navegador' : 'Global/KV') : 'Sin sesión (inicia sesión desde el avatar de /ars)'}`);
 
     // Pasar la cookie a locals para que esté disponible en las rutas
     context.locals.arsmateCookie = arsmateCookie;
@@ -155,7 +137,8 @@ export const arsMiddleware = defineMiddleware(async (context, next) => {
     const response = await next();
 
     // Guardar en cache si la respuesta es exitosa y es una ruta de API de Arsmate
-    if (isArsApi && request.method === 'GET' && response.status === 200) {
+    // (nunca el endpoint de auth: su estado debe leerse siempre en vivo).
+    if (isArsApi && !isAuthEndpoint && request.method === 'GET' && response.status === 200) {
         const contentType = response.headers.get('Content-Type') || '';
         if (contentType.includes('application/json')) {
             try {

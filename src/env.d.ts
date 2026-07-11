@@ -13,13 +13,13 @@ declare namespace App {
 }
 
 interface Env {
-  FIREBASE_API_KEY: string;
-  FIREBASE_PROJECT: string;
-  VODSCENE_EMAIL: string;
-  VODSCENE_PASSWORD: string;
+  VS_FIREBASE_API_KEY: string;
+  VS_FIREBASE_PROJECT: string;
   /** Contraseña de acceso a la app. Usar: wrangler pages secret put API_KEY */
   API_KEY: string;
-  /** Credenciales de Arsmate. Usar: wrangler pages secret put ARSMATE_EMAIL */
-  ARSMATE_EMAIL: string;
-  ARSMATE_PASSWORD: string;
+  /** KV compartido para sesiones/cachés (Sheer, Arsmate…). */
+  VS_C3_KV: KVNamespace;
+  /** Secreto opcional para cifrar los blobs de sesión guardados en KV. */
+  ARS_KV_SECRET?: string;
+  SHEER_KV_SECRET?: string;
 }

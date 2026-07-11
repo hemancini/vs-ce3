@@ -3,6 +3,7 @@ import ArsLayout from "@/layouts/ArsLayout.astro";
 import ImageModal from "@/components/ars/ImageModal.astro";
 import PostCard from "@/components/ars/PostCard.astro";
 import SiteHeader from "@/components/ars/SiteHeader.astro";
+import LoginRequired from "@/components/ars/LoginRequired.astro";
 import type { ArsmatePost } from "@/types/arsmate";
 import { fetchArsCreator } from "@/lib/ars/creators";
 import { fetchArsPost } from "@/lib/ars/posts";
@@ -13,35 +14,37 @@ const { username, postId } = Astro.params as {
 };
 const arsmateCookie = Astro.locals.arsmateCookie;
 
-if (!arsmateCookie) {
-  return Astro.redirect("/login");
-}
+// Sin sesión: en vez de redirigir a /login, mostramos el prompt para iniciar
+// sesión desde el avatar (que ya monta el SiteHeader de esta página).
+const hasSession = !!arsmateCookie;
 
 let postData: ArsmatePost | null = null;
 let error: string | null = null;
 
-try {
-  // 1. Fetch creator to get ID (llamada directa, sin loopback HTTP)
-  const creatorResult = await fetchArsCreator(username, arsmateCookie);
+if (hasSession) {
+  try {
+    // 1. Fetch creator to get ID (llamada directa, sin loopback HTTP)
+    const creatorResult = await fetchArsCreator(username, arsmateCookie);
 
-  if (!creatorResult.ok || !creatorResult.data?.success || !creatorResult.data.creator) {
-    throw new Error("No se pudo encontrar el creador");
+    if (!creatorResult.ok || !creatorResult.data?.success || !creatorResult.data.creator) {
+      throw new Error("No se pudo encontrar el creador");
+    }
+
+    const creatorId = String(creatorResult.data.creator.id);
+
+    // 2. Fetch the specific post (llamada directa, sin loopback HTTP)
+    const postResult = await fetchArsPost(postId, creatorId, arsmateCookie);
+    const postJson = postResult.data as { success?: boolean; post?: ArsmatePost } | undefined;
+
+    if (!postResult.ok || !postJson?.success || !postJson.post) {
+      throw new Error("No se pudo cargar la publicación");
+    }
+
+    postData = postJson.post;
+  } catch (e: any) {
+    console.error("Error SSR detail page:", e);
+    error = e.message;
   }
-
-  const creatorId = String(creatorResult.data.creator.id);
-
-  // 2. Fetch the specific post (llamada directa, sin loopback HTTP)
-  const postResult = await fetchArsPost(postId, creatorId, arsmateCookie);
-  const postJson = postResult.data as { success?: boolean; post?: ArsmatePost } | undefined;
-
-  if (!postResult.ok || !postJson?.success || !postJson.post) {
-    throw new Error("No se pudo cargar la publicación");
-  }
-
-  postData = postJson.post;
-} catch (e: any) {
-  console.error("Error SSR detail page:", e);
-  error = e.message;
 }
 ---
 
@@ -60,10 +63,12 @@ try {
       title="Publicación"
     />
 
+    {!hasSession && <LoginRequired message="Necesitas una sesión para ver esta publicación." />}
+
     <!-- Post Container -->
     <div id="post-container" class="px-4 py-8 max-w-2xl mx-auto space-y-6">
       {
-        postData ? (
+        !hasSession ? null : postData ? (
           <PostCard post={postData} username={username} isDetail={true} />
         ) : (
           <div id="error-message" class="py-12 text-center text-red-500 px-4">

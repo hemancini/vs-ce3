@@ -31,7 +31,7 @@ const json = (obj: unknown, status = 200) =>
   });
 
 const getApiKey = (env: any): string =>
-  env?.FIREBASE_API_KEY ?? import.meta.env.FIREBASE_API_KEY;
+  env?.VS_FIREBASE_API_KEY ?? import.meta.env.VS_FIREBASE_API_KEY;
 
 export const GET: APIRoute = async ({ locals }) => {
   const env = (locals as App.Locals).runtime?.env;

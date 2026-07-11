@@ -19,6 +19,8 @@ const {
   title,
   showSearch = false,
 } = Astro.props;
+
+import ArsAuth from "@/components/ars/ArsAuth.astro";
 ---
 
 <nav
@@ -151,6 +153,7 @@ const {
         />
       </svg>
     </button>
+    <ArsAuth />
   </div>
 </nav>
 

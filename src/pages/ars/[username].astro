@@ -4,17 +4,23 @@ import ProfileHeader from "@/components/ars/ProfileHeader.astro";
 import ImageModal from "@/components/ars/ImageModal.astro";
 import FeedView from "@/components/ars/FeedView.astro";
 import SiteHeader from "@/components/ars/SiteHeader.astro";
+import LoginRequired from "@/components/ars/LoginRequired.astro";
 import { fetchArsCreator } from "@/lib/ars/creators";
 
 const { username } = Astro.params;
 const arsmateCookie = Astro.locals.arsmateCookie;
 
+// Sin sesión no se puede consultar el perfil: invitamos a iniciar sesión.
+const hasSession = !!arsmateCookie;
+
 let creator = null;
-const result = await fetchArsCreator(username, arsmateCookie);
-if (result.ok && result.data?.success) {
-  creator = result.data.creator;
-} else if (!result.ok) {
-  console.error("Error SSR profile:", result.error);
+if (hasSession) {
+  const result = await fetchArsCreator(username, arsmateCookie);
+  if (result.ok && result.data?.success) {
+    creator = result.data.creator;
+  } else if (!result.ok) {
+    console.error("Error SSR profile:", result.error);
+  }
 }
 ---
 
@@ -28,16 +34,22 @@ if (result.ok && result.data?.success) {
     <!-- Header / Navigation -->
     <SiteHeader showSearch backLabel="Buscador" title={`@${username}`} />
 
-    <!-- Profile Section (SSR for better SEO/Speed) -->
-    <ProfileHeader creator={creator} />
+    {!hasSession && <LoginRequired message="Necesitas una sesión para ver el perfil." />}
 
-    <!-- Feed 100% SSR -->
-    <FeedView
-      username={username!}
-      creatorId={creator?.id != null ? String(creator.id) : null}
-      videosCount={creator?.stats?.videos ?? creator?.stats?.videos_count ?? null}
-      photosCount={creator?.stats?.photos ?? creator?.stats?.photos_count ?? null}
-    />
+    {hasSession && (
+      <>
+        <!-- Profile Section (SSR for better SEO/Speed) -->
+        <ProfileHeader creator={creator} />
+
+        <!-- Feed 100% SSR -->
+        <FeedView
+          username={username!}
+          creatorId={creator?.id != null ? String(creator.id) : null}
+          videosCount={creator?.stats?.videos ?? creator?.stats?.videos_count ?? null}
+          photosCount={creator?.stats?.photos ?? creator?.stats?.photos_count ?? null}
+        />
+      </>
+    )}
   </main>
 
   <!-- Image Lightbox Modal -->

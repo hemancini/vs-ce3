@@ -1,0 +1,43 @@
+---
+// Estado "sin sesión": invita a iniciar sesión en Arsmate en lugar de mostrar un
+// error o un vacío. El botón dispara el evento `ars-auth:open` que escucha el
+// avatar (ArsAuth) para abrir el modal de login.
+interface Props {
+  /** Texto secundario explicando qué requiere sesión. */
+  message?: string;
+}
+const { message = "Necesitas una sesión para ver este contenido." } = Astro.props;
+---
+
+<div class="py-20 flex flex-col items-center text-center gap-4 px-4">
+  <div
+    class="w-14 h-14 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-400 dark:text-slate-500"
+  >
+    <svg
+      class="w-7 h-7"
+      xmlns="http://www.w3.org/2000/svg"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      stroke-width="1.8"
+    >
+      <path
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
+    </svg>
+  </div>
+  <div>
+    <p class="text-slate-800 dark:text-slate-100 font-semibold">
+      Inicia sesión en Arsmate
+    </p>
+    <p class="text-slate-500 dark:text-slate-400 text-sm mt-1">{message}</p>
+  </div>
+  <button
+    type="button"
+    onclick="document.dispatchEvent(new CustomEvent('ars-auth:open'))"
+    class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-colors"
+  >
+    Iniciar sesión
+  </button>
+</div>
