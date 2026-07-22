@@ -265,9 +265,16 @@ export async function fetchArsFeed(
                             thumbnailUrl: thumbnailProxyUrl,
                             previewGifUrl: previewProxyUrl,
                             hlsManifestUrl: baseVideoUrl ? getProxiedUrl(baseVideoUrl) : null,
+                            // No gateamos por baseVideoUrl: en contenido de
+                            // suscripción gateado (sin ruta y sin snapshot) el
+                            // upstream no trae hlsManifestUrl/video, pero el
+                            // proxy /api/ars/proxy resuelve el video con token a
+                            // partir de postId/mediaId/userId. Mismo criterio que
+                            // el detalle (posts.ts) para que el feed no muestre
+                            // "Contenido Exclusivo" en posts que sí se reproducen.
                             videoSource:
-                                mType === "video" && baseVideoUrl
-                                    ? videoProxyUrl || getProxiedUrl(baseVideoUrl)
+                                mType === "video"
+                                    ? videoProxyUrl || (baseVideoUrl ? getProxiedUrl(baseVideoUrl) : null)
                                     : null,
                             videoMime: mType === "video" ? videoMime : null,
                         };
