@@ -129,6 +129,9 @@ function parsePage(html) {
 
     const postId = post.getAttribute('data-post-id') || '';
     const videoId = video ? video.getAttribute('data-video-id') || '' : '';
+    // Pista WebVTT de miniaturas del timeline (sprite JPG + cues cada 5s). La
+    // sirve /seek-preview/<postId>?media_id=… ; la consume /api/sheer/seek-preview.
+    const seekThumbnail = normStr(video?.getAttribute('data-seek-thumbnail') || '');
     const contentId = video ? video.getAttribute('data-content-id') || '' : '';
     const alias = video ? video.getAttribute('data-alias') || '' : '';
 
@@ -184,6 +187,7 @@ function parsePage(html) {
       alias,
       title: title || `Video ${videoId || postId}`,
       poster,
+      seekThumbnail,
       models,
       tags,
       views,
@@ -397,6 +401,100 @@ export async function scrapeSheerPost({ postId, url, env } = {}) {
     throw new Error(`No se encontraron fuentes reproducibles para el post ${postId || ''}.`);
   }
   return video;
+}
+
+// ── Miniaturas del timeline (seek preview) ───────────────────────────────────
+// El <video> de cada post trae data-seek-thumbnail con una URL de Sheer que
+// devuelve un WebVTT de miniaturas: cada cue apunta al MISMO sprite JPG con un
+// fragmento #xywh=x,y,w,h. Sin esto el player tenía que hacer seek sobre el mp4
+// de menor calidad para dibujar el frame, que es lento y a menudo ni pinta.
+//
+//   WEBVTT
+//   00:00:05.000 --> 00:00:09.999
+//   https://cdn77-image…/1.mp4?method=timeline&…#xywh=0,99,176,99
+//
+// Devolvemos una forma compacta: la lista de sprites, el tamaño de tile y un
+// cue por entrada como [segundoInicial, índiceDeSprite, x, y].
+function vttTimeToSeconds(str) {
+  const parts = String(str).split(':');
+  if (parts.length < 2) return NaN;
+  const secs = parseFloat(parts.pop().replace(',', '.'));
+  const mins = parseInt(parts.pop(), 10) || 0;
+  const hours = parts.length ? parseInt(parts.pop(), 10) || 0 : 0;
+  return hours * 3600 + mins * 60 + secs;
+}
+
+export function parseSeekPreviewVtt(vtt) {
+  const sprites = [];
+  const cues = [];
+  let start = null;
+
+  for (const raw of String(vtt || '').split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+
+    const range = line.match(/^([\d:.,]+)\s*-->\s*([\d:.,]+)/);
+    if (range) {
+      const t = vttTimeToSeconds(range[1]);
+      start = Number.isNaN(t) ? null : t;
+      continue;
+    }
+
+    if (start === null || !/^https?:\/\//i.test(line)) continue;
+
+    const hashAt = line.indexOf('#');
+    const url = normStr(hashAt === -1 ? line : line.slice(0, hashAt));
+    const xywh = (hashAt === -1 ? '' : line.slice(hashAt + 1)).match(
+      /xywh=(\d+),(\d+),(\d+),(\d+)/i,
+    );
+
+    let idx = sprites.indexOf(url);
+    if (idx === -1) idx = sprites.push(url) - 1;
+
+    cues.push([
+      Math.round(start * 1000) / 1000,
+      idx,
+      xywh ? parseInt(xywh[1], 10) : 0,
+      xywh ? parseInt(xywh[2], 10) : 0,
+      xywh ? parseInt(xywh[3], 10) : 0,
+      xywh ? parseInt(xywh[4], 10) : 0,
+    ]);
+    start = null;
+  }
+
+  if (!cues.length) return null;
+
+  // Tamaño de tile: el de la primera cue (todas las de Sheer son uniformes).
+  const tileW = cues[0][4] || 176;
+  const tileH = cues[0][5] || 99;
+  return { sprites, tileW, tileH, cues: cues.map(([t, i, x, y]) => [t, i, x, y]) };
+}
+
+/**
+ * Descarga y parsea la pista de miniaturas del timeline de un post.
+ * La URL viene del scrape (`video.seekThumbnail`); sólo aceptamos hosts de
+ * Sheer para no convertir la ruta en un proxy abierto.
+ *
+ * @param {object} opts
+ * @param {string} opts.url   URL de /seek-preview/… (absoluta o relativa a BASE_URL)
+ * @param {any}    [opts.env] runtime env (para VS_C3_KV)
+ * @returns {Promise<{ sprites:string[], tileW:number, tileH:number, cues:number[][] }>}
+ */
+export async function fetchSeekPreview({ url, env } = {}) {
+  if (!url) throw new Error('Falta la URL de la pista de miniaturas.');
+
+  const target = /^https?:\/\//i.test(url) ? url : `${BASE_URL}${url.startsWith('/') ? '' : '/'}${url}`;
+  const host = new URL(target).hostname;
+  if (host !== 'www.sheer.com' && host !== 'sheer.com') {
+    throw new Error(`Host no permitido para la pista de miniaturas: ${host}`);
+  }
+
+  // La cookie no es imprescindible (el endpoint responde público), pero la
+  // mandamos si la hay por coherencia con el resto del scraper.
+  const vtt = await fetchHtml(target, await resolveCookieHeader(env));
+  const preview = parseSeekPreviewVtt(vtt);
+  if (!preview) throw new Error('La pista de miniaturas no contiene cues válidos.');
+  return preview;
 }
 
 // ── Membresías (feed) ────────────────────────────────────────────────────────

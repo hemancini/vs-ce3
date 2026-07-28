@@ -50,8 +50,11 @@
           id="preview-tooltip"
           class="fixed -translate-x-1/2 pointer-events-none opacity-0 transition-opacity duration-200 flex flex-col items-center gap-1.5 z-300"
         >
-          <!-- Thumbnail wrapper: canvas shows last frame instantly; hidden video seeks in background -->
+          <!-- Thumbnail wrapper: si el post trae pista de miniaturas (sprite VTT)
+               se recorta el tile sobre #preview-sprite; si no, se cae al canvas
+               pintado desde el <video> oculto que hace seek por detrás. -->
           <div
+            id="preview-thumb"
             class="relative w-40 aspect-video rounded-lg border border-[rgba(138,59,205,0.4)] bg-black overflow-hidden shadow-[0_5px_15px_rgba(0,0,0,0.8)]"
           >
             <canvas
@@ -63,6 +66,11 @@
               preload="metadata"
               muted
               playsinline></video>
+            <img
+              id="preview-sprite"
+              alt=""
+              class="absolute left-0 top-0 max-w-none origin-top-left hidden"
+            />
           </div>
           <!-- Time stamp -->
           <span
@@ -285,6 +293,8 @@
     const previewVideo = document.getElementById("preview-video");
     const previewTime = document.getElementById("preview-time");
     const previewCanvas = document.getElementById("preview-canvas");
+    const previewThumb = document.getElementById("preview-thumb");
+    const previewSprite = document.getElementById("preview-sprite");
 
     const cleanSrc = (s) => (s ? String(s).replace(/&amp;/g, "&") : "");
 
@@ -452,6 +462,82 @@
       previewVideo.addEventListener("loadeddata", drawFrameToCanvas);
     }
 
+    // ── Preview por sprite (pista de miniaturas del post) ────────────────────
+    // videoData.seekThumbnail apunta al WebVTT de Sheer; /api/sheer/seek-preview
+    // lo trae ya parseado ({ sprites, tileW, tileH, cues }) porque el endpoint
+    // original no manda CORS. Cuando hay sprite no hace falta hacer seek sobre
+    // el mp4: basta recortar el tile correspondiente al segundo apuntado.
+    let seekPreview = null;
+    let seekPreviewToken = 0;
+
+    function resetSeekPreview() {
+      seekPreview = null;
+      seekPreviewToken++;
+      if (previewSprite) {
+        previewSprite.classList.add("hidden");
+        previewSprite.removeAttribute("src");
+      }
+      if (previewThumb) previewThumb.style.height = "";
+    }
+
+    async function loadSeekPreview(url) {
+      const token = ++seekPreviewToken;
+      try {
+        const res = await fetch(
+          `/api/sheer/seek-preview?url=${encodeURIComponent(url)}`,
+        );
+        const data = await res.json();
+        if (token !== seekPreviewToken) return false; // otro video ya se cargó
+        if (!data.ok || !data.preview?.cues?.length) return false;
+        seekPreview = data.preview;
+        // Precarga del sprite para que el primer hover ya lo tenga en caché.
+        if (previewSprite && seekPreview.sprites[0]) {
+          previewSprite.src = seekPreview.sprites[0];
+        }
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    // Última cue cuyo instante inicial es <= t (las cues vienen ordenadas).
+    function findCue(t) {
+      const cues = seekPreview.cues;
+      let lo = 0;
+      let hi = cues.length - 1;
+      let idx = 0;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (cues[mid][0] <= t) {
+          idx = mid;
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
+      }
+      return cues[idx];
+    }
+
+    function showSpriteFrame(time) {
+      if (!seekPreview || !previewSprite || !previewThumb) return;
+      const [, spriteIdx, x, y] = findCue(time);
+      const src = seekPreview.sprites[spriteIdx];
+      if (src && previewSprite.getAttribute("src") !== src) {
+        previewSprite.src = src;
+      }
+      // Escalamos el sprite entero y lo desplazamos: así no necesitamos conocer
+      // sus dimensiones reales, sólo el tamaño del tile.
+      const scale = (previewThumb.clientWidth || 160) / seekPreview.tileW;
+      // clientWidth/Height excluyen el borde, pero style.height lo incluye
+      // (box-sizing: border-box): se lo sumamos para no recortar el tile.
+      const borderY = previewThumb.offsetHeight - previewThumb.clientHeight;
+      previewThumb.style.height = `${seekPreview.tileH * scale + borderY}px`;
+      previewSprite.style.transform = `scale(${scale})`;
+      previewSprite.style.left = `${-x * scale}px`;
+      previewSprite.style.top = `${-y * scale}px`;
+      previewSprite.classList.remove("hidden");
+    }
+
     function handleTimelineHover(e) {
       if (
         !video.duration ||
@@ -468,23 +554,29 @@
       const percentage = Math.max(0, Math.min(1, pos));
       const targetTime = percentage * video.duration;
 
-      const previewSrcAttr =
-        video.getAttribute("data-preview-src") ||
-        video.getAttribute("data-default-src");
-      if (previewSrcAttr) {
-        const tempAnchor = document.createElement("a");
-        tempAnchor.href = previewSrcAttr;
-        const resolvedPreviewSrc = tempAnchor.href;
-        if (previewVideo.src !== resolvedPreviewSrc) {
-          previewVideo.src = previewSrcAttr;
-          previewVideo.load();
+      const validTime = !isNaN(targetTime) && isFinite(targetTime);
+
+      if (seekPreview) {
+        // Con pista de miniaturas no tocamos el <video> de preview: sólo
+        // reposicionamos el sprite (instantáneo y sin descargar el mp4).
+        if (validTime) showSpriteFrame(targetTime);
+      } else {
+        const previewSrcAttr =
+          video.getAttribute("data-preview-src") ||
+          video.getAttribute("data-default-src");
+        if (previewSrcAttr) {
+          const tempAnchor = document.createElement("a");
+          tempAnchor.href = previewSrcAttr;
+          const resolvedPreviewSrc = tempAnchor.href;
+          if (previewVideo.src !== resolvedPreviewSrc) {
+            previewVideo.src = previewSrcAttr;
+            previewVideo.load();
+          }
         }
+        if (validTime) seekPreviewVideo(targetTime);
       }
 
-      if (!isNaN(targetTime) && isFinite(targetTime)) {
-        seekPreviewVideo(targetTime);
-        previewTime.textContent = formatTime(targetTime);
-      }
+      if (validTime) previewTime.textContent = formatTime(targetTime);
 
       const tooltipWidth = previewTooltip.offsetWidth || 160;
       const tooltipHeight = previewTooltip.offsetHeight || 120;
@@ -704,13 +796,25 @@
       video.setAttribute("data-default-src", cleanSrc(defaultSource?.src));
       video.setAttribute("data-preview-src", cleanSrc(previewSource?.src));
 
-      // Precarga del video de preview (calidad más baja) para el seek.
-      const previewSrc =
-        video.getAttribute("data-preview-src") ||
-        video.getAttribute("data-default-src");
-      if (previewSrc && previewVideo) {
-        previewVideo.src = previewSrc;
-        previewVideo.load();
+      // Miniaturas del timeline: si el post trae la pista (data-seek-thumbnail
+      // del scrape) la usamos; sólo si falla caemos al seek sobre el mp4.
+      resetSeekPreview();
+      const preloadPreviewVideo = () => {
+        const previewSrc =
+          video.getAttribute("data-preview-src") ||
+          video.getAttribute("data-default-src");
+        if (previewSrc && previewVideo) {
+          previewVideo.src = previewSrc;
+          previewVideo.load();
+        }
+      };
+
+      if (videoData.seekThumbnail) {
+        loadSeekPreview(videoData.seekThumbnail).then((ok) => {
+          if (!ok && playerActive) preloadPreviewVideo();
+        });
+      } else {
+        preloadPreviewVideo();
       }
 
       // Metadatos.
@@ -802,6 +906,7 @@
     // Detiene y resetea (al cerrar el modal).
     function stop() {
       playerActive = false;
+      resetSeekPreview();
       video.pause();
       video.removeAttribute("src");
       try {
