@@ -507,6 +507,21 @@ const MOCK_ADMIN_USER = {
                              p.media.url = m3u8;
                              p.media.requiresToken = false; // Disable frontend token check
                              console.log(`🔥 [Injector] Force-unlocking video URL: ${m3u8}`);
+                        } else if (p.media.type === 'video' && p.media.id) {
+                             // Fix (paridad con feed.ts / interceptor Node): video gateado
+                             // SIN thumbnail 'video-proxy' no debe quedar sin fuente. En vez
+                             // de gatear por la URL base, derivamos la URL del proxy local
+                             // desde el mediaId (siempre presente), igual que hacemos para
+                             // videos con URL. Así no cae al candado "Contenido Exclusivo".
+                             if (p.contentType === "Público" || p.price === 0 || p.isPublic) {
+                                 return;
+                             }
+                             const proxyUrl = `http://localhost:${window.PROXY_PORT}/play?postId=${p.id}&mediaId=${p.media.id}&userId=${p.user_id}`;
+                             p.media.hlsManifestUrl = proxyUrl;
+                             p.media.videoUrl = proxyUrl;
+                             p.media.url = proxyUrl;
+                             p.media.src = proxyUrl;
+                             console.log(`🔥 [Injector] Force-unlocking video (por mediaId): ${proxyUrl}`);
                         }
                     }
                     if (p.mediaItems) {
@@ -515,7 +530,7 @@ const MOCK_ADMIN_USER = {
                             if (p.contentType === "Público" || p.price === 0 || p.isPublic) {
                                 return;
                             }
-                            
+
                             m.requiresToken = false;
                             if (m.thumbnail && m.thumbnail.includes('video-proxy')) {
                                 const m3u8 = m.thumbnail.replace('thumbnail.jpg', 'master.m3u8');
@@ -524,6 +539,15 @@ const MOCK_ADMIN_USER = {
                                 m.url = m3u8;
                                 m.src = m3u8;
                                 console.log(`🔥 [Injector] Force-unlocking video item: ${m3u8}`);
+                            } else if (m.type === 'video' && m.id) {
+                                // Fix: mismo criterio que arriba, pero para cada item de video
+                                // sin thumbnail utilizable → derivar del mediaId.
+                                const proxyUrl = `http://localhost:${window.PROXY_PORT}/play?postId=${p.id}&mediaId=${m.id}&userId=${p.user_id}`;
+                                m.hlsManifestUrl = proxyUrl;
+                                m.videoUrl = proxyUrl;
+                                m.url = proxyUrl;
+                                m.src = proxyUrl;
+                                console.log(`🔥 [Injector] Force-unlocking video item (por mediaId): ${proxyUrl}`);
                             }
                         });
                     }
