@@ -8,7 +8,7 @@ import SheerVideoCard from '../../components/sheer/SheerVideoCard.astro';
 import SheerHeader from '../../components/sheer/SheerHeader.astro';
 import SheerScrapeControls from '../../components/sheer/SheerScrapeControls.astro';
 import SheerVideoModal from '../../components/sheer/SheerVideoModal.astro';
-import { scrapeSheer, loadMode, readLibraryCreator, DEFAULT_ALIAS } from '../../lib/sheer/scraper.js';
+import { scrapeSheer, loadMode, readLibraryCreator, saveScrapedVideos, DEFAULT_ALIAS } from '../../lib/sheer/scraper.js';
 
 export const prerender = false;
 
@@ -17,6 +17,9 @@ const env = (Astro.locals as any)?.runtime?.env;
 const params = Astro.url.searchParams;
 const alias = (Astro.params.alias || DEFAULT_ALIAS).trim() || DEFAULT_ALIAS;
 const pages = Math.min(Math.max(parseInt(params.get('paginas') || '1', 10) || 1, 1), 40);
+// ?guardar=1 lo pone el submit de «Scrapear en vivo»: archiva el resultado en la
+// biblioteca de KV. Sin él, una carga normal solo muestra (no escribe KV).
+const persist = params.get('guardar') === '1';
 
 const mode = await loadMode(env);
 const savedMode = mode === 'saved';
@@ -25,6 +28,8 @@ let videos: any[] = [];
 let totalPages = 0;
 let generatedAt: number | null = null;
 let error: string | null = null;
+let savedToKv = false;
+let saveError: string | null = null;
 const startedAt = Date.now();
 
 try {
@@ -38,6 +43,15 @@ try {
     const result = await scrapeSheer({ alias, maxPages: pages, env });
     videos = result.videos;
     totalPages = result.totalPages;
+    if (persist) {
+      // Archivar en KV lo scrapeado. Un fallo aquí (p. ej. falta el secreto de
+      // cifrado) no debe tumbar la grilla: se muestra aparte.
+      try {
+        savedToKv = !!(await saveScrapedVideos({ videos, alias, totalPages, env }));
+      } catch (e: any) {
+        saveError = e.message;
+      }
+    }
   }
 } catch (e: any) {
   error = e.message;
@@ -90,7 +104,10 @@ const hasFilters = actresses.length > 0 || categories.length > 0;
       ) : savedMode ? (
         <span slot="stats"><i class="fa-solid fa-hard-drive"></i> {videos.length} videos guardados{generatedAt ? ` · ${fmtDate(generatedAt)}` : ''}</span>
       ) : (
-        <span slot="stats"><i class="fa-solid fa-bolt"></i> {videos.length} videos · {elapsed}s · {totalPages} págs.</span>
+        <span slot="stats">
+          <i class="fa-solid fa-bolt"></i> {videos.length} videos · {elapsed}s · {totalPages} págs.
+          {savedToKv && (<span class="text-accent"> · <i class="fa-solid fa-hard-drive"></i> archivado en KV</span>)}
+        </span>
       )}
     </SheerHeader>
 
@@ -102,6 +119,13 @@ const hasFilters = actresses.length > 0 || categories.length > 0;
       </div>
     ) : (
       <SheerScrapeControls alias={alias} pages={pages} pathMode />
+    )}
+
+    {saveError && (
+      <div class="mb-8 flex items-center gap-3 rounded-2xl border border-line bg-card px-4 py-3 text-[0.85rem] text-danger sm:px-5">
+        <i class="fa-solid fa-triangle-exclamation"></i>
+        <span>No se pudo archivar en KV: {saveError}</span>
+      </div>
     )}
 
     {error ? (

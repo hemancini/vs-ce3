@@ -3,6 +3,9 @@
 // - membershipMode=true: feed de membresías (/sheer), GET solo con ?paginas (sin creador).
 // - pathMode=true: ruta por creador (/sheer/[alias]), navega al path con ?paginas=N.
 // - por defecto: GET form normal a /sheer/live con ?alias.
+//
+// El submit añade ?guardar=1: las páginas archivan en KV (`sheer:library`) lo que
+// scrapean solo cuando se pulsa el botón, no en cada carga/refresh de la página.
 interface Props {
   alias?: string;
   pages: number;
@@ -18,7 +21,7 @@ const formProps = membershipMode
   ? {
       method: 'get',
       onsubmit:
-        "event.preventDefault(); const a=this.alias.value.trim(); const p=this.paginas.value||'1'; if(a) window.location.href='/sheer/'+encodeURIComponent(a)+'?paginas='+p;",
+        "event.preventDefault(); const a=this.alias.value.trim(); const p=this.paginas.value||'1'; if(a) window.location.href='/sheer/'+encodeURIComponent(a)+'?paginas='+p+'&guardar=1';",
     }
   : { method: 'get', action: '/sheer/live' };
 ---
@@ -29,6 +32,7 @@ const formProps = membershipMode
     <i class="fa-solid fa-chevron-down ml-auto text-xs text-muted transition-transform duration-300 group-open:rotate-180"></i>
   </summary>
   <form {...formProps} class="flex flex-wrap items-end gap-3 px-4 pb-4 sm:gap-4 sm:px-5">
+  <input type="hidden" name="guardar" value="1" />
   {!membershipMode && (
     <div class="flex flex-col gap-1.5">
       <label for="alias" class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.5px] text-muted"><i class="fa-solid fa-user"></i> Creador</label>
@@ -59,7 +63,7 @@ const formProps = membershipMode
     </button>
   </div>
   <p class="w-full text-[0.8rem] italic text-muted">
-    Cada página = ~10 videos. Más páginas = más tiempo. Los datos NO se guardan; solo se muestran.
+    Cada página = ~10 videos. Más páginas = más tiempo. Lo scrapeado se archiva en la biblioteca de KV (nunca borra lo previo).
   </p>
   </form>
 </details>

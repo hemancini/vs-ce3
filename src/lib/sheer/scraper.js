@@ -835,6 +835,54 @@ export async function saveLibrary(library, env) {
 }
 
 /**
+ * Persiste en la biblioteca de KV los videos de un scrape EN VIVO (feed de
+ * membresías o catálogo de un creador), para que el modo guardado los vea sin
+ * tener que pasar por /sheer/scraper. Agrupa los videos por creador usando el
+ * alias de cada video (fallback al `alias` recibido) y delega en saveLibrary,
+ * que une en modo archivo con lo ya guardado.
+ *
+ * No manda `name`/`headshot`: el scrape en vivo no los trae y mandarlos vacíos
+ * (o iguales al alias) pisaría los buenos que dejó el scraper de biblioteca.
+ * `totalPages` solo aplica al catálogo de un creador, no al feed agregado.
+ *
+ * @param {object}  [opts]
+ * @param {any[]}   [opts.videos]      videos scrapeados
+ * @param {string}  [opts.alias]       creador, si todos los videos son de uno
+ * @param {number}  [opts.totalPages]  páginas del catálogo del creador (solo modo creador)
+ * @param {any}     [opts.env]         runtime env (para VS_C3_KV)
+ * @returns {Promise<object|null>} biblioteca resultante, o null si no había nada que guardar
+ */
+export async function saveScrapedVideos({ videos = [], alias = '', totalPages = 0, env } = {}) {
+  if (!env?.VS_C3_KV || !videos.length) return null;
+
+  const byAlias = new Map();
+  for (const v of videos) {
+    const key = v?.alias || alias;
+    if (!key) continue; // sin creador no sabemos dónde archivarlo
+    const cur = byAlias.get(key) || { alias: key, videos: [] };
+    cur.videos.push(v);
+    byAlias.set(key, cur);
+  }
+
+  const creators = [...byAlias.values()].map((c) => ({
+    ...c,
+    count: c.videos.length,
+    ...(totalPages && byAlias.size === 1 ? { totalPages } : {}),
+  }));
+  if (!creators.length) return null;
+
+  return await saveLibrary(
+    {
+      generatedAt: Date.now(),
+      totalCreators: creators.length,
+      totalVideos: creators.reduce((n, c) => n + c.count, 0),
+      creators,
+    },
+    env,
+  );
+}
+
+/**
  * Lee y descifra la biblioteca de KV. Soporta los tres formatos de `sheer:library`:
  *   · payload cifrado "v1:…"           → valor único.
  *   · manifiesto JSON { __chunked }     → reensambla los trozos cifrados.
