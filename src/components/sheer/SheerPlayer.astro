@@ -38,7 +38,7 @@
     <!-- Custom Video Controls -->
     <div
       id="custom-controls"
-      class="absolute bottom-0 left-0 right-0 z-20 flex flex-col gap-3 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-4 opacity-0 transition-opacity duration-300 pointer-events-none group-hover/player:opacity-100 group-focus-within/player:opacity-100 controls-visible"
+      class="absolute bottom-0 left-0 right-0 z-20 flex flex-col gap-3 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-4 opacity-0 transition-opacity duration-300 pointer-events-none controls-visible"
     >
       <!-- Timeline / Progress Bar -->
       <div
@@ -198,9 +198,8 @@
 
 <style>
   /* Custom Styles for Video Player */
-  #player-container:hover #custom-controls,
-  #player-container:focus-within #custom-controls,
-  #custom-controls.controls-visible {
+  #custom-controls.controls-visible,
+  #custom-controls:focus-within {
     opacity: 1;
     pointer-events: auto;
   }
@@ -736,18 +735,50 @@
     // ── Auto-ocultar controles ──────────────────────────────────────────────
     function resetIdleTimer() {
       if (!customControls || !playerContainer) return;
+      if (overlay && !overlay.classList.contains("play-overlay--hidden"))
+        return;
+
       customControls.classList.add("controls-visible");
       playerContainer.style.cursor = "default";
       if (idleTimer) clearTimeout(idleTimer);
       if (!video.paused) {
+        if (
+          (qualityMenu && !qualityMenu.classList.contains("hidden")) ||
+          isDragging
+        ) {
+          return;
+        }
         idleTimer = setTimeout(() => {
+          if (
+            (qualityMenu && !qualityMenu.classList.contains("hidden")) ||
+            isDragging
+          ) {
+            return;
+          }
           customControls.classList.remove("controls-visible");
           playerContainer.style.cursor = "none";
         }, 3000);
       }
     }
-    if (playerContainer)
+
+    if (playerContainer) {
       playerContainer.addEventListener("mousemove", resetIdleTimer);
+      playerContainer.addEventListener("mouseenter", resetIdleTimer);
+      playerContainer.addEventListener("touchstart", resetIdleTimer, {
+        passive: true,
+      });
+      playerContainer.addEventListener("mouseleave", () => {
+        if (
+          !video.paused &&
+          !isDragging &&
+          (!qualityMenu || qualityMenu.classList.contains("hidden"))
+        ) {
+          if (idleTimer) clearTimeout(idleTimer);
+          customControls.classList.remove("controls-visible");
+          playerContainer.style.cursor = "default";
+        }
+      });
+    }
 
     // ── Espacio = play/pausa (sólo con el player activo) ─────────────────────
     document.addEventListener("keydown", (e) => {

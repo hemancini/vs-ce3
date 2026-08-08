@@ -49,6 +49,16 @@ import SheerPlayer from './SheerPlayer.astro';
     if (!modal || !newtab) return;
 
     let lastFocus = null;
+    let currentPostId = null;
+
+    // Marca visualmente la tarjeta que abrió el modal (ver .video-card--marked).
+    function markCard(postId) {
+      if (!postId) return;
+      const card = document.querySelector(
+        '.video-card[data-id="' + CSS.escape(String(postId)) + '"]'
+      );
+      if (card) card.classList.add('video-card--marked');
+    }
 
     function open(postId) {
       if (!postId) return;
@@ -66,6 +76,7 @@ import SheerPlayer from './SheerPlayer.astro';
       }
 
       newtab.href = '/sheer/play?postId=' + encodeURIComponent(postId);
+      currentPostId = postId;
       lastFocus = document.activeElement;
       modal.classList.remove('hidden');
       modal.classList.add('flex');
@@ -83,7 +94,15 @@ import SheerPlayer from './SheerPlayer.astro';
       document.body.style.overflow = '';
       if (window.sheerPlayerStop) window.sheerPlayerStop();
       if (lastFocus && typeof lastFocus.focus === 'function') lastFocus.focus();
+      currentPostId = null;
     }
+
+    // "Nueva pestaña": el video sigue en la pestaña nueva, así que cerramos el
+    // modal y dejamos marcada la tarjeta desde la que se abrió.
+    newtab.addEventListener('click', () => {
+      markCard(currentPostId);
+      close();
+    });
 
     // Expuesto para que la tarjeta lo invoque en su onclick.
     window.openSheerModal = open;

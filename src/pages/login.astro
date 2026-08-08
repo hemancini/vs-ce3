@@ -56,6 +56,22 @@ const redirect = Astro.url.searchParams.get("redirect") ?? "/";
         </div>
       )}
 
+      {/*
+        Campo de usuario oculto: los gestores de contraseñas necesitan un par
+        usuario/contraseña para guardar y autocompletar de forma fiable.
+        No se envía nada útil al servidor; solo identifica la credencial.
+      */}
+      <input
+        type="text"
+        name="username"
+        value="vs"
+        autocomplete="username"
+        readonly
+        tabindex="-1"
+        aria-hidden="true"
+        class="absolute w-0 h-0 opacity-0 pointer-events-none"
+      />
+
       <div class="flex flex-col gap-1.5">
         <label for="apikey" class="text-xs font-semibold text-gray-400 uppercase tracking-widest">
           Contraseña
@@ -74,13 +90,140 @@ const redirect = Astro.url.searchParams.get("redirect") ?? "/";
       </div>
 
       <button
+        id="login-submit"
         type="submit"
-        class="w-full bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-semibold rounded-lg px-4 py-2.5 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        class="w-full bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-semibold rounded-lg px-4 py-2.5 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-60 disabled:cursor-default"
       >
         Entrar
       </button>
     </form>
   </div>
+
+  <script is:inline define:vars={{ hasError: Boolean(error) }}>
+    /**
+     * Auto-login: envía el formulario sin intervención del usuario, pero
+     * SOLO cuando el navegador aporta una contraseña guardada, es decir:
+     *  - la Credential Management API devuelve una credencial, o
+     *  - el campo queda en estado `:autofill`
+     * Sin credencial guardada el formulario se comporta como siempre.
+     *
+     * Guardas contra bucles de redirección:
+     *  - nunca tras un intento fallido (?error=1)
+     *  - nunca si el usuario ya escribió a mano
+     *  - como máximo un intento cada 30 s por pestaña (sessionStorage)
+     *  - si sessionStorage no está disponible no se hace nada: sin él la guarda
+     *    de sesión de Layout.astro rebotaría de vuelta al login en bucle
+     */
+    (function () {
+      const ATTEMPT_KEY = 'vs_autologin_ts';
+      const COOLDOWN_MS = 30_000;
+
+      const form  = document.getElementById('login-form');
+      const input = document.getElementById('apikey');
+      const button = document.getElementById('login-submit');
+      if (!form || !input || hasError) return;
+
+      let store;
+      try {
+        store = window.sessionStorage;
+        const last = Number(store.getItem(ATTEMPT_KEY)) || 0;
+        if (Date.now() - last < COOLDOWN_MS) return;
+      } catch {
+        return;
+      }
+
+      let userTyped = false;
+      let submitted = false;
+
+      const markTyped = () => { userTyped = true; };
+      input.addEventListener('keydown', markTyped);
+      input.addEventListener('paste', markTyped);
+
+      /** `matches` lanza SyntaxError si el navegador no conoce la pseudo-clase */
+      function matchesSafe(sel) {
+        try { return input.matches(sel); } catch { return false; }
+      }
+
+      function submitNow() {
+        if (submitted) return;
+        submitted = true;
+        try { store.setItem(ATTEMPT_KEY, String(Date.now())); } catch {}
+
+        if (button) {
+          button.disabled = true;
+          button.textContent = 'Accediendo…';
+        }
+
+        if (typeof form.requestSubmit === 'function') form.requestSubmit();
+        else form.submit();
+      }
+
+      function tryAutoSubmit() {
+        if (submitted || userTyped) return;
+
+        // Solo con contraseña guardada: exigimos el pseudo-estado de autofill.
+        // Un valor no vacío no basta —puede venir de la restauración de
+        // formulario al recargar—, y además Chrome enmascara el `value` del
+        // autofill hasta que el usuario interactúa, así que leerlo no sirve.
+        if (!matchesSafe(':autofill') && !matchesSafe(':-webkit-autofill')) return;
+
+        submitNow();
+      }
+
+      // 0) Credential Management API: en Chrome/Edge devuelve la contraseña
+      //    guardada sin ninguna UI ni interacción. Es la vía más fiable; el
+      //    resto son respaldos para navegadores que no la implementan.
+      if (navigator.credentials && window.PasswordCredential) {
+        navigator.credentials
+          .get({ password: true, mediation: 'silent' })
+          .then(function (cred) {
+            if (!cred || !cred.password || submitted || userTyped) return;
+            input.value = cred.password;
+            submitNow();
+          })
+          .catch(function () { /* sin credencial disponible → respaldos */ });
+      }
+
+      // 1) Autofill instantáneo de Chrome/Safari: la animación se dispara al pintar
+      input.addEventListener('animationstart', function (e) {
+        if (e.animationName === 'vs-autofill') tryAutoSubmit();
+      });
+
+      // 2) Selección manual desde el gestor (Safari/Touch ID, menú de Firefox…)
+      input.addEventListener('change', tryAutoSubmit);
+      input.addEventListener('input', tryAutoSubmit);
+
+      // 3) Varios navegadores solo materializan el autofill tras el primer
+      //    gesto en la página; re-comprobar entonces.
+      ['pointerdown', 'focusin'].forEach(function (evt) {
+        document.addEventListener(evt, function () {
+          setTimeout(tryAutoSubmit, 0);
+          setTimeout(tryAutoSubmit, 150);
+        }, { once: true });
+      });
+
+      // 4) Respaldo por sondeo: algunos rellenan sin pseudo-clase ni evento
+      [0, 120, 350, 800, 1500].forEach((ms) => setTimeout(tryAutoSubmit, ms));
+
+      // 5) Vuelta atrás desde bfcache: el input ya trae el valor restaurado,
+      //    pero hay que revalidar el cooldown para no reenviar en bucle.
+      window.addEventListener('pageshow', function (e) {
+        if (!e.persisted) return;
+        let last = 0;
+        try { last = Number(store.getItem(ATTEMPT_KEY)) || 0; } catch { return; }
+        if (Date.now() - last < COOLDOWN_MS) return;
+        submitted = false;
+        tryAutoSubmit();
+      });
+    })();
+  </script>
+
+  <style is:global>
+    /* Sonda de autofill: solo existe para disparar `animationstart` en el input */
+    @keyframes vs-autofill { from { opacity: 1; } to { opacity: 1; } }
+    #apikey:-webkit-autofill { animation: vs-autofill 1ms; }
+    #apikey:autofill { animation: vs-autofill 1ms; }
+  </style>
 
 </body>
 </html>
