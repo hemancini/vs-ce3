@@ -337,6 +337,7 @@
       if (view === "validate")
         document.getElementById("auth-validate")?.click();
       if (view === "accounts") renderAccounts();
+      if (view === "cookies") resetSaveCookies();
     };
 
     const openModal = (view) => {
@@ -558,7 +559,10 @@
                 <p class="text-[0.72rem] text-muted">${meta}</p>
               </div>
               ${useBtn}
-              <button type="button" data-remove="${esc(a.id)}" aria-label="Eliminar" class="flex h-8 w-8 items-center justify-center rounded-lg border border-line text-muted transition-colors hover:border-danger hover:text-danger">
+              <button type="button" data-copy="${esc(a.id)}" title="Copiar cookie" aria-label="Copiar cookie" class="flex h-8 w-8 items-center justify-center rounded-lg border border-line text-muted transition-colors hover:border-line-hover hover:text-accent">
+                <i class="fa-solid fa-copy text-[0.8rem]"></i>
+              </button>
+              <button type="button" data-remove="${esc(a.id)}" title="Eliminar" aria-label="Eliminar" class="flex h-8 w-8 items-center justify-center rounded-lg border border-line text-muted transition-colors hover:border-danger hover:text-danger">
                 <i class="fa-solid fa-trash-can text-[0.8rem]"></i>
               </button>
             </div>`;
@@ -570,6 +574,13 @@
         .forEach((b) =>
           b.addEventListener("click", () =>
             selectAccount(b.getAttribute("data-select")),
+          ),
+        );
+      accountsList
+        .querySelectorAll("[data-copy]")
+        .forEach((b) =>
+          b.addEventListener("click", () =>
+            copyAccountCookies(b.getAttribute("data-copy"), b),
           ),
         );
       accountsList
@@ -639,6 +650,61 @@
       }
     };
 
+    // ── Copiar cookies de una cuenta ─────────────────────────────────────────
+    const copyToClipboard = async (text) => {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch {
+        // Fallback para navegadores sin API de portapapeles o sin permiso.
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        let ok = false;
+        try {
+          ok = document.execCommand("copy");
+        } catch {}
+        document.body.removeChild(ta);
+        return ok;
+      }
+    };
+
+    // Cambia momentáneamente el icono del botón a un check para dar feedback.
+    const flashCopy = (btn) => {
+      const icon = btn.querySelector("i");
+      if (!icon) return;
+      const prev = icon.className;
+      icon.className = "fa-solid fa-check text-[0.8rem] text-[#4ade80]";
+      setTimeout(() => {
+        icon.className = prev;
+      }, 1400);
+    };
+
+    const copyAccountCookies = async (id, btn) => {
+      setResult("loading", "Obteniendo cookies…");
+      try {
+        const data = await api("POST", { action: "cookie", id });
+        if (!data.ok) return setResult("bad", data.error || "No se pudo copiar.");
+        if (!data.cookieHeader)
+          return setResult("bad", "La cuenta no tiene cookies guardadas.");
+        const ok = await copyToClipboard(data.cookieHeader);
+        if (ok) {
+          flashCopy(btn);
+          setResult(
+            "ok",
+            `Cookies de «${data.label || "la cuenta"}» copiadas al portapapeles.`,
+          );
+        } else {
+          setResult("bad", "No se pudo copiar al portapapeles.");
+        }
+      } catch {
+        setResult("bad", "Error al copiar las cookies.");
+      }
+    };
+
     // ── Validación inicial + botón ───────────────────────────────────────────
     const refreshStatus = async () => {
       setStatus("loading", "Comprobando…");
@@ -674,43 +740,64 @@
       });
 
     // ── Guardar cookies pegadas ──────────────────────────────────────────────
-    document
-      .getElementById("auth-save-cookies")
-      ?.addEventListener("click", async (e) => {
-        const btn = e.currentTarget;
-        const cookies = document.getElementById("auth-cookies")?.value.trim();
-        const label = document
-          .getElementById("auth-cookies-label")
-          ?.value.trim();
-        if (!cookies) return setResult("bad", "Pega las cookies primero.");
-        busy(btn, true, "Guardando…");
-        setResult("loading", "");
-        try {
-          const data = await api("POST", { action: "save", cookies, label });
-          if (data.ok) {
-            setAccounts(data.accounts);
-            setStatus(
-              data.valid ? "ok" : "bad",
-              data.valid ? "Sesión activa" : "Sesión inactiva",
-            );
-            setResult(
-              data.valid ? "ok" : "bad",
-              `${data.count} cookies guardadas` +
-                (data.valid
-                  ? " — sesión activa ✓"
-                  : ` — pero ${data.reason || "sesión inactiva"}`),
-            );
-          } else {
-            setResult(
-              "bad",
-              data.error || "No se pudieron guardar las cookies.",
-            );
-          }
-        } catch {
-          setResult("bad", "Error de red al guardar.");
+    const saveCookiesBtn = document.getElementById("auth-save-cookies");
+    const saveCookiesDefault = saveCookiesBtn
+      ? saveCookiesBtn.innerHTML
+      : "";
+    let saveDone = false;
+
+    // Restaura el botón a su estado inicial (p. ej. al reabrir la vista).
+    const resetSaveCookies = () => {
+      saveDone = false;
+      if (!saveCookiesBtn) return;
+      saveCookiesBtn.disabled = false;
+      saveCookiesBtn.style.opacity = "";
+      if (saveCookiesDefault) saveCookiesBtn.innerHTML = saveCookiesDefault;
+    };
+
+    saveCookiesBtn?.addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      // Tras validar correctamente, el botón pasa a «Aceptar» y cierra el modal.
+      if (saveDone) return closeModal();
+      const cookies = document.getElementById("auth-cookies")?.value.trim();
+      const label = document
+        .getElementById("auth-cookies-label")
+        ?.value.trim();
+      if (!cookies) return setResult("bad", "Pega las cookies primero.");
+      busy(btn, true, "Guardando…");
+      setResult("loading", "");
+      try {
+        const data = await api("POST", { action: "save", cookies, label });
+        if (data.ok) {
+          setAccounts(data.accounts);
+          setStatus(
+            data.valid ? "ok" : "bad",
+            data.valid ? "Sesión activa" : "Sesión inactiva",
+          );
+          setResult(
+            data.valid ? "ok" : "bad",
+            `${data.count} cookies guardadas` +
+              (data.valid
+                ? " — sesión activa ✓"
+                : ` — pero ${data.reason || "sesión inactiva"}`),
+          );
+          // Validación completada: un único botón «Aceptar» que cierra el modal.
+          saveDone = true;
+          btn.disabled = false;
+          btn.style.opacity = "";
+          btn.innerHTML = '<i class="fa-solid fa-check"></i> Aceptar';
+        } else {
+          setResult(
+            "bad",
+            data.error || "No se pudieron guardar las cookies.",
+          );
+          busy(btn, false);
         }
+      } catch {
+        setResult("bad", "Error de red al guardar.");
         busy(btn, false);
-      });
+      }
+    });
 
     // ── Login email/contraseña ───────────────────────────────────────────────
     document

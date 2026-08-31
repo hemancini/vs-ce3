@@ -6,6 +6,7 @@
 //   POST { action: 'login', email, password } → login con credenciales (cuenta = email).
 //   POST { action: 'list' }            → lista de cuentas (sin exponer las cookies).
 //   POST { action: 'select', id }      → marca una cuenta como activa.
+//   POST { action: 'cookie', id }      → cookies de una cuenta (para copiarlas).
 //   POST { action: 'remove', id }      → elimina una cuenta.
 //
 // Todos los errores se devuelven con 200 + { ok:false/valid:false, ... } para que
@@ -155,6 +156,21 @@ export const POST = async (context) => {
         reason: res.reason,
         activeId: store.activeId,
         accounts: sanitizeAccounts(store),
+      });
+    }
+
+    if (action === 'cookie') {
+      if (!payload.id) return json({ ok: false, error: 'Falta el id de la cuenta.' }, 400);
+      const store = await loadAccounts(env);
+      const acc = store.accounts.find((a) => a.id === payload.id);
+      if (!acc) return json({ ok: false, error: 'Cuenta no encontrada.' }, 404);
+      return json({
+        ok: true,
+        id: acc.id,
+        label: acc.label,
+        active: acc.id === store.activeId,
+        count: acc.cookies.length,
+        cookieHeader: cookiesToHeader(acc.cookies),
       });
     }
 
